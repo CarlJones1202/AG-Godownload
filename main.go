@@ -20,6 +20,11 @@ func main() {
 		log.Fatal("Failed to create uploads directory:", err)
 	}
 
+	// Verify all downloaded images exist and re-download if missing
+	if err := services.VerifyDownloadedImages(); err != nil {
+		log.Printf("Warning: Failed to verify images: %v", err)
+	}
+
 	// Start background crawler worker (checks every 5 minutes)
 	services.StartCrawlerWorker(5 * time.Second)
 	log.Println("Background crawler worker started")
