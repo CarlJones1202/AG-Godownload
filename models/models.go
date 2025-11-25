@@ -35,5 +35,6 @@ type Image struct {
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
 	GalleryID   uint           `json:"gallery_id"`
 	Filename    string         `json:"filename"`
-	OriginalURL string         `json:"original_url"`
+	OriginalURL string         `json:"original_url"` // The hosting page URL (e.g., imagebam.com/view/...)
+	DownloadURL string         `json:"download_url"` // The final direct image URL after ripping
 }

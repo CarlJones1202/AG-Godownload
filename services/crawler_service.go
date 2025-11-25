@@ -154,7 +154,8 @@ func CrawlSource(sourceID uint) error {
 			image := models.Image{
 				GalleryID:   gallery.ID,
 				Filename:    filepath.Base(destPath),
-				OriginalURL: imageURL,
+				OriginalURL: src,      // The hosting page URL
+				DownloadURL: imageURL, // The final direct image URL
 			}
 			database.DB.Create(&image)
 			fmt.Printf("Successfully downloaded and saved image: %s\n", imageURL)

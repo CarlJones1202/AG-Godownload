@@ -60,6 +60,7 @@ func AddImageToGallery(c *gin.Context) {
 		GalleryID:   uint(galleryID),
 		Filename:    filepath.Base(destPath),
 		OriginalURL: req.URL,
+		DownloadURL: req.URL, // For manual additions, both are the same
 	}
 	if err := database.DB.Create(&image).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save image record"})
