@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/disintegration/imaging"
 )
@@ -74,11 +73,15 @@ func GenerateThumbnail(srcPath string) (string, error) {
 	// Resize to width 200 using Lanczos filter.
 	dst := imaging.Resize(src, 200, 0, imaging.Lanczos)
 
-	base := filepath.Base(srcPath)
-	ext := filepath.Ext(base)
-	name := strings.TrimSuffix(base, ext)
-	thumbName := name + "_thumb" + ".jpg" // Force jpg for thumbnails
-	thumbPath := filepath.Join(UploadsDir, thumbName)
+	// Create thumbnails subdirectory
+	thumbnailDir := filepath.Join(UploadsDir, "thumbnails")
+	if err := os.MkdirAll(thumbnailDir, 0755); err != nil {
+		return "", err
+	}
+
+	// Use same filename as original, but in thumbnails subdirectory
+	filename := filepath.Base(srcPath)
+	thumbPath := filepath.Join(thumbnailDir, filename)
 
 	// Save the resulting image as JPEG.
 	err = imaging.Save(dst, thumbPath, imaging.JPEGQuality(80))

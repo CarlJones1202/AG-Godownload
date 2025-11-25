@@ -5,6 +5,7 @@ import (
 	"gallery_api/handlers"
 	"gallery_api/services"
 	"log"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -18,6 +19,10 @@ func main() {
 	if err := services.EnsureUploadsDir(); err != nil {
 		log.Fatal("Failed to create uploads directory:", err)
 	}
+
+	// Start background crawler worker (checks every 5 minutes)
+	services.StartCrawlerWorker(5 * time.Second)
+	log.Println("Background crawler worker started")
 
 	r := gin.Default()
 

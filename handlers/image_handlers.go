@@ -77,10 +77,7 @@ func ServeImage(c *gin.Context) {
 
 func ServeThumbnail(c *gin.Context) {
 	filename := c.Param("filename")
-	// Assuming thumbnail naming convention from service
-	ext := filepath.Ext(filename)
-	name := filename[:len(filename)-len(ext)]
-	thumbName := name + "_thumb.jpg"
-	path := filepath.Join(services.UploadsDir, thumbName)
+	// Thumbnails are in the thumbnails subdirectory with the same filename
+	path := filepath.Join(services.UploadsDir, "thumbnails", filename)
 	c.File(path)
 }

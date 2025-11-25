@@ -54,47 +54,93 @@ func CrawlSource(sourceID uint) error {
 		return err
 	}
 
-	// Logic from reference: find div[id^='post_message_']
+	// Logic from reference: find div[id^='post_message_'] and extract images using rippers
 	doc.Find("div[id^='post_message_']").Each(func(i int, s *goquery.Selection) {
-		// Find images inside this div
-		s.Find("img").Each(func(j int, img *goquery.Selection) {
-			src, exists := img.Attr("src")
-			if !exists {
+		// Find images inside this div - look for <a> tags containing <img>
+		s.Find("a img").Each(func(j int, img *goquery.Selection) {
+			// Skip "View Post" images
+			if img.AttrOr("alt", "") == "View Post" {
+				fmt.Printf("Skipping element %d: alt='View Post'\n", j)
 				return
 			}
 
-			// Check if it's a thumbnail linking to a larger image (common in forums)
-			// The reference code checks parent <a> tag
-			parent := img.Parent()
-			if parent.Is("a") {
-				href, hrefExists := parent.Attr("href")
-				if hrefExists {
-					// Use the href as the image URL if it looks like an image or a known host
-					// For simplicity, we'll try to download the href if it ends in an image extension
-					// or if we implement specific logic later.
-					// For now, let's just use the href if it looks like an image, otherwise fallback to src
-					lowerHref := strings.ToLower(href)
-					if strings.HasSuffix(lowerHref, ".jpg") || strings.HasSuffix(lowerHref, ".png") || strings.HasSuffix(lowerHref, ".jpeg") {
-						src = href
-					}
+			// Get the parent <a> tag's href
+			a := img.Parent()
+			src, exists := a.Attr("href")
+			if !exists {
+				fmt.Printf("Element %d: No href found\n", j)
+				return
+			}
+			fmt.Printf("Element %d: Found link %s\n", j, src)
+
+			// Use rippers to extract actual image URL based on hosting site
+			var imageURL string
+			var err error
+			switch {
+			case strings.Contains(src, "imagebam"):
+				fmt.Println("Ripping from ImageBam")
+				imageURL, err = RipImageBam(src)
+			case strings.Contains(src, "imgbox"):
+				fmt.Println("Ripping from ImgBox")
+				imageURL, err = RipImageBox(src)
+			case strings.Contains(src, "imx.to"):
+				fmt.Println("Ripping from Imx.to")
+				imageURL, err = RipImx(img.AttrOr("src", ""))
+			case strings.Contains(src, "turboimagehost"):
+				fmt.Println("Ripping from TurboImageHost")
+				imageURL, err = RipTurboImg(src)
+			case strings.Contains(src, "vipr.im"):
+				fmt.Println("Ripping from Vipr.im")
+				imageURL, err = RipViprIm(img.AttrOr("src", ""))
+			case strings.Contains(src, "pixhost"):
+				fmt.Println("Ripping from PixHost")
+				imageURL, err = RipPixHost(img.AttrOr("src", ""))
+			case strings.Contains(src, "acidimg"):
+				fmt.Println("Ripping from AcidImg")
+				imageURL, err = RipAcidImg(img.AttrOr("src", ""))
+			case strings.Contains(src, "postimages.org"):
+				fmt.Println("Ripping from PostImages")
+				imageURL, err = RipPostImages(src)
+			case strings.Contains(src, "pixxxels.cc") || strings.Contains(src, "freeimage.us"):
+				fmt.Printf("Skipping unsupported host: %s\n", src)
+				return
+			default:
+				// If it's a direct image link, use it
+				lowerSrc := strings.ToLower(src)
+				if strings.HasSuffix(lowerSrc, ".jpg") || strings.HasSuffix(lowerSrc, ".png") || strings.HasSuffix(lowerSrc, ".jpeg") || strings.HasSuffix(lowerSrc, ".gif") {
+					imageURL = src
+				} else {
+					fmt.Printf("Unknown image source %s\n", src)
+					return
 				}
+			}
+
+			if err != nil {
+				fmt.Printf("Error ripping %s: %v\n", src, err)
+				return
+			}
+
+			if imageURL == "" {
+				fmt.Printf("No image URL extracted from %s\n", src)
+				return
 			}
 
 			// Basic deduplication check (by URL)
 			var count int64
-			database.DB.Model(&models.Image{}).Where("original_url = ? AND gallery_id = ?", src, gallery.ID).Count(&count)
+			database.DB.Model(&models.Image{}).Where("original_url = ? AND gallery_id = ?", imageURL, gallery.ID).Count(&count)
 			if count > 0 {
+				fmt.Printf("Image already exists: %s\n", imageURL)
 				return
 			}
 
-			// Download
-			filename := filepath.Base(src)
+			// Download the actual image
+			filename := filepath.Base(imageURL)
 			// Sanitize filename
 			filename = strings.Split(filename, "?")[0]
 
-			destPath, err := DownloadImage(src, filename)
+			destPath, err := DownloadImage(imageURL, filename)
 			if err != nil {
-				fmt.Printf("Failed to download %s: %v\n", src, err)
+				fmt.Printf("Failed to download %s: %v\n", imageURL, err)
 				return
 			}
 
@@ -108,9 +154,10 @@ func CrawlSource(sourceID uint) error {
 			image := models.Image{
 				GalleryID:   gallery.ID,
 				Filename:    filepath.Base(destPath),
-				OriginalURL: src,
+				OriginalURL: imageURL,
 			}
 			database.DB.Create(&image)
+			fmt.Printf("Successfully downloaded and saved image: %s\n", imageURL)
 		})
 	})
 
