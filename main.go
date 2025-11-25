@@ -24,6 +24,7 @@ func main() {
 	// Routes
 	r.POST("/sources", handlers.CreateSource)
 	r.GET("/sources", handlers.GetSources)
+	r.POST("/sources/:id/crawl", handlers.CrawlSource)
 
 	r.POST("/galleries", handlers.CreateGallery)
 	r.GET("/galleries", handlers.GetGalleries)

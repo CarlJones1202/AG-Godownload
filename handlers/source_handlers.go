@@ -3,7 +3,9 @@ package handlers
 import (
 	"gallery_api/database"
 	"gallery_api/models"
+	"gallery_api/services"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -33,6 +35,25 @@ func CreateSource(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, source)
+}
+
+func CrawlSource(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid source ID"})
+		return
+	}
+
+	// Trigger crawl in background
+	go func() {
+		if err := services.CrawlSource(uint(id)); err != nil {
+			// Log error (in a real app, use a logger)
+			println("Crawl failed:", err.Error())
+		}
+	}()
+
+	c.JSON(http.StatusAccepted, gin.H{"message": "Crawl started"})
 }
 
 func GetSources(c *gin.Context) {
