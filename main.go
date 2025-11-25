@@ -35,11 +35,15 @@ func main() {
 	r.POST("/sources", handlers.CreateSource)
 	r.GET("/sources", handlers.GetSources)
 	r.POST("/sources/:id/crawl", handlers.CrawlSource)
+	r.DELETE("/sources/:id", handlers.DeleteSource)
 
 	r.POST("/galleries", handlers.CreateGallery)
 	r.GET("/galleries", handlers.GetGalleries)
 	r.GET("/galleries/:id", handlers.GetGallery)
 	r.POST("/galleries/:id/images", handlers.AddImageToGallery)
+	r.DELETE("/galleries/:id", handlers.DeleteGallery)
+
+	r.DELETE("/images/:id", handlers.DeleteImage)
 
 	// Static file serving
 	// Note: In a real app, you might want to protect these or use a proper static file server (nginx etc)

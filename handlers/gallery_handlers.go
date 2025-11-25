@@ -3,7 +3,10 @@ package handlers
 import (
 	"gallery_api/database"
 	"gallery_api/models"
+	"gallery_api/services"
 	"net/http"
+	"path/filepath"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -46,4 +49,43 @@ func GetGallery(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gallery)
+}
+
+// DeleteGallery removes a gallery and optionally its images
+func DeleteGallery(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid gallery ID"})
+		return
+	}
+
+	// Check if we should delete images too
+	deleteImages := c.Query("delete_images") == "true"
+
+	var gallery models.Gallery
+	if err := database.DB.Preload("Images").First(&gallery, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Gallery not found"})
+		return
+	}
+
+	if deleteImages {
+		// Delete all images in this gallery
+		for _, image := range gallery.Images {
+			imagePath := filepath.Join(services.UploadsDir, image.Filename)
+			services.DeleteFile(imagePath)
+			thumbnailPath := filepath.Join(services.UploadsDir, "thumbnails", image.Filename)
+			services.DeleteFile(thumbnailPath)
+		}
+		// Delete image records
+		database.DB.Where("gallery_id = ?", id).Delete(&models.Image{})
+	}
+
+	// Delete gallery
+	if err := database.DB.Delete(&gallery).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete gallery"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Gallery deleted successfully"})
 }

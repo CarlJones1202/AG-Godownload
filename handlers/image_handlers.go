@@ -82,3 +82,41 @@ func ServeThumbnail(c *gin.Context) {
 	path := filepath.Join(services.UploadsDir, "thumbnails", filename)
 	c.File(path)
 }
+
+// DeleteImage removes an image from both database and filesystem
+func DeleteImage(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid image ID"})
+		return
+	}
+
+	// Get image details first
+	var image models.Image
+	if err := database.DB.First(&image, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Image not found"})
+		return
+	}
+
+	// Delete from filesystem
+	imagePath := filepath.Join(services.UploadsDir, image.Filename)
+	if err := services.DeleteFile(imagePath); err != nil {
+		// Log but don't fail if file doesn't exist
+		println("Warning: Failed to delete image file:", err.Error())
+	}
+
+	// Delete thumbnail
+	thumbnailPath := filepath.Join(services.UploadsDir, "thumbnails", image.Filename)
+	if err := services.DeleteFile(thumbnailPath); err != nil {
+		println("Warning: Failed to delete thumbnail:", err.Error())
+	}
+
+	// Delete from database
+	if err := database.DB.Delete(&image).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete image"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Image deleted successfully"})
+}

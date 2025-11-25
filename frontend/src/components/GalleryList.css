@@ -29,6 +29,7 @@
     cursor: pointer;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     border: 1px solid rgba(0, 0, 0, 0.06);
+    position: relative;
 }
 
 .gallery-card:hover {
@@ -107,4 +108,45 @@
 
 .back-button {
     margin-bottom: 1.5rem;
+}
+
+.delete-gallery-btn {
+    background: rgba(244, 67, 54, 0.9);
+    color: white;
+    border: none;
+}
+
+.delete-gallery-btn:hover {
+    background: rgba(211, 47, 47, 1);
+    transform: translateY(-1px);
+}
+
+.delete-gallery-card-btn {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(244, 67, 54, 0.9);
+    color: white;
+    border: none;
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s ease, transform 0.1s ease;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.gallery-card:hover .delete-gallery-card-btn {
+    opacity: 1;
+}
+
+.delete-gallery-card-btn:hover {
+    transform: scale(1.1);
+    background: rgba(211, 47, 47, 1);
 }

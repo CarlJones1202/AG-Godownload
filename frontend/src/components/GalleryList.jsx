@@ -5,6 +5,41 @@ import ImageGrid from './ImageGrid'
 function GalleryList({ galleries, onRefresh }) {
     const [selectedGallery, setSelectedGallery] = useState(null)
 
+    const handleDeleteGallery = async (galleryId, e) => {
+        e.stopPropagation()
+
+        const deleteImages = confirm(
+            'Delete gallery images too?\n\nOK = Delete gallery AND images\nCancel = Delete gallery only (keep images)'
+        )
+
+        if (!confirm(`Are you sure you want to delete this gallery${deleteImages ? ' and all its images' : ''}?`)) {
+            return
+        }
+
+        try {
+            const url = `/api/galleries/${galleryId}${deleteImages ? '?delete_images=true' : ''}`
+            const response = await fetch(url, { method: 'DELETE' })
+
+            if (response.ok) {
+                onRefresh()
+            } else {
+                alert('Failed to delete gallery')
+            }
+        } catch (error) {
+            console.error('Error deleting gallery:', error)
+            alert('Error deleting gallery')
+        }
+    }
+
+    const handleRefreshGallery = () => {
+        onRefresh()
+        // Re-fetch the selected gallery
+        const updated = galleries.find(g => g.id === selectedGallery.id)
+        if (updated) {
+            setSelectedGallery(updated)
+        }
+    }
+
     if (selectedGallery) {
         return (
             <div>
@@ -14,8 +49,16 @@ function GalleryList({ galleries, onRefresh }) {
                 >
                     ← Back to Galleries
                 </button>
-                <h2>{selectedGallery.name}</h2>
-                <ImageGrid gallery={selectedGallery} />
+                <div className="gallery-header">
+                    <h2>{selectedGallery.name}</h2>
+                    <button
+                        className="delete-gallery-btn"
+                        onClick={(e) => handleDeleteGallery(selectedGallery.id, e)}
+                    >
+                        🗑️ Delete Gallery
+                    </button>
+                </div>
+                <ImageGrid gallery={selectedGallery} onRefresh={handleRefreshGallery} />
             </div>
         )
     }
@@ -53,6 +96,13 @@ function GalleryList({ galleries, onRefresh }) {
                                 <h3>{gallery.name}</h3>
                                 <p>{gallery.images?.length || 0} images</p>
                             </div>
+                            <button
+                                className="delete-gallery-card-btn"
+                                onClick={(e) => handleDeleteGallery(gallery.id, e)}
+                                title="Delete gallery"
+                            >
+                                ×
+                            </button>
                         </div>
                     ))}
                 </div>

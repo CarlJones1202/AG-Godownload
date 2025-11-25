@@ -5,6 +5,7 @@ import (
 	"gallery_api/models"
 	"gallery_api/services"
 	"net/http"
+	"path/filepath"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -71,4 +72,52 @@ func GetSources(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, sources)
+}
+
+// DeleteSource removes a source and optionally its gallery and images
+func DeleteSource(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid source ID"})
+		return
+	}
+
+	// Check cascade options
+	deleteGallery := c.Query("delete_gallery") == "true"
+	deleteImages := c.Query("delete_images") == "true"
+
+	var source models.Source
+	if err := database.DB.First(&source, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Source not found"})
+		return
+	}
+
+	if deleteGallery || deleteImages {
+		// Find associated gallery
+		var gallery models.Gallery
+		if err := database.DB.Preload("Images").Where("source_id = ?", id).First(&gallery).Error; err == nil {
+			if deleteImages {
+				// Delete all images
+				for _, image := range gallery.Images {
+					imagePath := filepath.Join(services.UploadsDir, image.Filename)
+					services.DeleteFile(imagePath)
+					thumbnailPath := filepath.Join(services.UploadsDir, "thumbnails", image.Filename)
+					services.DeleteFile(thumbnailPath)
+				}
+				database.DB.Where("gallery_id = ?", gallery.ID).Delete(&models.Image{})
+			}
+			if deleteGallery {
+				database.DB.Delete(&gallery)
+			}
+		}
+	}
+
+	// Delete source
+	if err := database.DB.Delete(&source).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete source"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Source deleted successfully"})
 }
