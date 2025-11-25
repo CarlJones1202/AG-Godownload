@@ -17,6 +17,16 @@ func CreateSource(c *gin.Context) {
 		return
 	}
 
+	// Check for duplicate location
+	var existing models.Source
+	if err := database.DB.Where("location = ?", source.Location).First(&existing).Error; err == nil {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":           "A source with this URL already exists",
+			"existing_source": existing,
+		})
+		return
+	}
+
 	if err := database.DB.Create(&source).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create source"})
 		return
@@ -28,8 +38,6 @@ func CreateSource(c *gin.Context) {
 		SourceID: &source.ID,
 	}
 	if err := database.DB.Create(&gallery).Error; err != nil {
-		// Log error but don't fail the request? Or fail?
-		// Let's fail for now as it's a requirement
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create default gallery for source"})
 		return
 	}
@@ -48,7 +56,6 @@ func CrawlSource(c *gin.Context) {
 	// Trigger crawl in background
 	go func() {
 		if err := services.CrawlSource(uint(id)); err != nil {
-			// Log error (in a real app, use a logger)
 			println("Crawl failed:", err.Error())
 		}
 	}()
