@@ -14,8 +14,8 @@ type Source struct {
 	Name          string         `json:"name"`
 	Type          string         `json:"type"` // e.g., "url", "local"
 	Location      string         `json:"location"`
-	LastCheckedAt time.Time      `json:"last_checked_at"`
-	Status        string         `json:"status"` // "idle", "crawling", "error"
+	LastCheckedAt time.Time      `gorm:"index" json:"last_checked_at"`
+	Status        string         `gorm:"index" json:"status"` // "idle", "crawling", "error"
 }
 
 type Gallery struct {
@@ -24,8 +24,8 @@ type Gallery struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 	Name      string         `json:"name"`
-	SourceID  *uint          `json:"source_id"` // Nullable if created manually
-	Images    []Image        `json:"images,omitempty"`
+	SourceID  *uint          `gorm:"index" json:"source_id"` // Nullable if created manually
+	Images    []Image        `json:"images,omitempty" gorm:"foreignKey:GalleryID"`
 }
 
 type Image struct {
@@ -33,8 +33,8 @@ type Image struct {
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
-	GalleryID   uint           `json:"gallery_id"`
+	GalleryID   uint           `gorm:"index" json:"gallery_id"`
 	Filename    string         `json:"filename"`
-	OriginalURL string         `json:"original_url"` // The hosting page URL (e.g., imagebam.com/view/...)
-	DownloadURL string         `json:"download_url"` // The final direct image URL after ripping
+	OriginalURL string         `gorm:"index" json:"original_url"` // The hosting page URL (e.g., imagebam.com/view/...)
+	DownloadURL string         `json:"download_url"`              // The final direct image URL after ripping
 }

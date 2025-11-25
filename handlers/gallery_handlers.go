@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 func CreateGallery(c *gin.Context) {
@@ -25,7 +26,10 @@ func CreateGallery(c *gin.Context) {
 
 func GetGalleries(c *gin.Context) {
 	var galleries []models.Gallery
-	if err := database.DB.Preload("Images").Find(&galleries).Error; err != nil {
+	// Only load first image for each gallery (for thumbnail)
+	if err := database.DB.Preload("Images", func(db *gorm.DB) *gorm.DB {
+		return db.Limit(1).Order("created_at ASC")
+	}).Find(&galleries).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch galleries"})
 		return
 	}
