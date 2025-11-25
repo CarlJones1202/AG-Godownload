@@ -28,7 +28,8 @@ function SourceManager({ sources, onSourceAdded, onRefresh }) {
                 setShowForm(false)
                 onSourceAdded()
             } else {
-                alert('Failed to add source')
+                const data = await response.json()
+                alert(data.error || 'Failed to add source')
             }
         } catch (error) {
             console.error('Error adding source:', error)
@@ -48,6 +49,43 @@ function SourceManager({ sources, onSourceAdded, onRefresh }) {
         } catch (error) {
             console.error('Error starting crawl:', error)
             alert('Failed to start crawl')
+        }
+    }
+
+    const handleDeleteSource = async (sourceId, e) => {
+        e.stopPropagation()
+
+        const deleteGallery = confirm(
+            'Delete associated gallery too?\n\nOK = Delete source AND gallery\nCancel = Delete source only'
+        )
+
+        let deleteImages = false
+        if (deleteGallery) {
+            deleteImages = confirm(
+                'Delete all images in the gallery?\n\nOK = Delete gallery AND images\nCancel = Delete gallery only'
+            )
+        }
+
+        if (!confirm(`Are you sure you want to delete this source${deleteGallery ? ' and gallery' : ''}${deleteImages ? ' and images' : ''}?`)) {
+            return
+        }
+
+        try {
+            const params = new URLSearchParams()
+            if (deleteGallery) params.append('delete_gallery', 'true')
+            if (deleteImages) params.append('delete_images', 'true')
+
+            const url = `/api/sources/${sourceId}${params.toString() ? '?' + params.toString() : ''}`
+            const response = await fetch(url, { method: 'DELETE' })
+
+            if (response.ok) {
+                onRefresh()
+            } else {
+                alert('Failed to delete source')
+            }
+        } catch (error) {
+            console.error('Error deleting source:', error)
+            alert('Error deleting source')
         }
     }
 
@@ -122,12 +160,21 @@ function SourceManager({ sources, onSourceAdded, onRefresh }) {
                                     )}
                                 </div>
                             </div>
-                            <button
-                                onClick={() => handleCrawl(source.id)}
-                                disabled={source.status === 'crawling'}
-                            >
-                                {source.status === 'crawling' ? 'Crawling...' : '🔄 Crawl Now'}
-                            </button>
+                            <div className="source-actions">
+                                <button
+                                    onClick={() => handleCrawl(source.id)}
+                                    disabled={source.status === 'crawling'}
+                                >
+                                    {source.status === 'crawling' ? 'Crawling...' : '🔄 Crawl'}
+                                </button>
+                                <button
+                                    className="delete-source-btn"
+                                    onClick={(e) => handleDeleteSource(source.id, e)}
+                                    title="Delete source"
+                                >
+                                    🗑️
+                                </button>
+                            </div>
                         </div>
                     ))
                 )}

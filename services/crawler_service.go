@@ -60,6 +60,8 @@ func CrawlSource(sourceID uint) error {
 	const maxConcurrent = 7 // Start with 7 concurrent downloads
 	sem := make(chan struct{}, maxConcurrent)
 	var wg sync.WaitGroup
+	var imagesMutex sync.Mutex
+	var imagesToInsert []models.Image
 
 	doc.Find("div[id^='post_message_']").Each(func(i int, s *goquery.Selection) {
 		// Find images inside this div - look for <a> tags containing <img>
@@ -178,14 +180,16 @@ func CrawlSource(sourceID uint) error {
 					fmt.Printf("Failed to generate thumbnail for %s: %v\n", filename, err)
 				}
 
-				// Save to DB
+				// Save to slice for batch insert
 				image := models.Image{
 					GalleryID:   gallery.ID,
 					Filename:    filepath.Base(destPath),
 					OriginalURL: src,      // The hosting page URL
 					DownloadURL: imageURL, // The final direct image URL
 				}
-				database.DB.Create(&image)
+				imagesMutex.Lock()
+				imagesToInsert = append(imagesToInsert, image)
+				imagesMutex.Unlock()
 				fmt.Printf("Successfully downloaded and saved image: %s\n", imageURL)
 			}(src, img.AttrOr("src", ""))
 		})
@@ -193,6 +197,16 @@ func CrawlSource(sourceID uint) error {
 
 	// Wait for all downloads to complete
 	wg.Wait()
+
+	// Batch insert all images
+	if len(imagesToInsert) > 0 {
+		fmt.Printf("Batch inserting %d images...\n", len(imagesToInsert))
+		if err := database.DB.Create(&imagesToInsert).Error; err != nil {
+			fmt.Printf("Failed to batch insert images: %v\n", err)
+		} else {
+			fmt.Printf("Successfully inserted %d images\n", len(imagesToInsert))
+		}
+	}
 
 	database.DB.Model(&source).Update("Status", "idle")
 	return nil
