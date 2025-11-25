@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -55,6 +56,11 @@ func CrawlSource(sourceID uint) error {
 	}
 
 	// Logic from reference: find div[id^='post_message_'] and extract images using rippers
+	// Use a semaphore to limit concurrent downloads
+	const maxConcurrent = 7 // Start with 7 concurrent downloads
+	sem := make(chan struct{}, maxConcurrent)
+	var wg sync.WaitGroup
+
 	doc.Find("div[id^='post_message_']").Each(func(i int, s *goquery.Selection) {
 		// Find images inside this div - look for <a> tags containing <img>
 		s.Find("a img").Each(func(j int, img *goquery.Selection) {
@@ -73,94 +79,120 @@ func CrawlSource(sourceID uint) error {
 			}
 			fmt.Printf("Element %d: Found link %s\n", j, src)
 
-			// Use rippers to extract actual image URL based on hosting site
-			var imageURL string
-			var err error
-			switch {
-			case strings.Contains(src, "imagebam"):
-				fmt.Println("Ripping from ImageBam")
-				imageURL, err = RipImageBam(src)
-			case strings.Contains(src, "imgbox"):
-				fmt.Println("Ripping from ImgBox")
-				imageURL, err = RipImageBox(src)
-			case strings.Contains(src, "imx.to"):
-				fmt.Println("Ripping from Imx.to")
-				imageURL, err = RipImx(img.AttrOr("src", ""))
-			case strings.Contains(src, "turboimagehost"):
-				fmt.Println("Ripping from TurboImageHost")
-				imageURL, err = RipTurboImg(src)
-			case strings.Contains(src, "vipr.im"):
-				fmt.Println("Ripping from Vipr.im")
-				imageURL, err = RipViprIm(img.AttrOr("src", ""))
-			case strings.Contains(src, "pixhost"):
-				fmt.Println("Ripping from PixHost")
-				imageURL, err = RipPixHost(img.AttrOr("src", ""))
-			case strings.Contains(src, "acidimg"):
-				fmt.Println("Ripping from AcidImg")
-				imageURL, err = RipAcidImg(img.AttrOr("src", ""))
-			case strings.Contains(src, "postimages.org"):
-				fmt.Println("Ripping from PostImages")
-				imageURL, err = RipPostImages(src)
-			case strings.Contains(src, "pixxxels.cc") || strings.Contains(src, "freeimage.us"):
-				fmt.Printf("Skipping unsupported host: %s\n", src)
-				return
-			default:
-				// If it's a direct image link, use it
-				lowerSrc := strings.ToLower(src)
-				if strings.HasSuffix(lowerSrc, ".jpg") || strings.HasSuffix(lowerSrc, ".png") || strings.HasSuffix(lowerSrc, ".jpeg") || strings.HasSuffix(lowerSrc, ".gif") {
-					imageURL = src
-				} else {
-					fmt.Printf("Unknown image source %s\n", src)
+			// Launch download in goroutine with semaphore
+			wg.Add(1)
+			go func(src string, imgSrc string) {
+				defer wg.Done()
+
+				// Acquire semaphore
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				// Use rippers to extract actual image URL based on hosting site
+				var imageURL string
+				var err error
+				switch {
+				case strings.Contains(src, "imagebam"):
+					fmt.Println("Ripping from ImageBam")
+					imageURL, err = RipImageBam(src)
+				case strings.Contains(src, "imgbox"):
+					fmt.Println("Ripping from ImgBox")
+					imageURL, err = RipImageBox(src)
+				case strings.Contains(src, "imx.to"):
+					fmt.Println("Ripping from Imx.to")
+					imageURL, err = RipImx(imgSrc)
+				case strings.Contains(src, "turboimagehost"):
+					fmt.Println("Ripping from TurboImageHost")
+					imageURL, err = RipTurboImg(src)
+				case strings.Contains(src, "vipr.im"):
+					fmt.Println("Ripping from Vipr.im")
+					imageURL, err = RipViprIm(imgSrc)
+				case strings.Contains(src, "pixhost"):
+					fmt.Println("Ripping from PixHost")
+					imageURL, err = RipPixHost(imgSrc)
+				case strings.Contains(src, "acidimg"):
+					fmt.Println("Ripping from AcidImg")
+					imageURL, err = RipAcidImg(imgSrc)
+				case strings.Contains(src, "postimages.org"):
+					fmt.Println("Ripping from PostImages")
+					imageURL, err = RipPostImages(src)
+				case strings.Contains(src, "pixxxels.cc") || strings.Contains(src, "freeimage.us"):
+					fmt.Printf("Skipping unsupported host: %s\n", src)
+					return
+				default:
+					// If it's a direct image link, use it
+					lowerSrc := strings.ToLower(src)
+					if strings.HasSuffix(lowerSrc, ".jpg") || strings.HasSuffix(lowerSrc, ".png") || strings.HasSuffix(lowerSrc, ".jpeg") || strings.HasSuffix(lowerSrc, ".gif") {
+						imageURL = src
+					} else {
+						fmt.Printf("Unknown image source %s\n", src)
+						return
+					}
+				}
+
+				if err != nil {
+					fmt.Printf("Error ripping %s: %v\n", src, err)
 					return
 				}
-			}
 
-			if err != nil {
-				fmt.Printf("Error ripping %s: %v\n", src, err)
-				return
-			}
+				if imageURL == "" {
+					fmt.Printf("No image URL extracted from %s\n", src)
+					return
+				}
 
-			if imageURL == "" {
-				fmt.Printf("No image URL extracted from %s\n", src)
-				return
-			}
+				// Basic deduplication check (by URL)
+				var count int64
+				database.DB.Model(&models.Image{}).Where("original_url = ? AND gallery_id = ?", imageURL, gallery.ID).Count(&count)
+				if count > 0 {
+					fmt.Printf("Image already exists: %s\n", imageURL)
+					return
+				}
 
-			// Basic deduplication check (by URL)
-			var count int64
-			database.DB.Model(&models.Image{}).Where("original_url = ? AND gallery_id = ?", imageURL, gallery.ID).Count(&count)
-			if count > 0 {
-				fmt.Printf("Image already exists: %s\n", imageURL)
-				return
-			}
+				// Download the actual image with retry logic
+				filename := filepath.Base(imageURL)
+				// Sanitize filename
+				filename = strings.Split(filename, "?")[0]
 
-			// Download the actual image
-			filename := filepath.Base(imageURL)
-			// Sanitize filename
-			filename = strings.Split(filename, "?")[0]
+				var destPath string
+				maxRetries := 3
+				for attempt := 1; attempt <= maxRetries; attempt++ {
+					destPath, err = DownloadImage(imageURL, filename)
+					if err == nil {
+						break
+					}
+					fmt.Printf("Download attempt %d failed for %s: %v\n", attempt, imageURL, err)
+					if attempt < maxRetries {
+						// Exponential backoff
+						time.Sleep(time.Duration(attempt*2) * time.Second)
+					}
+				}
 
-			destPath, err := DownloadImage(imageURL, filename)
-			if err != nil {
-				fmt.Printf("Failed to download %s: %v\n", imageURL, err)
-				return
-			}
+				if err != nil {
+					fmt.Printf("Failed to download %s after %d attempts: %v\n", imageURL, maxRetries, err)
+					return
+				}
 
-			// Generate thumbnail
-			_, err = GenerateThumbnail(destPath)
-			if err != nil {
-				fmt.Printf("Failed to generate thumbnail for %s: %v\n", filename, err)
-			}
+				// Generate thumbnail
+				_, err = GenerateThumbnail(destPath)
+				if err != nil {
+					fmt.Printf("Failed to generate thumbnail for %s: %v\n", filename, err)
+				}
 
-			// Save to DB
-			image := models.Image{
-				GalleryID:   gallery.ID,
-				Filename:    filepath.Base(destPath),
-				OriginalURL: src,      // The hosting page URL
-				DownloadURL: imageURL, // The final direct image URL
-			}
-			database.DB.Create(&image)
-			fmt.Printf("Successfully downloaded and saved image: %s\n", imageURL)
+				// Save to DB
+				image := models.Image{
+					GalleryID:   gallery.ID,
+					Filename:    filepath.Base(destPath),
+					OriginalURL: src,      // The hosting page URL
+					DownloadURL: imageURL, // The final direct image URL
+				}
+				database.DB.Create(&image)
+				fmt.Printf("Successfully downloaded and saved image: %s\n", imageURL)
+			}(src, img.AttrOr("src", ""))
 		})
 	})
+
+	// Wait for all downloads to complete
+	wg.Wait()
 
 	database.DB.Model(&source).Update("Status", "idle")
 	return nil
