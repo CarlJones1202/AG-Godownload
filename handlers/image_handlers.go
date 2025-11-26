@@ -41,8 +41,21 @@ func AddImageToGallery(c *gin.Context) {
 		req.Filename = filepath.Base(req.URL)
 	}
 
+	// Determine source name
+	var sourceName string
+	if gallery.SourceID != nil {
+		var source models.Source
+		if err := database.DB.First(&source, *gallery.SourceID).Error; err == nil {
+			sourceName = source.Name
+		} else {
+			sourceName = "uncategorized"
+		}
+	} else {
+		sourceName = "uncategorized"
+	}
+
 	// Download image
-	destPath, err := services.DownloadImage(req.URL, req.Filename)
+	destPath, err := services.DownloadImage(req.URL, sourceName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to download image: " + err.Error()})
 		return

@@ -14,7 +14,7 @@ func VerifyDownloadedImages() error {
 	logger.Info("Verifying downloaded images...")
 
 	var images []models.Image
-	if err := database.DB.Find(&images).Error; err != nil {
+	if err := database.DB.Preload("Galleries").Find(&images).Error; err != nil {
 		return err
 	}
 
@@ -30,8 +30,26 @@ func VerifyDownloadedImages() error {
 
 			// Try to re-download if we have a download URL
 			if image.DownloadURL != "" {
-				fmt.Printf("Re-downloading from: %s\n", image.DownloadURL)
-				destPath, err := DownloadImage(image.DownloadURL, image.Filename)
+				// Determine source name
+				var sourceName string
+				if len(image.Galleries) > 0 {
+					gallery := image.Galleries[0]
+					if gallery.SourceID != nil {
+						var source models.Source
+						if err := database.DB.First(&source, *gallery.SourceID).Error; err == nil {
+							sourceName = source.Name
+						} else {
+							sourceName = "uncategorized"
+						}
+					} else {
+						sourceName = "uncategorized"
+					}
+				} else {
+					sourceName = "uncategorized"
+				}
+
+				fmt.Printf("Re-downloading from: %s (Source: %s)\n", image.DownloadURL, sourceName)
+				destPath, err := DownloadImage(image.DownloadURL, sourceName)
 				if err != nil {
 					fmt.Printf("Failed to re-download %s: %v\n", image.Filename, err)
 					continue

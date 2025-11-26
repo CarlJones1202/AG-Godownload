@@ -38,6 +38,8 @@ function App() {
             fetchImages(pageFromUrl)
         } else if (location.pathname === '/people') {
             fetchPeople(pageFromUrl)
+        } else {
+            setLoading(false)
         }
     }, [location.pathname, searchParams])
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import './PersonDetail.css'
 import GalleryList from './GalleryList'
@@ -8,17 +8,18 @@ function PersonDetail() {
     const navigate = useNavigate()
     const [person, setPerson] = useState(null)
     const [loading, setLoading] = useState(true)
+    const [error, setError] = useState(null)
     const [isEditing, setIsEditing] = useState(false)
     const [editForm, setEditForm] = useState({ name: '', aliases: '' })
 
-    useEffect(() => {
-        fetchPerson()
-    }, [id])
-
-    const fetchPerson = async () => {
+    const fetchPerson = useCallback(async () => {
         setLoading(true)
+        setError(null)
         try {
             const response = await fetch(`/api/people/${id}`)
+            if (!response.ok) {
+                throw new Error(`Failed to fetch person: ${response.status}`)
+            }
             const data = await response.json()
             setPerson(data)
             // Initialize edit form
@@ -29,10 +30,15 @@ function PersonDetail() {
             })
         } catch (error) {
             console.error('Failed to fetch person:', error)
+            setError(error.message)
         } finally {
             setLoading(false)
         }
-    }
+    }, [id])
+
+    useEffect(() => {
+        fetchPerson()
+    }, [fetchPerson])
 
     const parseAliases = (aliasesStr) => {
         try {
@@ -70,6 +76,51 @@ function PersonDetail() {
         }
     }
 
+    const [stashSearch, setStashSearch] = useState('')
+    const [stashResults, setStashResults] = useState([])
+    const [showStashModal, setShowStashModal] = useState(false)
+    const [searchingStash, setSearchingStash] = useState(false)
+
+    const handleSearchStash = async () => {
+        if (!stashSearch.trim()) return
+        setSearchingStash(true)
+        try {
+            const response = await fetch(`/api/stashdb/search?name=${encodeURIComponent(stashSearch)}`)
+            const result = await response.json()
+            if (result.data) {
+                setStashResults(result.data)
+            }
+        } catch (error) {
+            console.error('Failed to search StashDB:', error)
+            alert('Failed to search StashDB')
+        } finally {
+            setSearchingStash(false)
+        }
+    }
+
+    const handleLinkStash = async (stashId) => {
+        try {
+            const response = await fetch(`/api/people/${id}/stashdb/link`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ stash_id: stashId })
+            })
+
+            if (response.ok) {
+                setShowStashModal(false)
+                setStashResults([])
+                setStashSearch('')
+                fetchPerson()
+                alert('Successfully linked to StashDB!')
+            } else {
+                alert('Failed to link to StashDB')
+            }
+        } catch (error) {
+            console.error('Failed to link StashDB:', error)
+            alert('Failed to link StashDB')
+        }
+    }
+
     const handleUnlinkGallery = async (galleryId, e) => {
         e.stopPropagation()
 
@@ -95,6 +146,10 @@ function PersonDetail() {
 
     if (loading) {
         return <div className="loading">Loading...</div>
+    }
+
+    if (error) {
+        return <div className="error">Error: {error}</div>
     }
 
     if (!person) {
@@ -138,8 +193,19 @@ function PersonDetail() {
                         <>
                             <div className="person-title">
                                 <h1>{person.name}</h1>
-                                <button onClick={() => setIsEditing(true)} className="edit-btn">✏️ Edit</button>
+                                <div className="person-actions">
+                                    <button onClick={() => setIsEditing(true)} className="edit-btn">✏️ Edit</button>
+                                    <button onClick={() => {
+                                        setStashSearch(person.name)
+                                        setShowStashModal(true)
+                                    }} className="stash-btn">🔗 Link StashDB</button>
+                                </div>
                             </div>
+                            {person.stash_id && (
+                                <div className="stash-badge">
+                                    <span className="stash-icon">✓</span> Linked to StashDB
+                                </div>
+                            )}
                             {parseAliases(person.aliases).length > 0 && (
                                 <div className="aliases">
                                     {parseAliases(person.aliases).map((alias, i) => (
@@ -151,6 +217,47 @@ function PersonDetail() {
                     )}
                 </div>
             </div>
+
+            {showStashModal && (
+                <div className="modal-overlay" onClick={() => setShowStashModal(false)}>
+                    <div className="modal-content" onClick={e => e.stopPropagation()}>
+                        <h2>Link to StashDB</h2>
+                        <div className="search-box">
+                            <input
+                                type="text"
+                                value={stashSearch}
+                                onChange={(e) => setStashSearch(e.target.value)}
+                                placeholder="Search performer name..."
+                                onKeyDown={(e) => e.key === 'Enter' && handleSearchStash()}
+                            />
+                            <button onClick={handleSearchStash} disabled={searchingStash}>
+                                {searchingStash ? 'Searching...' : 'Search'}
+                            </button>
+                        </div>
+
+                        <div className="search-results">
+                            {stashResults.map(performer => (
+                                <div key={performer.id} className="search-result-item">
+                                    <div className="performer-info">
+                                        <strong>{performer.name}</strong>
+                                        {performer.aliases && performer.aliases.length > 0 && (
+                                            <div className="performer-aliases">
+                                                {performer.aliases.join(', ')}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <button onClick={() => handleLinkStash(performer.id)}>Link</button>
+                                </div>
+                            ))}
+                            {stashResults.length === 0 && !searchingStash && (
+                                <p className="no-results">No results found</p>
+                            )}
+                        </div>
+
+                        <button className="close-modal-btn" onClick={() => setShowStashModal(false)}>Close</button>
+                    </div>
+                </div>
+            )}
 
             <div className="person-galleries">
                 <h2>Galleries ({galleries.length})</h2>

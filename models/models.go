@@ -49,5 +49,6 @@ type Person struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 	Name      string         `gorm:"index" json:"name"`
 	Aliases   string         `json:"aliases"` // JSON array stored as text
+	StashID   string         `gorm:"index" json:"stash_id"`
 	Galleries []*Gallery     `json:"galleries,omitempty" gorm:"many2many:person_galleries;"`
 }

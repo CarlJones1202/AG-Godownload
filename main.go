@@ -20,6 +20,11 @@ func main() {
 		logger.Fatal("Failed to create uploads directory:", err)
 	}
 
+	// Migrate images to new directory structure
+	if err := services.MigrateImagesToNewStructure(); err != nil {
+		logger.Warn("Image migration had errors:", err)
+	}
+
 	// Run startup verification
 	services.VerifyDownloadedImages()
 
@@ -48,6 +53,9 @@ func main() {
 	r.DELETE("/people/:id", handlers.DeletePerson)
 	r.POST("/people/:id/link-galleries", handlers.LinkPersonToGalleries)
 	r.DELETE("/people/:id/galleries/:galleryId", handlers.UnlinkGalleryFromPerson)
+
+	r.GET("/stashdb/search", handlers.SearchStashDB)
+	r.POST("/people/:id/stashdb/link", handlers.LinkStashDB)
 
 	r.DELETE("/images/:id", handlers.DeleteImage)
 	r.GET("/images", handlers.GetImages)
