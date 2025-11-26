@@ -94,8 +94,15 @@ func RipPixHost(src string) (string, error) {
 
 func RipImx(src string) (string, error) {
 	fmt.Printf("Starting RipImx for %s\n", src)
-	imageURL := strings.ReplaceAll(src, "u/t", "u/i")
-	fmt.Printf("Transformed Imx.to URL: %s\n", imageURL)
+	resp, err := http.Head(src)
+	if err != nil {
+		return "", fmt.Errorf("resolving Imx URL %s: %v", src, err)
+	}
+	defer resp.Body.Close()
+
+	finalURL := resp.Request.URL.String()
+	imageURL := strings.ReplaceAll(finalURL, "u/t", "u/i")
+	fmt.Printf("Transformed Imx.to URL: %s -> %s\n", src, imageURL)
 	return imageURL, nil
 }
 
