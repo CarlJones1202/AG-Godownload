@@ -20,13 +20,20 @@ func main() {
 		logger.Fatal("Failed to create uploads directory:", err)
 	}
 
-	// Migrate images to new directory structure
-	if err := services.MigrateImagesToNewStructure(); err != nil {
-		logger.Warn("Image migration had errors:", err)
-	}
+	// // Migrate images to new directory structure
+	// if err := services.MigrateImagesToNewStructure(); err != nil {
+	// 	logger.Warn("Image migration had errors:", err)
+	// }
 
 	// Run startup verification
-	services.VerifyDownloadedImages()
+	go func() {
+		logger.Info("Starting background verification of downloaded images...")
+		if err := services.VerifyDownloadedImages(); err != nil {
+			logger.Error("Background verification failed:", err)
+		} else {
+			logger.Info("Background verification completed successfully")
+		}
+	}()
 
 	// Start background crawler worker
 	services.StartCrawlerWorker()

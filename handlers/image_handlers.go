@@ -5,10 +5,15 @@ import (
 	"gallery_api/models"
 	"gallery_api/services"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 
+	"strings"
+
 	"github.com/gin-gonic/gin"
+
+	"gorm.io/gorm"
 )
 
 // AddImageToGallery handles downloading an image from a URL and adding it to a gallery
@@ -118,17 +123,126 @@ func GetImages(c *gin.Context) {
 	})
 }
 
+// ServeImage - finds image by filename, determines source name via DB, serves from correct subdir
 func ServeImage(c *gin.Context) {
 	filename := c.Param("filename")
-	path := filepath.Join(services.UploadsDir, filename)
+
+	// Security: prevent path traversal
+	if strings.Contains(filename, "/") || strings.Contains(filename, "..") {
+		c.String(http.StatusBadRequest, "Invalid filename")
+		return
+	}
+
+	var image struct {
+		ID         uint
+		Filename   string
+		SourceName string `gorm:"column:source_name"`
+	}
+
+	// Find image by filename (hash), join through galleries → source
+	err := database.DB.
+		Model(&models.Image{}).
+		Select(`images.id, images.filename, sources.name AS source_name`).
+		Joins(`JOIN image_galleries ON image_galleries.image_id = images.id`).
+		Joins(`JOIN galleries ON galleries.id = image_galleries.gallery_id`).
+		Joins(`JOIN sources ON sources.id = galleries.source_id`).
+		Where(`images.filename LIKE ? OR images.filename = ?`, "%/"+filename, filename).
+		First(&image).Error
+
+	// Fallback: if no source (manual/uncategorized), try root
+	if err == gorm.ErrRecordNotFound {
+		path := filepath.Join(services.UploadsDir, filename)
+		if fileExists(path) {
+			c.File(path)
+			return
+		}
+		c.String(http.StatusNotFound, "Image not found")
+		return
+	}
+
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Database error")
+		return
+	}
+
+	// Build path using Source.Name as subdirectory
+	sourceDir := services.SanitizeDirectoryName(image.SourceName)
+	path := filepath.Join(services.UploadsDir, sourceDir, filename)
+
+	if !fileExists(path) {
+		// Last-ditch: try root (in case of migration issues)
+		rootPath := filepath.Join(services.UploadsDir, filename)
+		if fileExists(rootPath) {
+			c.File(rootPath)
+			return
+		}
+		c.String(http.StatusNotFound, "Image file missing")
+		return
+	}
+
 	c.File(path)
 }
 
+// ServeThumbnail - same logic, but for thumbnails
 func ServeThumbnail(c *gin.Context) {
 	filename := c.Param("filename")
-	// Thumbnails are in the thumbnails subdirectory with the same filename
-	path := filepath.Join(services.UploadsDir, "thumbnails", filename)
-	c.File(path)
+
+	if strings.Contains(filename, "/") || strings.Contains(filename, "..") {
+		c.String(http.StatusBadRequest, "Invalid filename")
+		return
+	}
+
+	var image struct {
+		SourceName string `gorm:"column:source_name"`
+	}
+
+	err := database.DB.
+		Model(&models.Image{}).
+		Select(`sources.name AS source_name`).
+		Joins(`JOIN image_galleries ON image_galleries.image_id = images.id`).
+		Joins(`JOIN galleries ON galleries.id = image_galleries.gallery_id`).
+		Joins(`JOIN sources ON sources.id = galleries.source_id`).
+		Where(`images.filename LIKE ? OR images.filename = ?`, "%/"+filename, filename).
+		First(&image).Error
+
+	if err == gorm.ErrRecordNotFound {
+		// Try old flat thumbnail
+		oldPath := filepath.Join(services.UploadsDir, "thumbnails", filename)
+		if fileExists(oldPath) {
+			c.File(oldPath)
+			return
+		}
+		c.String(http.StatusNotFound, "Thumbnail not found")
+		return
+	}
+
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Database error")
+		return
+	}
+
+	sourceDir := services.SanitizeDirectoryName(image.SourceName)
+	thumbPath := filepath.Join(services.UploadsDir, sourceDir, "thumbnails", filename)
+
+	if fileExists(thumbPath) {
+		c.File(thumbPath)
+		return
+	}
+
+	// Fallback to root thumbnails
+	oldPath := filepath.Join(services.UploadsDir, "thumbnails", filename)
+	if fileExists(oldPath) {
+		c.File(oldPath)
+		return
+	}
+
+	c.String(http.StatusNotFound, "Thumbnail missing")
+}
+
+// Helper
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // DeleteImage removes an image from both database and filesystem
