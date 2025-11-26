@@ -5,6 +5,7 @@ import (
 	"gallery_api/database"
 	"gallery_api/models"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -71,7 +72,25 @@ func CrawlSource(sourceID uint) error {
 		existingURLs[img.OriginalURL] = true
 	}
 
-	doc.Find("div[id^='post_message_']").Each(func(i int, s *goquery.Selection) {
+	// Parse the URL to check for a fragment
+	u, err := url.Parse(source.Location)
+	if err != nil {
+		database.DB.Model(&source).Update("Status", "error")
+		return err
+	}
+	fragment := u.Fragment
+
+	var selection *goquery.Selection
+	if strings.HasPrefix(fragment, "post") {
+		postID := strings.TrimPrefix(fragment, "post")
+		fmt.Printf("Crawling specific post ID: %s\n", postID)
+		selection = doc.Find(fmt.Sprintf("div[id='post_message_%s']", postID))
+	} else {
+		fmt.Println("Crawling first post only")
+		selection = doc.Find("div[id^='post_message_']").First()
+	}
+
+	selection.Each(func(i int, s *goquery.Selection) {
 		// Find images inside this div - look for <a> tags containing <img>
 		s.Find("a img").Each(func(j int, img *goquery.Selection) {
 			// Skip "View Post" images
