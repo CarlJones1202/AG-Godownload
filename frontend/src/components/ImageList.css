@@ -30,6 +30,7 @@
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     border: 1px solid rgba(0, 0, 0, 0.06);
     position: relative;
+    aspect-ratio: 1;
 }
 
 .image-card:hover {
@@ -52,7 +53,7 @@
 
 .image-thumbnail {
     width: 100%;
-    height: 180px;
+    height: 100%;
     background: linear-gradient(135deg, #f5f5f5 0%, #e5e5e5 100%);
     display: flex;
     align-items: center;
@@ -75,33 +76,6 @@
 
 .image-card:hover .image-thumbnail img {
     transform: scale(1.05);
-}
-
-.image-info {
-    padding: 0.75rem;
-}
-
-.gallery-name {
-    margin: 0 0 0.25rem 0;
-    font-size: 0.8125rem;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    color: #0a0a0a;
-}
-
-@media (prefers-color-scheme: dark) {
-    .gallery-name {
-        color: #f0f0f0;
-    }
-}
-
-.image-filename {
-    margin: 0;
-    color: #888;
-    font-size: 0.75rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .no-images {

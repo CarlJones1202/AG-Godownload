@@ -74,10 +74,10 @@ function ImageList({ images, onRefresh, meta, onPageChange }) {
                                     loading="lazy"
                                 />
                             </div>
-                            <div className="image-info">
-                                {/* <p className="gallery-name">{image.gallery?.name || 'Unknown'}</p> */}
+                            {/* <div className="image-info">
+                                <p className="gallery-name">{image.gallery?.name || 'Unknown'}</p>
                                 <p className="image-filename">{image.filename}</p>
-                            </div>
+                            </div> */}
                             <button
                                 className="delete-image-btn"
                                 onClick={(e) => handleDeleteImage(image.id, e)}
