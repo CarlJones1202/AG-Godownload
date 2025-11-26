@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import './SourceManager.css'
 
-function SourceManager({ sources, onSourceAdded, onRefresh }) {
+function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange }) {
     const [showForm, setShowForm] = useState(false)
     const [formData, setFormData] = useState({
         name: '',
@@ -178,7 +178,26 @@ function SourceManager({ sources, onSourceAdded, onRefresh }) {
                         </div>
                     ))
                 )}
+
             </div>
+
+            {meta && meta.total_pages > 1 && (
+                <div className="pagination">
+                    <button
+                        disabled={meta.current_page === 1}
+                        onClick={() => onPageChange(meta.current_page - 1)}
+                    >
+                        Previous
+                    </button>
+                    <span>Page {meta.current_page} of {meta.total_pages}</span>
+                    <button
+                        disabled={meta.current_page === meta.total_pages}
+                        onClick={() => onPageChange(meta.current_page + 1)}
+                    >
+                        Next
+                    </button>
+                </div>
+            )}
         </div>
     )
 }

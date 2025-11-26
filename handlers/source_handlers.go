@@ -65,13 +65,36 @@ func CrawlSource(c *gin.Context) {
 }
 
 func GetSources(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 10
+	}
+	offset := (page - 1) * limit
+
+	var total int64
+	database.DB.Model(&models.Source{}).Count(&total)
+
 	var sources []models.Source
-	if err := database.DB.Find(&sources).Error; err != nil {
+	if err := database.DB.Limit(limit).Offset(offset).Find(&sources).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch sources"})
 		return
 	}
 
-	c.JSON(http.StatusOK, sources)
+	totalPages := int((total + int64(limit) - 1) / int64(limit))
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": sources,
+		"meta": gin.H{
+			"current_page": page,
+			"total_pages":  totalPages,
+			"total_items":  total,
+			"limit":        limit,
+		},
+	})
 }
 
 // DeleteSource removes a source and optionally its gallery and images

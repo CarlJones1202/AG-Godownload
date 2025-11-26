@@ -28,9 +28,22 @@ func CreateGallery(c *gin.Context) {
 }
 
 func GetGalleries(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "12"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 12
+	}
+	offset := (page - 1) * limit
+
+	var total int64
+	database.DB.Model(&models.Gallery{}).Count(&total)
+
 	var galleries []models.Gallery
 	// Load galleries without images first
-	if err := database.DB.Find(&galleries).Error; err != nil {
+	if err := database.DB.Limit(limit).Offset(offset).Find(&galleries).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch galleries"})
 		return
 	}
@@ -41,7 +54,7 @@ func GetGalleries(c *gin.Context) {
 		ImageCount int `json:"image_count"`
 	}
 
-	response := make([]GalleryResponse, len(galleries))
+	galleryResponses := make([]GalleryResponse, len(galleries))
 	for i := range galleries {
 		// Get image count
 		var count int64
@@ -53,13 +66,23 @@ func GetGalleries(c *gin.Context) {
 			galleries[i].Images = []models.Image{firstImage}
 		}
 
-		response[i] = GalleryResponse{
+		galleryResponses[i] = GalleryResponse{
 			Gallery:    galleries[i],
 			ImageCount: int(count),
 		}
 	}
 
-	c.JSON(http.StatusOK, response)
+	totalPages := int((total + int64(limit) - 1) / int64(limit))
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": galleryResponses,
+		"meta": gin.H{
+			"current_page": page,
+			"total_pages":  totalPages,
+			"total_items":  total,
+			"limit":        limit,
+		},
+	})
 }
 
 func GetGallery(c *gin.Context) {

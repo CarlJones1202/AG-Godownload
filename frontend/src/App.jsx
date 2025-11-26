@@ -9,16 +9,29 @@ function App() {
     const [sources, setSources] = useState([])
     const [loading, setLoading] = useState(true)
 
+    // Pagination state
+    const [galleryPage, setGalleryPage] = useState(1)
+    const [galleryMeta, setGalleryMeta] = useState({ total_pages: 1, current_page: 1 })
+    const [sourcePage, setSourcePage] = useState(1)
+    const [sourceMeta, setSourceMeta] = useState({ total_pages: 1, current_page: 1 })
+
     useEffect(() => {
-        fetchGalleries()
-        fetchSources()
+        fetchGalleries(1)
+        fetchSources(1)
     }, [])
 
-    const fetchGalleries = async () => {
+    const fetchGalleries = async (page = 1) => {
+        setLoading(true)
         try {
-            const response = await fetch('/api/galleries')
-            const data = await response.json()
-            setGalleries(data || [])
+            const response = await fetch(`/api/galleries?page=${page}&limit=50`)
+            const result = await response.json()
+            if (result.data) {
+                setGalleries(result.data)
+                setGalleryMeta(result.meta)
+                setGalleryPage(page)
+            } else {
+                setGalleries(result || [])
+            }
         } catch (error) {
             console.error('Failed to fetch galleries:', error)
         } finally {
@@ -26,19 +39,25 @@ function App() {
         }
     }
 
-    const fetchSources = async () => {
+    const fetchSources = async (page = 1) => {
         try {
-            const response = await fetch('/api/sources')
-            const data = await response.json()
-            setSources(data || [])
+            const response = await fetch(`/api/sources?page=${page}&limit=50`)
+            const result = await response.json()
+            if (result.data) {
+                setSources(result.data)
+                setSourceMeta(result.meta)
+                setSourcePage(page)
+            } else {
+                setSources(result || [])
+            }
         } catch (error) {
             console.error('Failed to fetch sources:', error)
         }
     }
 
     const handleSourceAdded = () => {
-        fetchSources()
-        fetchGalleries()
+        fetchSources(1)
+        fetchGalleries(1)
     }
 
     return (
@@ -67,13 +86,20 @@ function App() {
                 ) : (
                     <>
                         {activeTab === 'galleries' && (
-                            <GalleryList galleries={galleries} onRefresh={fetchGalleries} />
+                            <GalleryList
+                                galleries={galleries}
+                                onRefresh={() => fetchGalleries(galleryPage)}
+                                meta={galleryMeta}
+                                onPageChange={fetchGalleries}
+                            />
                         )}
                         {activeTab === 'sources' && (
                             <SourceManager
                                 sources={sources}
                                 onSourceAdded={handleSourceAdded}
-                                onRefresh={fetchSources}
+                                onRefresh={() => fetchSources(sourcePage)}
+                                meta={sourceMeta}
+                                onPageChange={fetchSources}
                             />
                         )}
                     </>

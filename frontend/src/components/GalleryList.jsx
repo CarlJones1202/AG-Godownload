@@ -2,7 +2,7 @@ import { useState } from 'react'
 import './GalleryList.css'
 import ImageGrid from './ImageGrid'
 
-function GalleryList({ galleries, onRefresh }) {
+function GalleryList({ galleries, onRefresh, meta, onPageChange }) {
     const [selectedGallery, setSelectedGallery] = useState(null)
 
     const handleDeleteGallery = async (galleryId, e) => {
@@ -90,14 +90,13 @@ function GalleryList({ galleries, onRefresh }) {
                 <h2>Your Galleries</h2>
                 <button onClick={onRefresh}>🔄 Refresh</button>
             </div>
-
             {galleries.length === 0 ? (
-                <div className="empty-state">
-                    <p>No galleries yet. Add a source to get started!</p>
+                <div className="no-galleries">
+                    <p>No galleries found. Add a source to start crawling!</p>
                 </div>
             ) : (
                 <div className="gallery-grid">
-                    {galleries.map(gallery => (
+                    {galleries.map((gallery) => (
                         <div
                             key={gallery.id}
                             className="gallery-card"
@@ -108,9 +107,10 @@ function GalleryList({ galleries, onRefresh }) {
                                     <img
                                         src={`/api/thumbnails/${gallery.images[0].filename}`}
                                         alt={gallery.name}
+                                        loading="lazy"
                                     />
                                 ) : (
-                                    <div className="no-image">📁</div>
+                                    <div className="no-image">No Images</div>
                                 )}
                             </div>
                             <div className="gallery-info">
@@ -120,12 +120,30 @@ function GalleryList({ galleries, onRefresh }) {
                             <button
                                 className="delete-gallery-card-btn"
                                 onClick={(e) => handleDeleteGallery(gallery.id, e)}
-                                title="Delete gallery"
+                                title="Delete Gallery"
                             >
-                                ×
+                                🗑️
                             </button>
                         </div>
                     ))}
+                </div>
+            )}
+
+            {meta && meta.total_pages > 1 && (
+                <div className="pagination">
+                    <button
+                        disabled={meta.current_page === 1}
+                        onClick={() => onPageChange(meta.current_page - 1)}
+                    >
+                        Previous
+                    </button>
+                    <span>Page {meta.current_page} of {meta.total_pages}</span>
+                    <button
+                        disabled={meta.current_page === meta.total_pages}
+                        onClick={() => onPageChange(meta.current_page + 1)}
+                    >
+                        Next
+                    </button>
                 </div>
             )}
         </div>
