@@ -54,6 +54,7 @@ function App() {
     }
 
     const fetchSources = async (page = 1) => {
+        setLoading(true)
         try {
             const response = await fetch(`/api/sources?page=${page}&limit=50`)
             const result = await response.json()
@@ -66,6 +67,8 @@ function App() {
             }
         } catch (error) {
             console.error('Failed to fetch sources:', error)
+        } finally {
+            setLoading(false)
         }
     }
 

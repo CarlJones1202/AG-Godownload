@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import './Lightbox.css'
 
 function Lightbox({ image, onClose, onNext, onPrev, currentIndex, totalImages }) {
@@ -13,27 +13,70 @@ function Lightbox({ image, onClose, onNext, onPrev, currentIndex, totalImages })
         return () => window.removeEventListener('keydown', handleKeyDown)
     }, [onClose, onNext, onPrev])
 
+    const [showInfo, setShowInfo] = useState(false)
+
     return (
         <div className="lightbox" onClick={onClose}>
             <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
                 <button className="lightbox-close" onClick={onClose}>✕</button>
+                <button
+                    className={`lightbox-info-toggle ${showInfo ? 'active' : ''}`}
+                    onClick={() => setShowInfo(!showInfo)}
+                    title="Toggle Info"
+                >
+                    ℹ️
+                </button>
 
                 <button className="lightbox-nav lightbox-prev" onClick={onPrev}>
                     ‹
                 </button>
 
-                <img
-                    src={`/api/images/${image.filename}`}
-                    alt={`Image ${image.id}`}
-                />
+                <div className="lightbox-image-container">
+                    <img
+                        src={`/api/images/${image.filename}`}
+                        alt={`Image ${image.id}`}
+                    />
+                </div>
 
                 <button className="lightbox-nav lightbox-next" onClick={onNext}>
                     ›
                 </button>
 
-                <div className="lightbox-info">
+                <div className="lightbox-footer">
                     <span>{currentIndex} / {totalImages}</span>
                 </div>
+
+                {showInfo && (
+                    <div className="lightbox-metadata">
+                        <h3>Image Info</h3>
+                        <div className="metadata-item">
+                            <label>Filename:</label>
+                            <span>{image.filename}</span>
+                        </div>
+                        <div className="metadata-item">
+                            <label>Galleries:</label>
+                            <div className="tags">
+                                {image.galleries && image.galleries.length > 0 ? (
+                                    image.galleries.map(g => (
+                                        <span key={g.id} className="tag">{g.name}</span>
+                                    ))
+                                ) : (
+                                    <span className="tag">{image.gallery?.name || 'Unknown'}</span>
+                                )}
+                            </div>
+                        </div>
+                        <div className="metadata-item">
+                            <label>Source URL:</label>
+                            <a href={image.original_url} target="_blank" rel="noopener noreferrer" className="link">
+                                Open Original
+                            </a>
+                        </div>
+                        <div className="metadata-item">
+                            <label>Created:</label>
+                            <span>{new Date(image.created_at).toLocaleDateString()}</span>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     )

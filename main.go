@@ -5,7 +5,6 @@ import (
 	"gallery_api/handlers"
 	"gallery_api/services"
 	"log"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -14,6 +13,7 @@ func main() {
 	// Initialize Database
 	database.Connect()
 	database.Migrate()
+	database.MigrateData()
 
 	// Ensure uploads directory exists
 	if err := services.EnsureUploadsDir(); err != nil {
@@ -23,11 +23,8 @@ func main() {
 	// Run startup verification
 	services.VerifyDownloadedImages()
 
-	// Reset any sources that were crawling when server stopped
-	services.RecoverInterruptedCrawls()
-
 	// Start background crawler worker
-	go services.StartCrawlerWorker(5 * time.Second)
+	services.StartCrawlerWorker()
 	log.Println("Background crawler worker started")
 
 	r := gin.Default()

@@ -75,7 +75,7 @@ function ImageList({ images, onRefresh, meta, onPageChange }) {
                                 />
                             </div>
                             <div className="image-info">
-                                <p className="gallery-name">{image.gallery?.name || 'Unknown'}</p>
+                                {/* <p className="gallery-name">{image.gallery?.name || 'Unknown'}</p> */}
                                 <p className="image-filename">{image.filename}</p>
                             </div>
                             <button

@@ -43,6 +43,9 @@ func CreateSource(c *gin.Context) {
 		return
 	}
 
+	// Queue for crawling
+	services.AddToCrawlerQueue(source.ID)
+
 	c.JSON(http.StatusCreated, source)
 }
 
@@ -55,11 +58,7 @@ func CrawlSource(c *gin.Context) {
 	}
 
 	// Trigger crawl in background
-	go func() {
-		if err := services.CrawlSource(uint(id)); err != nil {
-			println("Crawl failed:", err.Error())
-		}
-	}()
+	services.AddToCrawlerQueue(uint(id))
 
 	c.JSON(http.StatusAccepted, gin.H{"message": "Crawl started"})
 }

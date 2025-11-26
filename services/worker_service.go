@@ -4,50 +4,50 @@ import (
 	"fmt"
 	"gallery_api/database"
 	"gallery_api/models"
-	"time"
 )
 
-// StartCrawlerWorker - optimized version
-func StartCrawlerWorker(interval time.Duration) {
+var CrawlerQueue = make(chan uint, 100)
+
+func AddToCrawlerQueue(sourceID uint) {
+	select {
+	case CrawlerQueue <- sourceID:
+		fmt.Printf("Added source %d to crawler queue\n", sourceID)
+	default:
+		fmt.Printf("Crawler queue full, skipping source %d\n", sourceID)
+	}
+}
+
+// StartCrawlerWorker - event driven version
+func StartCrawlerWorker() {
+	// Startup recovery: find sources that were crawling or need crawling
 	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
-		fmt.Println("Crawler worker started")
-
-		for range ticker.C {
-			fmt.Println("Checking for sources to crawl...")
-
-			var sources []models.Source
-			oneHourAgo := time.Now().Add(-1 * time.Hour)
-
-			// Use explicit conditions + proper indexing
-			err := database.DB.
-				Where("(status = ? AND (last_checked_at IS NULL OR last_checked_at < ?)) AND deleted_at IS NULL", "idle", oneHourAgo).
-				Or("status = '' AND deleted_at IS NULL").
-				Order("last_checked_at ASC NULLS FIRST"). // important: process oldest first
-				Limit(50).                                // CRITICAL: don't try to crawl 10k sources at once!
-				Find(&sources).Error
-
-			if err != nil {
-				fmt.Printf("Error querying sources: %v\n", err)
-				continue
-			}
-
-			if len(sources) == 0 {
-				fmt.Println("No sources to crawl")
-				continue
-			}
-
-			fmt.Printf("Found %d sources to crawl\n", len(sources))
-
-			for _, source := range sources {
-				go func(s models.Source) {
-					if err := CrawlSource(s.ID); err != nil {
-						fmt.Printf("Error crawling source %d (%s): %v\n", s.ID, s.Name, err)
-					}
-				}(source) // pass by value!
+		fmt.Println("Checking for interrupted crawls...")
+		var sources []models.Source
+		// Find sources that are 'crawling' (interrupted) or 'idle' but might have been missed?
+		// Actually, mostly we care about 'crawling' ones that got stuck because of a crash.
+		// Or maybe we just want to ensure everything is consistent.
+		// For now, let's just pick up 'crawling' ones and reset them or re-queue them.
+		// Also, if we want to be robust, we could pick up 'pending' if we had such a status.
+		// Let's just look for 'crawling' status.
+		if err := database.DB.Where("status = ?", "crawling").Find(&sources).Error; err == nil {
+			fmt.Printf("Found %d interrupted crawls, re-queueing...\n", len(sources))
+			for _, s := range sources {
+				AddToCrawlerQueue(s.ID)
 			}
 		}
 	}()
+
+	// Start workers
+	const numWorkers = 5
+	for i := 0; i < numWorkers; i++ {
+		go func(workerID int) {
+			fmt.Printf("Crawler worker %d started\n", workerID)
+			for sourceID := range CrawlerQueue {
+				fmt.Printf("Worker %d processing source %d\n", workerID, sourceID)
+				if err := CrawlSource(sourceID); err != nil {
+					fmt.Printf("Worker %d error crawling source %d: %v\n", workerID, sourceID, err)
+				}
+			}
+		}(i)
+	}
 }

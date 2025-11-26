@@ -33,8 +33,9 @@ type Image struct {
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
-	GalleryID   uint           `gorm:"index" json:"gallery_id"`
+	GalleryID   uint           `gorm:"index" json:"gallery_id"` // Deprecated: use Galleries
 	Gallery     *Gallery       `json:"gallery,omitempty" gorm:"foreignKey:GalleryID"`
+	Galleries   []*Gallery     `json:"galleries,omitempty" gorm:"many2many:image_galleries;"`
 	Filename    string         `json:"filename"`
 	OriginalURL string         `gorm:"index" json:"original_url"` // The hosting page URL (e.g., imagebam.com/view/...)
 	DownloadURL string         `json:"download_url"`              // The final direct image URL after ripping

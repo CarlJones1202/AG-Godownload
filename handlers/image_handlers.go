@@ -57,10 +57,11 @@ func AddImageToGallery(c *gin.Context) {
 
 	// Save to DB
 	image := models.Image{
-		GalleryID:   uint(galleryID),
+		// GalleryID:   uint(galleryID), // Keep for backward compat if needed, but let's try to move to M2M
 		Filename:    filepath.Base(destPath),
 		OriginalURL: req.URL,
-		DownloadURL: req.URL, // For manual additions, both are the same
+		DownloadURL: req.URL,
+		Galleries:   []*models.Gallery{&gallery},
 	}
 	if err := database.DB.Create(&image).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save image record"})
@@ -86,7 +87,7 @@ func GetImages(c *gin.Context) {
 	database.DB.Model(&models.Image{}).Count(&total)
 
 	var images []models.Image
-	if err := database.DB.Preload("Gallery").Limit(limit).Offset(offset).Order("created_at DESC").Find(&images).Error; err != nil {
+	if err := database.DB.Preload("Galleries").Limit(limit).Offset(offset).Order("created_at DESC").Find(&images).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch images"})
 		return
 	}

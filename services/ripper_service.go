@@ -101,7 +101,7 @@ func RipImx(src string) (string, error) {
 	defer resp.Body.Close()
 
 	finalURL := resp.Request.URL.String()
-	imageURL := strings.ReplaceAll(finalURL, "u/t", "u/i")
+	imageURL := strings.ReplaceAll(finalURL, "/t/", "/i/")
 	fmt.Printf("Transformed Imx.to URL: %s -> %s\n", src, imageURL)
 	return imageURL, nil
 }
