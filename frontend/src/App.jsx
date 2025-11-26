@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Routes, Route, NavLink, useLocation } from 'react-router-dom'
+import { Routes, Route, NavLink, useLocation, useSearchParams } from 'react-router-dom'
 import './App.css'
 import GalleryList from './components/GalleryList'
 import SourceManager from './components/SourceManager'
@@ -7,6 +7,7 @@ import ImageList from './components/ImageList'
 
 function App() {
     const location = useLocation()
+    const [searchParams, setSearchParams] = useSearchParams()
     const [galleries, setGalleries] = useState([])
     const [sources, setSources] = useState([])
     const [images, setImages] = useState([])
@@ -21,14 +22,17 @@ function App() {
     const [imageMeta, setImageMeta] = useState({ total_pages: 1, current_page: 1 })
 
     useEffect(() => {
+        // Get page from URL query params
+        const pageFromUrl = parseInt(searchParams.get('page')) || 1
+
         if (location.pathname === '/' || location.pathname === '/galleries' || location.pathname.startsWith('/galleries/')) {
-            fetchGalleries(1)
+            fetchGalleries(pageFromUrl)
         } else if (location.pathname === '/sources') {
-            fetchSources(1)
+            fetchSources(pageFromUrl)
         } else if (location.pathname === '/images') {
-            fetchImages(1)
+            fetchImages(pageFromUrl)
         }
-    }, [location.pathname])
+    }, [location.pathname, searchParams])
 
     const fetchGalleries = async (page = 1) => {
         setLoading(true)
@@ -90,6 +94,21 @@ function App() {
         fetchImages(1)
     }
 
+    const handleGalleryPageChange = (page) => {
+        setSearchParams({ page: page.toString() })
+        fetchGalleries(page)
+    }
+
+    const handleSourcePageChange = (page) => {
+        setSearchParams({ page: page.toString() })
+        fetchSources(page)
+    }
+
+    const handleImagePageChange = (page) => {
+        setSearchParams({ page: page.toString() })
+        fetchImages(page)
+    }
+
     return (
         <div className="app">
             <header className="app-header">
@@ -126,7 +145,7 @@ function App() {
                                 galleries={galleries}
                                 onRefresh={() => fetchGalleries(galleryPage)}
                                 meta={galleryMeta}
-                                onPageChange={fetchGalleries}
+                                onPageChange={handleGalleryPageChange}
                             />
                         } />
                         <Route path="/galleries" element={
@@ -134,7 +153,7 @@ function App() {
                                 galleries={galleries}
                                 onRefresh={() => fetchGalleries(galleryPage)}
                                 meta={galleryMeta}
-                                onPageChange={fetchGalleries}
+                                onPageChange={handleGalleryPageChange}
                             />
                         } />
                         <Route path="/galleries/:id" element={
@@ -142,7 +161,7 @@ function App() {
                                 galleries={galleries}
                                 onRefresh={() => fetchGalleries(galleryPage)}
                                 meta={galleryMeta}
-                                onPageChange={fetchGalleries}
+                                onPageChange={handleGalleryPageChange}
                             />
                         } />
                         <Route path="/images" element={
@@ -150,7 +169,7 @@ function App() {
                                 images={images}
                                 onRefresh={() => fetchImages(imagePage)}
                                 meta={imageMeta}
-                                onPageChange={fetchImages}
+                                onPageChange={handleImagePageChange}
                             />
                         } />
                         <Route path="/sources" element={
@@ -159,7 +178,7 @@ function App() {
                                 onSourceAdded={handleSourceAdded}
                                 onRefresh={() => fetchSources(sourcePage)}
                                 meta={sourceMeta}
-                                onPageChange={fetchSources}
+                                onPageChange={handleSourcePageChange}
                             />
                         } />
                     </Routes>
