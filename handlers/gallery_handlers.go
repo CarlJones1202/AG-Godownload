@@ -29,15 +29,37 @@ func CreateGallery(c *gin.Context) {
 
 func GetGalleries(c *gin.Context) {
 	var galleries []models.Gallery
-	// Only load first image for each gallery (for thumbnail)
-	if err := database.DB.Preload("Images", func(db *gorm.DB) *gorm.DB {
-		return db.Limit(1).Order("created_at ASC")
-	}).Find(&galleries).Error; err != nil {
+	// Load galleries without images first
+	if err := database.DB.Find(&galleries).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch galleries"})
 		return
 	}
 
-	c.JSON(http.StatusOK, galleries)
+	// Create response with image counts and first image
+	type GalleryResponse struct {
+		models.Gallery
+		ImageCount int `json:"image_count"`
+	}
+
+	response := make([]GalleryResponse, len(galleries))
+	for i := range galleries {
+		// Get image count
+		var count int64
+		database.DB.Model(&models.Image{}).Where("gallery_id = ?", galleries[i].ID).Count(&count)
+
+		// Load first image for thumbnail
+		var firstImage models.Image
+		if err := database.DB.Where("gallery_id = ?", galleries[i].ID).Order("created_at ASC").First(&firstImage).Error; err == nil {
+			galleries[i].Images = []models.Image{firstImage}
+		}
+
+		response[i] = GalleryResponse{
+			Gallery:    galleries[i],
+			ImageCount: int(count),
+		}
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 func GetGallery(c *gin.Context) {
@@ -64,9 +86,19 @@ func DeleteGallery(c *gin.Context) {
 	deleteImages := c.Query("delete_images") == "true"
 
 	var gallery models.Gallery
-	if err := database.DB.Preload("Images").First(&gallery, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Gallery not found"})
-		return
+	// Only load filenames if we're deleting images
+	if deleteImages {
+		if err := database.DB.Preload("Images", func(db *gorm.DB) *gorm.DB {
+			return db.Select("id", "gallery_id", "filename")
+		}).First(&gallery, id).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Gallery not found"})
+			return
+		}
+	} else {
+		if err := database.DB.First(&gallery, id).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Gallery not found"})
+			return
+		}
 	}
 
 	if deleteImages {

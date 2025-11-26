@@ -63,6 +63,14 @@ func CrawlSource(sourceID uint) error {
 	var imagesMutex sync.Mutex
 	var imagesToInsert []models.Image
 
+	// Pre-load existing image URLs for this gallery to avoid duplicate checks in loop
+	existingURLs := make(map[string]bool)
+	var existingImages []models.Image
+	database.DB.Model(&models.Image{}).Where("gallery_id = ?", gallery.ID).Select("original_url").Find(&existingImages)
+	for _, img := range existingImages {
+		existingURLs[img.OriginalURL] = true
+	}
+
 	doc.Find("div[id^='post_message_']").Each(func(i int, s *goquery.Selection) {
 		// Find images inside this div - look for <a> tags containing <img>
 		s.Find("a img").Each(func(j int, img *goquery.Selection) {
@@ -143,9 +151,7 @@ func CrawlSource(sourceID uint) error {
 				}
 
 				// Basic deduplication check (by URL)
-				var count int64
-				database.DB.Model(&models.Image{}).Where("original_url = ? AND gallery_id = ?", imageURL, gallery.ID).Count(&count)
-				if count > 0 {
+				if existingURLs[imageURL] {
 					fmt.Printf("Image already exists: %s\n", imageURL)
 					return
 				}

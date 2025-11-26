@@ -20,13 +20,14 @@ func main() {
 		log.Fatal("Failed to create uploads directory:", err)
 	}
 
-	// Verify all downloaded images exist and re-download if missing
-	if err := services.VerifyDownloadedImages(); err != nil {
-		log.Printf("Warning: Failed to verify images: %v", err)
-	}
+	// Run startup verification
+	services.VerifyDownloadedImages()
 
-	// Start background crawler worker (checks every 5 minutes)
-	services.StartCrawlerWorker(5 * time.Second)
+	// Reset any sources that were crawling when server stopped
+	services.RecoverInterruptedCrawls()
+
+	// Start background crawler worker
+	go services.StartCrawlerWorker(5 * time.Second)
 	log.Println("Background crawler worker started")
 
 	r := gin.Default()
@@ -46,10 +47,6 @@ func main() {
 	r.DELETE("/images/:id", handlers.DeleteImage)
 
 	// Static file serving
-	// Note: In a real app, you might want to protect these or use a proper static file server (nginx etc)
-	// But for this API, we serve them via endpoints to handle logic if needed, or just static.
-	// The user asked to "serve the thumbnails and images to the client upon request".
-	// Using specific handlers gives us more control (e.g. if we want to check permissions later).
 	r.GET("/images/:filename", handlers.ServeImage)
 	r.GET("/thumbnails/:filename", handlers.ServeThumbnail)
 

@@ -31,12 +31,33 @@ function GalleryList({ galleries, onRefresh }) {
         }
     }
 
-    const handleRefreshGallery = () => {
+    const handleRefreshGallery = async () => {
+        // Fetch the full gallery with all images
+        try {
+            const response = await fetch(`/api/galleries/${selectedGallery.id}`)
+            if (response.ok) {
+                const fullGallery = await response.json()
+                setSelectedGallery(fullGallery)
+            }
+        } catch (error) {
+            console.error('Error refreshing gallery:', error)
+        }
         onRefresh()
-        // Re-fetch the selected gallery
-        const updated = galleries.find(g => g.id === selectedGallery.id)
-        if (updated) {
-            setSelectedGallery(updated)
+    }
+
+    const handleSelectGallery = async (gallery) => {
+        // Fetch full gallery with all images
+        try {
+            const response = await fetch(`/api/galleries/${gallery.id}`)
+            if (response.ok) {
+                const fullGallery = await response.json()
+                setSelectedGallery(fullGallery)
+            } else {
+                setSelectedGallery(gallery)
+            }
+        } catch (error) {
+            console.error('Error fetching gallery:', error)
+            setSelectedGallery(gallery)
         }
     }
 
@@ -80,7 +101,7 @@ function GalleryList({ galleries, onRefresh }) {
                         <div
                             key={gallery.id}
                             className="gallery-card"
-                            onClick={() => setSelectedGallery(gallery)}
+                            onClick={() => handleSelectGallery(gallery)}
                         >
                             <div className="gallery-thumbnail">
                                 {gallery.images && gallery.images.length > 0 ? (
@@ -94,7 +115,7 @@ function GalleryList({ galleries, onRefresh }) {
                             </div>
                             <div className="gallery-info">
                                 <h3>{gallery.name}</h3>
-                                <p>{gallery.images?.length || 0} images</p>
+                                <p>{gallery.image_count || 0} images</p>
                             </div>
                             <button
                                 className="delete-gallery-card-btn"
