@@ -43,7 +43,7 @@
     }
 }
 
-.tabs button {
+.tabs a {
     background: transparent;
     color: #666;
     padding: 0.5rem 1.25rem;
@@ -51,30 +51,32 @@
     font-weight: 500;
     border-radius: 8px;
     transition: all 0.2s ease;
+    text-decoration: none;
+    display: inline-block;
 }
 
-.tabs button:hover {
+.tabs a:hover {
     color: #0a0a0a;
     transform: none;
     box-shadow: none;
 }
 
-.tabs button.active {
+.tabs a.active {
     background: #ffffff;
     color: #0a0a0a;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 @media (prefers-color-scheme: dark) {
-    .tabs button {
+    .tabs a {
         color: #888;
     }
 
-    .tabs button:hover {
+    .tabs a:hover {
         color: #f0f0f0;
     }
 
-    .tabs button.active {
+    .tabs a.active {
         background: #0a0a0a;
         color: #ffffff;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);

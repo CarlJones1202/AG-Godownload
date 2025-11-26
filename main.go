@@ -45,6 +45,7 @@ func main() {
 	r.DELETE("/galleries/:id", handlers.DeleteGallery)
 
 	r.DELETE("/images/:id", handlers.DeleteImage)
+	r.GET("/images", handlers.GetImages)
 
 	// Static file serving
 	r.GET("/images/:filename", handlers.ServeImage)

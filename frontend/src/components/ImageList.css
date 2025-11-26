@@ -1,0 +1,142 @@
+.image-list {
+    width: 100%;
+}
+
+.image-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+.image-header h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+}
+
+.images-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 1rem;
+}
+
+.image-card {
+    background: #ffffff;
+    border-radius: 12px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    position: relative;
+}
+
+.image-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+    border-color: rgba(0, 0, 0, 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+    .image-card {
+        background: #1a1a1a;
+        border-color: rgba(255, 255, 255, 0.06);
+    }
+
+    .image-card:hover {
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        border-color: rgba(255, 255, 255, 0.1);
+    }
+}
+
+.image-thumbnail {
+    width: 100%;
+    height: 180px;
+    background: linear-gradient(135deg, #f5f5f5 0%, #e5e5e5 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+@media (prefers-color-scheme: dark) {
+    .image-thumbnail {
+        background: linear-gradient(135deg, #1a1a1a 0%, #0f0f0f 100%);
+    }
+}
+
+.image-thumbnail img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s ease;
+}
+
+.image-card:hover .image-thumbnail img {
+    transform: scale(1.05);
+}
+
+.image-info {
+    padding: 0.75rem;
+}
+
+.gallery-name {
+    margin: 0 0 0.25rem 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: #0a0a0a;
+}
+
+@media (prefers-color-scheme: dark) {
+    .gallery-name {
+        color: #f0f0f0;
+    }
+}
+
+.image-filename {
+    margin: 0;
+    color: #888;
+    font-size: 0.75rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.no-images {
+    text-align: center;
+    padding: 4rem;
+    color: #888;
+    font-size: 0.9375rem;
+}
+
+.delete-image-btn {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(244, 67, 54, 0.9);
+    color: white;
+    border: none;
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s ease, transform 0.1s ease;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.image-card:hover .delete-image-btn {
+    opacity: 1;
+}
+
+.delete-image-btn:hover {
+    transform: scale(1.1);
+    background: rgba(211, 47, 47, 1);
+}

@@ -70,6 +70,40 @@ func AddImageToGallery(c *gin.Context) {
 	c.JSON(http.StatusCreated, image)
 }
 
+// GetImages returns all images with pagination
+func GetImages(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
+
+	var total int64
+	database.DB.Model(&models.Image{}).Count(&total)
+
+	var images []models.Image
+	if err := database.DB.Preload("Gallery").Limit(limit).Offset(offset).Order("created_at DESC").Find(&images).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch images"})
+		return
+	}
+
+	totalPages := int((total + int64(limit) - 1) / int64(limit))
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": images,
+		"meta": gin.H{
+			"current_page": page,
+			"total_pages":  totalPages,
+			"total_items":  total,
+			"limit":        limit,
+		},
+	})
+}
+
 func ServeImage(c *gin.Context) {
 	filename := c.Param("filename")
 	path := filepath.Join(services.UploadsDir, filename)

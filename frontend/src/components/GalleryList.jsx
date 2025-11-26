@@ -1,9 +1,36 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import './GalleryList.css'
 import ImageGrid from './ImageGrid'
 
 function GalleryList({ galleries, onRefresh, meta, onPageChange }) {
     const [selectedGallery, setSelectedGallery] = useState(null)
+    const navigate = useNavigate()
+    const params = useParams()
+    const location = useLocation()
+
+    // Check if we're in "view gallery" mode based on URL
+    const galleryId = params.id
+
+    useEffect(() => {
+        if (galleryId) {
+            fetchGalleryDetails(galleryId)
+        } else {
+            setSelectedGallery(null)
+        }
+    }, [galleryId])
+
+    const fetchGalleryDetails = async (id) => {
+        try {
+            const response = await fetch(`/api/galleries/${id}`)
+            if (response.ok) {
+                const fullGallery = await response.json()
+                setSelectedGallery(fullGallery)
+            }
+        } catch (error) {
+            console.error('Error fetching gallery:', error)
+        }
+    }
 
     const handleDeleteGallery = async (galleryId, e) => {
         e.stopPropagation()
@@ -32,33 +59,14 @@ function GalleryList({ galleries, onRefresh, meta, onPageChange }) {
     }
 
     const handleRefreshGallery = async () => {
-        // Fetch the full gallery with all images
-        try {
-            const response = await fetch(`/api/galleries/${selectedGallery.id}`)
-            if (response.ok) {
-                const fullGallery = await response.json()
-                setSelectedGallery(fullGallery)
-            }
-        } catch (error) {
-            console.error('Error refreshing gallery:', error)
+        if (selectedGallery) {
+            fetchGalleryDetails(selectedGallery.id)
         }
         onRefresh()
     }
 
-    const handleSelectGallery = async (gallery) => {
-        // Fetch full gallery with all images
-        try {
-            const response = await fetch(`/api/galleries/${gallery.id}`)
-            if (response.ok) {
-                const fullGallery = await response.json()
-                setSelectedGallery(fullGallery)
-            } else {
-                setSelectedGallery(gallery)
-            }
-        } catch (error) {
-            console.error('Error fetching gallery:', error)
-            setSelectedGallery(gallery)
-        }
+    const handleSelectGallery = (gallery) => {
+        navigate(`/galleries/${gallery.id}`)
     }
 
     if (selectedGallery) {
@@ -66,7 +74,7 @@ function GalleryList({ galleries, onRefresh, meta, onPageChange }) {
             <div>
                 <button
                     className="back-button"
-                    onClick={() => setSelectedGallery(null)}
+                    onClick={() => navigate('/galleries')}
                 >
                     ← Back to Galleries
                 </button>

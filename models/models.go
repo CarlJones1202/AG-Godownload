@@ -34,6 +34,7 @@ type Image struct {
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
 	GalleryID   uint           `gorm:"index" json:"gallery_id"`
+	Gallery     *Gallery       `json:"gallery,omitempty" gorm:"foreignKey:GalleryID"`
 	Filename    string         `json:"filename"`
 	OriginalURL string         `gorm:"index" json:"original_url"` // The hosting page URL (e.g., imagebam.com/view/...)
 	DownloadURL string         `json:"download_url"`              // The final direct image URL after ripping
