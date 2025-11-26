@@ -1,8 +1,8 @@
 package services
 
 import (
-	"fmt"
 	"gallery_api/database"
+	"gallery_api/logger"
 	"gallery_api/models"
 )
 
@@ -11,9 +11,9 @@ var CrawlerQueue = make(chan uint, 100)
 func AddToCrawlerQueue(sourceID uint) {
 	select {
 	case CrawlerQueue <- sourceID:
-		fmt.Printf("Added source %d to crawler queue\n", sourceID)
+		logger.Debugf("Added source %d to crawler queue", sourceID)
 	default:
-		fmt.Printf("Crawler queue full, skipping source %d\n", sourceID)
+		logger.Warn("Crawler queue full, skipping source", sourceID)
 	}
 }
 
@@ -21,7 +21,7 @@ func AddToCrawlerQueue(sourceID uint) {
 func StartCrawlerWorker() {
 	// Startup recovery: find sources that were crawling or need crawling
 	go func() {
-		fmt.Println("Checking for interrupted crawls...")
+		logger.Debug("Checking for interrupted crawls...")
 		var sources []models.Source
 		// Find sources that are 'crawling' (interrupted) or 'idle' but might have been missed?
 		// Actually, mostly we care about 'crawling' ones that got stuck because of a crash.
@@ -30,7 +30,7 @@ func StartCrawlerWorker() {
 		// Also, if we want to be robust, we could pick up 'pending' if we had such a status.
 		// Let's just look for 'crawling' status.
 		if err := database.DB.Where("status = ?", "crawling").Find(&sources).Error; err == nil {
-			fmt.Printf("Found %d interrupted crawls, re-queueing...\n", len(sources))
+			logger.Infof("Found %d interrupted crawls, re-queueing...", len(sources))
 			for _, s := range sources {
 				AddToCrawlerQueue(s.ID)
 			}
@@ -41,11 +41,11 @@ func StartCrawlerWorker() {
 	const numWorkers = 5
 	for i := 0; i < numWorkers; i++ {
 		go func(workerID int) {
-			fmt.Printf("Crawler worker %d started\n", workerID)
+			logger.Debugf("Crawler worker %d started", workerID)
 			for sourceID := range CrawlerQueue {
-				fmt.Printf("Worker %d processing source %d\n", workerID, sourceID)
+				logger.Debugf("Worker %d processing source %d", workerID, sourceID)
 				if err := CrawlSource(sourceID); err != nil {
-					fmt.Printf("Worker %d error crawling source %d: %v\n", workerID, sourceID, err)
+					logger.Errorf("Worker %d error crawling source %d: %v", workerID, sourceID, err)
 				}
 			}
 		}(i)

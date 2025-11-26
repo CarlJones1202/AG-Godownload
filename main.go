@@ -3,8 +3,8 @@ package main
 import (
 	"gallery_api/database"
 	"gallery_api/handlers"
+	"gallery_api/logger"
 	"gallery_api/services"
-	"log"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,7 +17,7 @@ func main() {
 
 	// Ensure uploads directory exists
 	if err := services.EnsureUploadsDir(); err != nil {
-		log.Fatal("Failed to create uploads directory:", err)
+		logger.Fatal("Failed to create uploads directory:", err)
 	}
 
 	// Run startup verification
@@ -25,7 +25,7 @@ func main() {
 
 	// Start background crawler worker
 	services.StartCrawlerWorker()
-	log.Println("Background crawler worker started")
+	logger.Info("Background crawler worker started")
 
 	r := gin.Default()
 
@@ -41,6 +41,14 @@ func main() {
 	r.POST("/galleries/:id/images", handlers.AddImageToGallery)
 	r.DELETE("/galleries/:id", handlers.DeleteGallery)
 
+	r.POST("/people", handlers.CreatePerson)
+	r.GET("/people", handlers.GetPeople)
+	r.GET("/people/:id", handlers.GetPerson)
+	r.PUT("/people/:id", handlers.UpdatePerson)
+	r.DELETE("/people/:id", handlers.DeletePerson)
+	r.POST("/people/:id/link-galleries", handlers.LinkPersonToGalleries)
+	r.DELETE("/people/:id/galleries/:galleryId", handlers.UnlinkGalleryFromPerson)
+
 	r.DELETE("/images/:id", handlers.DeleteImage)
 	r.GET("/images", handlers.GetImages)
 
@@ -48,6 +56,6 @@ func main() {
 	r.GET("/images/:filename", handlers.ServeImage)
 	r.GET("/thumbnails/:filename", handlers.ServeThumbnail)
 
-	log.Println("Server starting on :8080")
+	logger.Info("Server starting on :8080")
 	r.Run(":8080")
 }

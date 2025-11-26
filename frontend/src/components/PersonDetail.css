@@ -1,0 +1,259 @@
+.person-detail {
+    width: 100%;
+}
+
+.person-detail-header {
+    margin-bottom: 2rem;
+}
+
+.back-btn {
+    background: rgba(100, 108, 255, 0.1);
+    color: #646cff;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    margin-bottom: 1rem;
+    transition: all 0.2s ease;
+}
+
+.back-btn:hover {
+    background: rgba(100, 108, 255, 0.2);
+}
+
+.person-info-header .aliases {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.person-title {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.person-title h1 {
+    margin: 0;
+    font-size: 2rem;
+    font-weight: 600;
+}
+
+.edit-btn {
+    background: rgba(100, 108, 255, 0.1);
+    color: #646cff;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    transition: all 0.2s ease;
+}
+
+.edit-btn:hover {
+    background: rgba(100, 108, 255, 0.2);
+}
+
+.edit-form {
+    width: 100%;
+    max-width: 600px;
+}
+
+.edit-form .form-group {
+    margin-bottom: 1rem;
+}
+
+.edit-form label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    font-size: 0.875rem;
+}
+
+.edit-form input {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 6px;
+    font-size: 1rem;
+}
+
+@media (prefers-color-scheme: dark) {
+    .edit-form input {
+        background: #0a0a0a;
+        border-color: rgba(255, 255, 255, 0.1);
+        color: white;
+    }
+}
+
+.edit-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.save-btn,
+.cancel-btn {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    transition: all 0.2s ease;
+}
+
+.save-btn {
+    background: #646cff;
+    color: white;
+}
+
+.save-btn:hover {
+    background: #535bf2;
+}
+
+.cancel-btn {
+    background: rgba(0, 0, 0, 0.05);
+    color: #666;
+}
+
+.cancel-btn:hover {
+    background: rgba(0, 0, 0, 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+    .cancel-btn {
+        background: rgba(255, 255, 255, 0.05);
+        color: #aaa;
+    }
+
+    .cancel-btn:hover {
+        background: rgba(255, 255, 255, 0.1);
+    }
+}
+
+.alias-tag {
+    background: rgba(100, 108, 255, 0.1);
+    color: #646cff;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.person-galleries h2 {
+    margin: 0 0 1.5rem 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.no-galleries {
+    text-align: center;
+    padding: 4rem;
+    color: #888;
+}
+
+.no-galleries p {
+    margin: 0.5rem 0;
+    font-size: 0.9375rem;
+}
+
+.galleries-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.gallery-card {
+    background: #ffffff;
+    border-radius: 12px;
+    overflow: hidden;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    position: relative;
+}
+
+.gallery-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+    border-color: rgba(0, 0, 0, 0.1);
+}
+
+.gallery-content {
+    cursor: pointer;
+}
+
+.unlink-btn {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    background: rgba(244, 67, 54, 0.9);
+    color: white;
+    border: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    z-index: 10;
+}
+
+.unlink-btn:hover {
+    background: #f44336;
+    transform: scale(1.1);
+}
+
+@media (prefers-color-scheme: dark) {
+    .gallery-card {
+        background: #1a1a1a;
+        border-color: rgba(255, 255, 255, 0.06);
+    }
+
+    .gallery-card:hover {
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        border-color: rgba(255, 255, 255, 0.1);
+    }
+}
+
+.gallery-thumbnail {
+    width: 100%;
+    aspect-ratio: 1;
+    background: linear-gradient(135deg, #f5f5f5 0%, #e5e5e5 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+@media (prefers-color-scheme: dark) {
+    .gallery-thumbnail {
+        background: linear-gradient(135deg, #1a1a1a 0%, #0f0f0f 100%);
+    }
+}
+
+.gallery-thumbnail img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.gallery-info {
+    padding: 1rem;
+}
+
+.gallery-info h3 {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.9375rem;
+    font-weight: 600;
+}
+
+.image-count {
+    margin: 0;
+    color: #888;
+    font-size: 0.8125rem;
+}

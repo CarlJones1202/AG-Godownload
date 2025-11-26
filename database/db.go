@@ -1,8 +1,8 @@
 package database
 
 import (
+	"gallery_api/logger"
 	"gallery_api/models"
-	"log"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -15,18 +15,18 @@ func Connect() {
 	// Use glebarez/sqlite for pure Go implementation
 	DB, err = gorm.Open(sqlite.Open("gallery.db"), &gorm.Config{})
 	if err != nil {
-		log.Fatal("Failed to connect to database:", err)
+		logger.Fatal("Failed to connect to database:", err)
 	}
 
-	log.Println("Database connected successfully")
+	logger.Info("Database connected successfully")
 }
 
 func Migrate() {
-	err := DB.AutoMigrate(&models.Source{}, &models.Gallery{}, &models.Image{})
+	err := DB.AutoMigrate(&models.Source{}, &models.Gallery{}, &models.Image{}, &models.Person{})
 	if err != nil {
-		log.Fatal("Failed to migrate database:", err)
+		logger.Fatal("Failed to migrate database:", err)
 	}
-	log.Println("Database migrated successfully")
+	logger.Info("Database migrated successfully")
 }
 
 func MigrateData() {
@@ -39,8 +39,8 @@ func MigrateData() {
 		AND id NOT IN (SELECT image_id FROM image_galleries)
 	`).Error
 	if err != nil {
-		log.Printf("Warning: Data migration failed (might be already done): %v", err)
-	} else {
-		log.Println("Data migration (images -> image_galleries) completed")
+		logger.Warn("Data migration failed (might be already done):", err)
+		return
 	}
+	logger.Info("Data migration (images -> image_galleries) completed")
 }

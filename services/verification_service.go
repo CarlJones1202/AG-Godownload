@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 	"gallery_api/database"
+	"gallery_api/logger"
 	"gallery_api/models"
 	"os"
 	"path/filepath"
@@ -10,7 +11,7 @@ import (
 
 // VerifyDownloadedImages checks all images in the database and re-downloads any missing files
 func VerifyDownloadedImages() error {
-	fmt.Println("Verifying downloaded images...")
+	logger.Info("Verifying downloaded images...")
 
 	var images []models.Image
 	if err := database.DB.Find(&images).Error; err != nil {

@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"gallery_api/logger"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -19,7 +20,7 @@ func newCollector() *colly.Collector {
 }
 
 func RipImageBam(src string) (string, error) {
-	fmt.Printf("Starting RipImageBam for %s\n", src)
+	logger.Debugf("Starting RipImageBam for %s", src)
 	c := newCollector()
 	cookieJar, _ := cookiejar.New(nil)
 	cookies := []*http.Cookie{
@@ -31,13 +32,13 @@ func RipImageBam(src string) (string, error) {
 	c.SetCookieJar(cookieJar)
 
 	c.OnResponse(func(r *colly.Response) {
-		fmt.Printf("RipImageBam response for %s: Status %d\n", r.Request.URL.String(), r.StatusCode)
+		logger.Debugf("RipImageBam response for %s: Status %d", r.Request.URL.String(), r.StatusCode)
 	})
 
 	var imageURL string
 	c.OnHTML("img.main-image", func(e *colly.HTMLElement) {
 		imageURL = e.Attr("src")
-		fmt.Printf("Extracted ImageBam URL: %s\n", imageURL)
+		logger.Debugf("Extracted ImageBam URL: %s", imageURL)
 	})
 
 	if err := c.Visit(src); err != nil {
@@ -47,16 +48,16 @@ func RipImageBam(src string) (string, error) {
 }
 
 func RipImageBox(src string) (string, error) {
-	fmt.Printf("Starting RipImageBox for %s\n", src)
+	logger.Debugf("Starting RipImageBox for %s", src)
 	c := newCollector()
 	c.OnResponse(func(r *colly.Response) {
-		fmt.Printf("RipImageBox response for %s: Status %d\n", r.Request.URL.String(), r.StatusCode)
+		logger.Debugf("RipImageBox response for %s: Status %d", r.Request.URL.String(), r.StatusCode)
 	})
 
 	var imageURL string
 	c.OnHTML("#img", func(e *colly.HTMLElement) {
 		imageURL = e.Attr("src")
-		fmt.Printf("Extracted ImgBox URL: %s\n", imageURL)
+		logger.Debugf("Extracted ImgBox URL: %s", imageURL)
 	})
 	if err := c.Visit(src); err != nil {
 		return "", fmt.Errorf("visiting ImgBox %s: %v", src, err)
@@ -65,35 +66,35 @@ func RipImageBox(src string) (string, error) {
 }
 
 func RipPostImages(src string) (string, error) {
-	fmt.Printf("RipPostImages returning direct URL: %s\n", src)
+	logger.Debugf("RipPostImages returning direct URL: %s", src)
 	return src, nil
 }
 
 func RipViprIm(src string) (string, error) {
-	fmt.Printf("Starting RipViprIm for %s\n", src)
+	logger.Debugf("Starting RipViprIm for %s", src)
 	imageURL := strings.ReplaceAll(src, "/th", "/i")
-	fmt.Printf("Transformed Vipr.im URL: %s\n", imageURL)
+	logger.Debugf("Transformed Vipr.im URL: %s", imageURL)
 	return imageURL, nil
 }
 
 func RipAcidImg(src string) (string, error) {
-	fmt.Printf("Starting RipAcidImg for %s\n", src)
+	logger.Debugf("Starting RipAcidImg for %s", src)
 	imageURL := strings.ReplaceAll(src, "t.", "i.")
 	imageURL = strings.ReplaceAll(imageURL, "/t", "/i")
-	fmt.Printf("Transformed AcidImg URL: %s\n", imageURL)
+	logger.Debugf("Transformed AcidImg URL: %s", imageURL)
 	return imageURL, nil
 }
 
 func RipPixHost(src string) (string, error) {
-	fmt.Printf("Starting RipPixHost for %s\n", src)
+	logger.Debugf("Starting RipPixHost for %s", src)
 	imageURL := strings.ReplaceAll(src, "/thumbs", "/images")
 	imageURL = strings.ReplaceAll(imageURL, "https://t", "https://img")
-	fmt.Printf("Transformed PixHost URL: %s\n", imageURL)
+	logger.Debugf("Transformed PixHost URL: %s", imageURL)
 	return imageURL, nil
 }
 
 func RipImx(src string) (string, error) {
-	fmt.Printf("Starting RipImx for %s\n", src)
+	logger.Debugf("Starting RipImx for %s", src)
 	resp, err := http.Head(src)
 	if err != nil {
 		return "", fmt.Errorf("resolving Imx URL %s: %v", src, err)
@@ -102,21 +103,21 @@ func RipImx(src string) (string, error) {
 
 	finalURL := resp.Request.URL.String()
 	imageURL := strings.ReplaceAll(finalURL, "/t/", "/i/")
-	fmt.Printf("Transformed Imx.to URL: %s -> %s\n", src, imageURL)
+	logger.Debugf("Transformed Imx.to URL: %s -> %s", src, imageURL)
 	return imageURL, nil
 }
 
 func RipTurboImg(src string) (string, error) {
-	fmt.Printf("Starting RipTurboImg for %s\n", src)
+	logger.Debugf("Starting RipTurboImg for %s", src)
 	c := newCollector()
 	c.OnResponse(func(r *colly.Response) {
-		fmt.Printf("RipTurboImg response for %s: Status %d\n", r.Request.URL.String(), r.StatusCode)
+		logger.Debugf("RipTurboImg response for %s: Status %d", r.Request.URL.String(), r.StatusCode)
 	})
 
 	var imageURL string
 	c.OnHTML("#uImageCont img", func(e *colly.HTMLElement) {
 		imageURL = e.Attr("src")
-		fmt.Printf("Extracted TurboImageHost URL: %s\n", imageURL)
+		logger.Debugf("Extracted TurboImageHost URL: %s", imageURL)
 	})
 	if err := c.Visit(src); err != nil {
 		return "", fmt.Errorf("visiting TurboImageHost %s: %v", src, err)

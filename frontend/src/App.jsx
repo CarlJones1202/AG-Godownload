@@ -4,6 +4,8 @@ import './App.css'
 import GalleryList from './components/GalleryList'
 import SourceManager from './components/SourceManager'
 import ImageList from './components/ImageList'
+import PersonList from './components/PersonList'
+import PersonDetail from './components/PersonDetail'
 
 function App() {
     const location = useLocation()
@@ -11,6 +13,7 @@ function App() {
     const [galleries, setGalleries] = useState([])
     const [sources, setSources] = useState([])
     const [images, setImages] = useState([])
+    const [people, setPeople] = useState([])
     const [loading, setLoading] = useState(true)
 
     // Pagination state
@@ -20,6 +23,8 @@ function App() {
     const [sourceMeta, setSourceMeta] = useState({ total_pages: 1, current_page: 1 })
     const [imagePage, setImagePage] = useState(1)
     const [imageMeta, setImageMeta] = useState({ total_pages: 1, current_page: 1 })
+    const [personPage, setPersonPage] = useState(1)
+    const [personMeta, setPersonMeta] = useState({ total_pages: 1, current_page: 1 })
 
     useEffect(() => {
         // Get page from URL query params
@@ -31,6 +36,8 @@ function App() {
             fetchSources(pageFromUrl)
         } else if (location.pathname === '/images') {
             fetchImages(pageFromUrl)
+        } else if (location.pathname === '/people') {
+            fetchPeople(pageFromUrl)
         }
     }, [location.pathname, searchParams])
 
@@ -91,6 +98,25 @@ function App() {
         }
     }
 
+    const fetchPeople = async (page = 1) => {
+        setLoading(true)
+        try {
+            const response = await fetch(`/api/people?page=${page}&limit=50`)
+            const result = await response.json()
+            if (result.data) {
+                setPeople(result.data)
+                setPersonMeta(result.meta)
+                setPersonPage(page)
+            } else {
+                setPeople(result || [])
+            }
+        } catch (error) {
+            console.error('Failed to fetch people:', error)
+        } finally {
+            setLoading(false)
+        }
+    }
+
     const handleSourceAdded = () => {
         fetchSources(1)
         fetchGalleries(1)
@@ -110,6 +136,11 @@ function App() {
     const handleImagePageChange = (page) => {
         setSearchParams({ page: page.toString() })
         fetchImages(page)
+    }
+
+    const handlePersonPageChange = (page) => {
+        setSearchParams({ page: page.toString() })
+        fetchPeople(page)
     }
 
     return (
@@ -134,6 +165,12 @@ function App() {
                         className={({ isActive }) => isActive ? 'active' : ''}
                     >
                         Sources
+                    </NavLink>
+                    <NavLink
+                        to="/people"
+                        className={({ isActive }) => isActive ? 'active' : ''}
+                    >
+                        People
                     </NavLink>
                 </nav>
             </header>
@@ -184,6 +221,15 @@ function App() {
                                 onPageChange={handleSourcePageChange}
                             />
                         } />
+                        <Route path="/people" element={
+                            <PersonList
+                                people={people}
+                                onRefresh={() => fetchPeople(personPage)}
+                                meta={personMeta}
+                                onPageChange={handlePersonPageChange}
+                            />
+                        } />
+                        <Route path="/people/:id" element={<PersonDetail />} />
                     </Routes>
                 )}
             </main>

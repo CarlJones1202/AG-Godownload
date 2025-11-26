@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 	"gallery_api/database"
+	"gallery_api/logger"
 	"gallery_api/models"
 	"net/http"
 	"net/url"
@@ -83,10 +84,10 @@ func CrawlSource(sourceID uint) error {
 	var selection *goquery.Selection
 	if strings.HasPrefix(fragment, "post") {
 		postID := strings.TrimPrefix(fragment, "post")
-		fmt.Printf("Crawling specific post ID: %s\n", postID)
+		logger.Debugf("Crawling specific post ID: %s", postID)
 		selection = doc.Find(fmt.Sprintf("div[id='post_message_%s']", postID))
 	} else {
-		fmt.Println("Crawling first post only")
+		logger.Debug("Crawling first post only")
 		selection = doc.Find("div[id^='post_message_']").First()
 	}
 
@@ -95,7 +96,7 @@ func CrawlSource(sourceID uint) error {
 		s.Find("a img").Each(func(j int, img *goquery.Selection) {
 			// Skip "View Post" images
 			if img.AttrOr("alt", "") == "View Post" {
-				fmt.Printf("Skipping element %d: alt='View Post'\n", j)
+				logger.Debugf("Skipping element %d: alt='View Post'", j)
 				return
 			}
 
@@ -103,10 +104,10 @@ func CrawlSource(sourceID uint) error {
 			a := img.Parent()
 			src, exists := a.Attr("href")
 			if !exists {
-				fmt.Printf("Element %d: No href found\n", j)
+				logger.Debugf("Element %d: No href found", j)
 				return
 			}
-			fmt.Printf("Element %d: Found link %s\n", j, src)
+			logger.Debugf("Element %d: Found link %s", j, src)
 
 			// Launch download in goroutine with semaphore
 			wg.Add(1)
@@ -122,31 +123,31 @@ func CrawlSource(sourceID uint) error {
 				var err error
 				switch {
 				case strings.Contains(src, "imagebam"):
-					fmt.Println("Ripping from ImageBam")
+					logger.Debug("Ripping from ImageBam")
 					imageURL, err = RipImageBam(src)
 				case strings.Contains(src, "imgbox"):
-					fmt.Println("Ripping from ImgBox")
+					logger.Debug("Ripping from ImgBox")
 					imageURL, err = RipImageBox(src)
 				case strings.Contains(src, "imx.to"):
-					fmt.Println("Ripping from Imx.to")
+					logger.Debug("Ripping from Imx.to")
 					imageURL, err = RipImx(imgSrc)
 				case strings.Contains(src, "turboimagehost"):
-					fmt.Println("Ripping from TurboImageHost")
+					logger.Debug("Ripping from TurboImageHost")
 					imageURL, err = RipTurboImg(src)
 				case strings.Contains(src, "vipr.im"):
-					fmt.Println("Ripping from Vipr.im")
+					logger.Debug("Ripping from Vipr.im")
 					imageURL, err = RipViprIm(imgSrc)
 				case strings.Contains(src, "pixhost"):
-					fmt.Println("Ripping from PixHost")
+					logger.Debug("Ripping from PixHost")
 					imageURL, err = RipPixHost(imgSrc)
 				case strings.Contains(src, "acidimg"):
-					fmt.Println("Ripping from AcidImg")
+					logger.Debug("Ripping from AcidImg")
 					imageURL, err = RipAcidImg(imgSrc)
 				case strings.Contains(src, "postimages.org"):
-					fmt.Println("Ripping from PostImages")
+					logger.Debug("Ripping from PostImages")
 					imageURL, err = RipPostImages(src)
 				case strings.Contains(src, "pixxxels.cc") || strings.Contains(src, "freeimage.us"):
-					fmt.Printf("Skipping unsupported host: %s\n", src)
+					logger.Debugf("Skipping unsupported host: %s", src)
 					return
 				default:
 					// If it's a direct image link, use it
@@ -154,24 +155,24 @@ func CrawlSource(sourceID uint) error {
 					if strings.HasSuffix(lowerSrc, ".jpg") || strings.HasSuffix(lowerSrc, ".png") || strings.HasSuffix(lowerSrc, ".jpeg") || strings.HasSuffix(lowerSrc, ".gif") {
 						imageURL = src
 					} else {
-						fmt.Printf("Unknown image source %s\n", src)
+						logger.Debugf("Unknown image source %s", src)
 						return
 					}
 				}
 
 				if err != nil {
-					fmt.Printf("Error ripping %s: %v\n", src, err)
+					logger.Warnf("Error ripping %s: %v", src, err)
 					return
 				}
 
 				if imageURL == "" {
-					fmt.Printf("No image URL extracted from %s\n", src)
+					logger.Debugf("No image URL extracted from %s", src)
 					return
 				}
 
 				// Basic deduplication check (by URL)
 				if existingURLs[imageURL] {
-					fmt.Printf("Image already exists: %s\n", imageURL)
+					logger.Debugf("Image already exists: %s", imageURL)
 					return
 				}
 
@@ -187,7 +188,7 @@ func CrawlSource(sourceID uint) error {
 					if err == nil {
 						break
 					}
-					fmt.Printf("Download attempt %d failed for %s: %v\n", attempt, imageURL, err)
+					logger.Debugf("Download attempt %d failed for %s: %v", attempt, imageURL, err)
 					if attempt < maxRetries {
 						// Exponential backoff
 						time.Sleep(time.Duration(attempt*2) * time.Second)
@@ -195,14 +196,14 @@ func CrawlSource(sourceID uint) error {
 				}
 
 				if err != nil {
-					fmt.Printf("Failed to download %s after %d attempts: %v\n", imageURL, maxRetries, err)
+					logger.Warnf("Failed to download %s after %d attempts: %v", imageURL, maxRetries, err)
 					return
 				}
 
 				// Generate thumbnail
 				_, err = GenerateThumbnail(destPath)
 				if err != nil {
-					fmt.Printf("Failed to generate thumbnail for %s: %v\n", filename, err)
+					logger.Warnf("Failed to generate thumbnail for %s: %v", filename, err)
 				}
 
 				// Save to slice for batch insert
@@ -215,7 +216,7 @@ func CrawlSource(sourceID uint) error {
 				imagesMutex.Lock()
 				imagesToInsert = append(imagesToInsert, image)
 				imagesMutex.Unlock()
-				fmt.Printf("Successfully downloaded and saved image: %s\n", imageURL)
+				logger.Debugf("Successfully downloaded and saved image: %s", imageURL)
 			}(src, img.AttrOr("src", ""))
 		})
 	})
@@ -225,11 +226,11 @@ func CrawlSource(sourceID uint) error {
 
 	// Batch insert all images
 	if len(imagesToInsert) > 0 {
-		fmt.Printf("Batch inserting %d images...\n", len(imagesToInsert))
+		logger.Infof("Batch inserting %d images...", len(imagesToInsert))
 		if err := database.DB.Create(&imagesToInsert).Error; err != nil {
-			fmt.Printf("Failed to batch insert images: %v\n", err)
+			logger.Errorf("Failed to batch insert images: %v", err)
 		} else {
-			fmt.Printf("Successfully inserted %d images\n", len(imagesToInsert))
+			logger.Infof("Successfully inserted %d images", len(imagesToInsert))
 		}
 	}
 
