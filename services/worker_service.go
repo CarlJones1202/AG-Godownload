@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// StartCrawlerWorker starts a background goroutine that periodically checks for sources to crawl
+// StartCrawlerWorker - optimized version
 func StartCrawlerWorker(interval time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)
@@ -18,14 +18,21 @@ func StartCrawlerWorker(interval time.Duration) {
 		for range ticker.C {
 			fmt.Println("Checking for sources to crawl...")
 
-			// Find sources that haven't been checked yet or haven't been checked recently
 			var sources []models.Source
-
-			// Get sources that are idle and either never checked or checked more than 1 hour ago
 			oneHourAgo := time.Now().Add(-1 * time.Hour)
-			database.DB.Where("status = ? AND (last_checked_at IS NULL OR last_checked_at < ?)", "idle", oneHourAgo).
-				Or("status = ?", "").
-				Find(&sources)
+
+			// Use explicit conditions + proper indexing
+			err := database.DB.
+				Where("(status = ? AND (last_checked_at IS NULL OR last_checked_at < ?)) AND deleted_at IS NULL", "idle", oneHourAgo).
+				Or("status = '' AND deleted_at IS NULL").
+				Order("last_checked_at ASC NULLS FIRST"). // important: process oldest first
+				Limit(50).                                // CRITICAL: don't try to crawl 10k sources at once!
+				Find(&sources).Error
+
+			if err != nil {
+				fmt.Printf("Error querying sources: %v\n", err)
+				continue
+			}
 
 			if len(sources) == 0 {
 				fmt.Println("No sources to crawl")
@@ -34,16 +41,12 @@ func StartCrawlerWorker(interval time.Duration) {
 
 			fmt.Printf("Found %d sources to crawl\n", len(sources))
 
-			// Crawl each source
 			for _, source := range sources {
-				fmt.Printf("Crawling source %d: %s\n", source.ID, source.Name)
-
-				// Crawl in a separate goroutine to avoid blocking
-				go func(sourceID uint) {
-					if err := CrawlSource(sourceID); err != nil {
-						fmt.Printf("Error crawling source %d: %v\n", sourceID, err)
+				go func(s models.Source) {
+					if err := CrawlSource(s.ID); err != nil {
+						fmt.Printf("Error crawling source %d (%s): %v\n", s.ID, s.Name, err)
 					}
-				}(source.ID)
+				}(source) // pass by value!
 			}
 		}
 	}()
