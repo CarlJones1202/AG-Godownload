@@ -238,15 +238,31 @@ function PersonDetail() {
                         <div className="search-results">
                             {stashResults.map(performer => (
                                 <div key={performer.id} className="search-result-item">
+                                    <div className="performer-image">
+                                        {performer.images && performer.images.length > 0 ? (
+                                            <img src={performer.images[0].url} alt={performer.name} />
+                                        ) : (
+                                            <div className="no-image">No Image</div>
+                                        )}
+                                    </div>
                                     <div className="performer-info">
-                                        <strong>{performer.name}</strong>
+                                        <div className="performer-header">
+                                            <strong>{performer.name}</strong>
+                                            {performer.disambiguation && (
+                                                <span className="disambiguation">({performer.disambiguation})</span>
+                                            )}
+                                        </div>
+                                        <div className="performer-details">
+                                            {performer.birthdate && performer.birthdate.date && <span>Born: {performer.birthdate.date}</span>}
+                                            {performer.country && <span>Country: {performer.country}</span>}
+                                        </div>
                                         {performer.aliases && performer.aliases.length > 0 && (
                                             <div className="performer-aliases">
-                                                {performer.aliases.join(', ')}
+                                                Aliases: {performer.aliases.join(', ')}
                                             </div>
                                         )}
                                     </div>
-                                    <button onClick={() => handleLinkStash(performer.id)}>Link</button>
+                                    <button onClick={() => handleLinkStash(performer.id)} className="link-btn">Link</button>
                                 </div>
                             ))}
                             {stashResults.length === 0 && !searchingStash && (

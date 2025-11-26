@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"gallery_api/database"
 	"gallery_api/models"
 	"gallery_api/services"
@@ -20,6 +21,7 @@ func SearchStashDB(c *gin.Context) {
 	service := services.NewStashDBService()
 	performers, err := service.SearchPerformers(name)
 	if err != nil {
+		fmt.Printf("StashDB Search Error: %v\n", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to search StashDB: " + err.Error()})
 		return
 	}

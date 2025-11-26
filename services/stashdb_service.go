@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 )
@@ -19,17 +20,29 @@ type GraphQLRequest struct {
 }
 
 type StashPerformer struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	Aliases []string `json:"aliases"`
-	// Add other fields as needed
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Disambiguation string   `json:"disambiguation"`
+	Aliases        []string `json:"aliases"`
+	Gender         string   `json:"gender"`
+	Birthdate      struct {
+		Date string `json:"date"`
+	} `json:"birthdate"`
+	Country   string `json:"country"`
+	Height    int    `json:"height"`
+	HairColor string `json:"hair_color"`
+	EyeColor  string `json:"eye_color"`
+	Ethnicity string `json:"ethnicity"`
+	Images    []struct {
+		URL string `json:"url"`
+	} `json:"images"`
 }
 
 type SearchPerformersResponse struct {
 	Data struct {
-		FindPerformers struct {
+		QueryPerformers struct {
 			Performers []StashPerformer `json:"performers"`
-		} `json:"findPerformers"`
+		} `json:"queryPerformers"`
 	} `json:"data"`
 }
 
@@ -53,11 +66,24 @@ func NewStashDBService() *StashDBService {
 func (s *StashDBService) SearchPerformers(name string) ([]StashPerformer, error) {
 	query := `
 		query SearchPerformers($name: String!) {
-			findPerformers(performer_filter: {name: {value: $name, modifier: CONTAINS}}) {
+			queryPerformers(input: {names: $name, page: 1, per_page: 20}) {
 				performers {
 					id
 					name
+					disambiguation
 					aliases
+					gender
+					birthdate {
+						date
+					}
+					country
+					height
+					hair_color
+					eye_color
+					ethnicity
+					images {
+						url
+					}
 				}
 			}
 		}
@@ -71,7 +97,7 @@ func (s *StashDBService) SearchPerformers(name string) ([]StashPerformer, error)
 		return nil, err
 	}
 
-	return resp.Data.FindPerformers.Performers, nil
+	return resp.Data.QueryPerformers.Performers, nil
 }
 
 func (s *StashDBService) GetPerformer(id string) (*StashPerformer, error) {
@@ -80,7 +106,20 @@ func (s *StashDBService) GetPerformer(id string) (*StashPerformer, error) {
 			findPerformer(id: $id) {
 				id
 				name
+				disambiguation
 				aliases
+				gender
+				birthdate {
+					date
+				}
+				country
+				height
+				hair_color
+				eye_color
+				ethnicity
+				images {
+					url
+				}
 			}
 		}
 	`
@@ -125,7 +164,8 @@ func (s *StashDBService) execute(query string, variables map[string]interface{},
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("stashdb api returned status: %d", resp.StatusCode)
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("stashdb api returned status: %d, body: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(response); err != nil {
