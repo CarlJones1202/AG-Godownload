@@ -177,14 +177,10 @@ func CrawlSource(sourceID uint) error {
 				}
 
 				// Download the actual image with retry logic
-				filename := filepath.Base(imageURL)
-				// Sanitize filename
-				filename = strings.Split(filename, "?")[0]
-
 				var destPath string
 				maxRetries := 3
 				for attempt := 1; attempt <= maxRetries; attempt++ {
-					destPath, err = DownloadImage(imageURL, filename)
+					destPath, err = DownloadImage(imageURL, source.Name)
 					if err == nil {
 						break
 					}
@@ -203,7 +199,7 @@ func CrawlSource(sourceID uint) error {
 				// Generate thumbnail
 				_, err = GenerateThumbnail(destPath)
 				if err != nil {
-					logger.Warnf("Failed to generate thumbnail for %s: %v", filename, err)
+					logger.Warnf("Failed to generate thumbnail: %v", err)
 				}
 
 				// Save to slice for batch insert

@@ -1,10 +1,15 @@
 package services
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/disintegration/imaging"
 )
@@ -20,7 +25,23 @@ func EnsureUploadsDir() error {
 	return nil
 }
 
-func DownloadImage(url string, filename string) (string, error) {
+// SanitizeDirectoryName removes invalid characters from directory names
+func SanitizeDirectoryName(name string) string {
+	// Replace invalid characters with underscores
+	reg := regexp.MustCompile(`[<>:"/\\|?*]`)
+	sanitized := reg.ReplaceAllString(name, "_")
+	// Remove leading/trailing spaces and dots
+	sanitized = strings.Trim(sanitized, " .")
+	// Limit length
+	if len(sanitized) > 100 {
+		sanitized = sanitized[:100]
+	}
+	return sanitized
+}
+
+// DownloadImage downloads an image and saves it with a content-based hash filename
+// in a subdirectory named after the source
+func DownloadImage(url string, sourceName string) (string, error) {
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", err
@@ -31,32 +52,62 @@ func DownloadImage(url string, filename string) (string, error) {
 		return "", fmt.Errorf("failed to download image: status code %d", resp.StatusCode)
 	}
 
-	// Determine extension if not present in filename
-	ext := filepath.Ext(filename)
-	if ext == "" {
-		contentType := resp.Header.Get("Content-Type")
-		switch contentType {
-		case "image/jpeg":
-			ext = ".jpg"
-		case "image/png":
-			ext = ".png"
-		case "image/gif":
-			ext = ".gif"
-		default:
-			// Default to jpg if unknown
-			ext = ".jpg"
-		}
-		filename = filename + ext
+	// Read the entire response body into memory
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
 	}
 
-	destPath := filepath.Join(UploadsDir, filename)
+	// Calculate SHA-256 hash of the content
+	hash := sha256.Sum256(data)
+	hashStr := hex.EncodeToString(hash[:])
+
+	// Determine extension from content type
+	ext := ".jpg" // default
+	contentType := resp.Header.Get("Content-Type")
+	switch contentType {
+	case "image/jpeg":
+		ext = ".jpg"
+	case "image/png":
+		ext = ".png"
+	case "image/gif":
+		ext = ".gif"
+	case "image/webp":
+		ext = ".webp"
+	}
+
+	// Create filename from hash
+	filename := hashStr + ext
+
+	// Sanitize source name for directory
+	sourceDir := SanitizeDirectoryName(sourceName)
+	if sourceDir == "" {
+		sourceDir = "unknown"
+	}
+
+	// Create source subdirectory
+	fullDir := filepath.Join(UploadsDir, sourceDir)
+	if err := os.MkdirAll(fullDir, 0755); err != nil {
+		return "", err
+	}
+
+	// Full path for the image
+	destPath := filepath.Join(fullDir, filename)
+
+	// Check if file already exists (same content hash)
+	if _, err := os.Stat(destPath); err == nil {
+		// File already exists, return the path
+		return destPath, nil
+	}
+
+	// Write the file
 	out, err := os.Create(destPath)
 	if err != nil {
 		return "", err
 	}
 	defer out.Close()
 
-	_, err = out.ReadFrom(resp.Body)
+	_, err = out.Write(data)
 	if err != nil {
 		return "", err
 	}
@@ -73,8 +124,12 @@ func GenerateThumbnail(srcPath string) (string, error) {
 	// Resize to width 200 using Lanczos filter.
 	dst := imaging.Resize(src, 200, 0, imaging.Lanczos)
 
-	// Create thumbnails subdirectory
-	thumbnailDir := filepath.Join(UploadsDir, "thumbnails")
+	// Get the directory structure from source path
+	// srcPath is like "uploads/source_name/hash.jpg"
+	// We want "uploads/source_name/thumbnails/hash.jpg"
+	dir := filepath.Dir(srcPath)
+	thumbnailDir := filepath.Join(dir, "thumbnails")
+
 	if err := os.MkdirAll(thumbnailDir, 0755); err != nil {
 		return "", err
 	}
