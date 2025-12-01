@@ -202,9 +202,18 @@ func LinkPersonToGalleries(c *gin.Context) {
 	}
 
 	// Build search terms (name + aliases)
-	searchTerms := append([]string{strings.ToLower(person.Name)}, aliases...)
-	for i := range searchTerms {
-		searchTerms[i] = strings.ToLower(searchTerms[i])
+	baseTerms := append([]string{person.Name}, aliases...)
+	var searchTerms []string
+
+	for _, term := range baseTerms {
+		term = strings.ToLower(term)
+		searchTerms = append(searchTerms, term)
+
+		// Add variation with hyphens instead of spaces
+		if strings.Contains(term, " ") {
+			searchTerms = append(searchTerms, strings.ReplaceAll(term, " ", "-"))
+			searchTerms = append(searchTerms, strings.ReplaceAll(term, " ", "%20"))
+		}
 	}
 
 	// Find galleries with sources that match any search term
