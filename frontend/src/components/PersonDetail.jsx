@@ -11,6 +11,7 @@ function PersonDetail() {
     const [error, setError] = useState(null)
     const [isEditing, setIsEditing] = useState(false)
     const [editForm, setEditForm] = useState({ name: '', aliases: '' })
+    const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0)
 
     const fetchPerson = useCallback(async () => {
         setLoading(true)
@@ -206,6 +207,82 @@ function PersonDetail() {
                                     <span className="stash-icon">✓</span> Linked to StashDB
                                 </div>
                             )}
+
+                            {/* Photo Carousel */}
+                            {person.photos && (() => {
+                                const photos = JSON.parse(person.photos);
+                                if (photos.length === 0) return null;
+
+                                return (
+                                    <div className="person-photos-section">
+                                        <div className="person-photos-carousel">
+                                            <img
+                                                src={photos[currentPhotoIndex]}
+                                                alt={`${person.name} ${currentPhotoIndex + 1}`}
+                                            />
+                                            {photos.length > 1 && (
+                                                <>
+                                                    <button
+                                                        className="carousel-btn prev"
+                                                        onClick={() => setCurrentPhotoIndex((currentPhotoIndex - 1 + photos.length) % photos.length)}
+                                                    >
+                                                        ‹
+                                                    </button>
+                                                    <button
+                                                        className="carousel-btn next"
+                                                        onClick={() => setCurrentPhotoIndex((currentPhotoIndex + 1) % photos.length)}
+                                                    >
+                                                        ›
+                                                    </button>
+                                                    <div className="carousel-indicators">
+                                                        {photos.map((_, index) => (
+                                                            <button
+                                                                key={index}
+                                                                className={`indicator ${index === currentPhotoIndex ? 'active' : ''}`}
+                                                                onClick={() => setCurrentPhotoIndex(index)}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+
+                            {/* Extended Info */}
+                            {(person.birthdate || person.country || person.ethnicity || person.height || person.measurements || person.hair_color || person.eye_color) && (
+                                <div className="person-extended-info">
+                                    <div className="info-grid">
+                                        {person.birthdate && <div className="info-item"><strong>Born:</strong> {person.birthdate}</div>}
+                                        {person.country && <div className="info-item"><strong>Country:</strong> {person.country}</div>}
+                                        {person.ethnicity && <div className="info-item"><strong>Ethnicity:</strong> {person.ethnicity}</div>}
+                                        {person.height && <div className="info-item"><strong>Height:</strong> {person.height}cm</div>}
+                                        {person.hair_color && <div className="info-item"><strong>Hair:</strong> {person.hair_color}</div>}
+                                        {person.eye_color && <div className="info-item"><strong>Eyes:</strong> {person.eye_color}</div>}
+                                        {person.measurements && <div className="info-item"><strong>Measurements:</strong> {person.measurements}</div>}
+                                    </div>
+
+                                    {(person.tattoos || person.piercings) && (
+                                        <div className="body-mods-section">
+                                            <h3>Body Modifications</h3>
+                                            {person.tattoos && <div className="info-item"><strong>Tattoos:</strong> {person.tattoos}</div>}
+                                            {person.piercings && <div className="info-item"><strong>Piercings:</strong> {person.piercings}</div>}
+                                        </div>
+                                    )}
+
+                                    {(person.twitter || person.instagram) && (
+                                        <div className="social-section">
+                                            <h3>Social Media</h3>
+                                            <div className="social-links">
+                                                {person.twitter && <a href={`https://twitter.com/${person.twitter}`} target="_blank" rel="noopener noreferrer">🐦 Twitter</a>}
+                                                {person.instagram && <a href={`https://instagram.com/${person.instagram}`} target="_blank" rel="noopener noreferrer">📷 Instagram</a>}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
                             {parseAliases(person.aliases).length > 0 && (
                                 <div className="aliases">
                                     {parseAliases(person.aliases).map((alias, i) => (

@@ -138,6 +138,12 @@ function PersonList({ people, onRefresh, meta, onPageChange }) {
                         >
                             <div className="person-info">
                                 <h3>{person.name}</h3>
+                                {(person.country || person.birthdate) && (
+                                    <div className="person-meta">
+                                        {person.country && <span className="meta-tag">🗺️ {person.country}</span>}
+                                        {person.birthdate && <span className="meta-tag">🎂 {person.birthdate}</span>}
+                                    </div>
+                                )}
                                 {parseAliases(person.aliases).length > 0 && (
                                     <div className="aliases">
                                         {parseAliases(person.aliases).map((alias, i) => (

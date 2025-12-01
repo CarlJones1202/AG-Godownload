@@ -7,6 +7,7 @@ import (
 	"gallery_api/models"
 	"gallery_api/services"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -74,6 +75,60 @@ func LinkStashDB(c *gin.Context) {
 	// Update fields
 	person.StashID = performer.ID
 	person.Aliases = string(newAliasesJSON)
+
+	// Store extended data
+	person.Birthdate = performer.Birthdate.Date
+	person.Country = performer.Country
+	person.Ethnicity = performer.Ethnicity
+	person.EyeColor = performer.EyeColor
+	person.HairColor = performer.HairColor
+	person.Height = fmt.Sprintf("%d", performer.Height)
+
+	// Format measurements
+	person.Measurements = fmt.Sprintf("Band: %d, Cup: %s, Waist: %d, Hip: %d",
+		performer.Measurements.BandSize, performer.Measurements.CupSize,
+		performer.Measurements.Waist, performer.Measurements.Hip)
+
+	// Format tattoos
+	var tattoos []string
+	for _, t := range performer.Tattoos {
+		tattoos = append(tattoos, fmt.Sprintf("%s (%s)", t.Description, t.Location))
+	}
+	person.Tattoos = strings.Join(tattoos, "; ")
+
+	// Format piercings
+	var piercings []string
+	for _, p := range performer.Piercings {
+		piercings = append(piercings, fmt.Sprintf("%s (%s)", p.Description, p.Location))
+	}
+	person.Piercings = strings.Join(piercings, "; ")
+
+	// person.Bio = performer.Details // Removed as field is invalid
+
+	// Extract social media
+	for _, u := range performer.URLs {
+		if strings.Contains(strings.ToLower(u.URL), "twitter.com") || strings.Contains(strings.ToLower(u.URL), "x.com") {
+			parts := strings.Split(u.URL, "/")
+			if len(parts) > 0 {
+				person.Twitter = parts[len(parts)-1]
+			}
+		}
+		if strings.Contains(strings.ToLower(u.URL), "instagram.com") {
+			parts := strings.Split(u.URL, "/")
+			if len(parts) > 0 {
+				person.Instagram = parts[len(parts)-1]
+			}
+		}
+	}
+
+	// Store photos
+	var photoURLs []string
+	for _, img := range performer.Images {
+		photoURLs = append(photoURLs, img.URL)
+	}
+	photosJSON, _ := json.Marshal(photoURLs)
+	person.Photos = string(photosJSON)
+
 	// Optionally update name if you want to sync with StashDB
 	// person.Name = performer.Name
 

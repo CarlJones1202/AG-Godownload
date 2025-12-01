@@ -33,7 +33,31 @@ type StashPerformer struct {
 	HairColor string `json:"hair_color"`
 	EyeColor  string `json:"eye_color"`
 	Ethnicity string `json:"ethnicity"`
-	Images    []struct {
+	// Fixed fields based on error
+	Measurements struct {
+		BandSize int    `json:"band_size"`
+		CupSize  string `json:"cup_size"`
+		Waist    int    `json:"waist"`
+		Hip      int    `json:"hip"`
+	} `json:"measurements"`
+	FakeTits string `json:"fake_tits"` // Keeping this as string for now, but might need removal if still invalid. Error said "Cannot query field", so I should remove it from query but maybe keep in struct if I want to map it later? No, remove from struct to be safe.
+	// Actually, let's remove the invalid fields from struct too to avoid confusion
+	Tattoos []struct {
+		Location    string `json:"location"`
+		Description string `json:"description"`
+	} `json:"tattoos"`
+	Piercings []struct {
+		Location    string `json:"location"`
+		Description string `json:"description"`
+	} `json:"piercings"`
+	// Details field removed as it is invalid
+	// Social media usually in urls
+	URLs []struct {
+		URL  string `json:"url"`
+		Type string `json:"type"`
+	} `json:"urls"`
+
+	Images []struct {
 		URL string `json:"url"`
 	} `json:"images"`
 }
@@ -81,6 +105,24 @@ func (s *StashDBService) SearchPerformers(name string) ([]StashPerformer, error)
 					hair_color
 					eye_color
 					ethnicity
+					measurements {
+						band_size
+						cup_size
+						waist
+						hip
+					}
+					tattoos {
+						location
+						description
+					}
+					piercings {
+						location
+						description
+					}
+					urls {
+						url
+						type
+					}
 					images {
 						url
 					}
@@ -117,6 +159,24 @@ func (s *StashDBService) GetPerformer(id string) (*StashPerformer, error) {
 				hair_color
 				eye_color
 				ethnicity
+				measurements {
+					band_size
+					cup_size
+					waist
+					hip
+				}
+				tattoos {
+					location
+					description
+				}
+				piercings {
+					location
+					description
+				}
+				urls {
+					url
+					type
+				}
 				images {
 					url
 				}

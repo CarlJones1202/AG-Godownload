@@ -43,12 +43,27 @@ type Image struct {
 }
 
 type Person struct {
-	ID        uint           `gorm:"primaryKey" json:"id"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
-	Name      string         `gorm:"index" json:"name"`
-	Aliases   string         `json:"aliases"` // JSON array stored as text
-	StashID   string         `gorm:"index" json:"stash_id"`
-	Galleries []*Gallery     `json:"galleries,omitempty" gorm:"many2many:person_galleries;"`
+	ID           uint           `gorm:"primaryKey" json:"id"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
+	Name         string         `gorm:"index" json:"name"`
+	Aliases      string         `json:"aliases"` // JSON array stored as text
+	StashID      string         `gorm:"index" json:"stash_id"`
+	Birthdate    string         `json:"birthdate"`
+	Country      string         `json:"country"`
+	Ethnicity    string         `json:"ethnicity"`
+	EyeColor     string         `json:"eye_color"`
+	HairColor    string         `json:"hair_color"`
+	Height       string         `json:"height"`
+	Measurements string         `json:"measurements"`
+	FakeTits     string         `json:"fake_tits"`
+	CareerLength string         `json:"career_length"`
+	Tattoos      string         `json:"tattoos"`
+	Piercings    string         `json:"piercings"`
+	Bio          string         `json:"bio"`
+	Twitter      string         `json:"twitter"`
+	Instagram    string         `json:"instagram"`
+	Photos       string         `json:"photos"` // JSON array of image URLs
+	Galleries    []*Gallery     `json:"galleries,omitempty" gorm:"many2many:person_galleries;"`
 }

@@ -129,12 +129,28 @@ func GetPerson(c *gin.Context) {
 
 	// Return person with enhanced galleries
 	c.JSON(http.StatusOK, gin.H{
-		"id":         person.ID,
-		"created_at": person.CreatedAt,
-		"updated_at": person.UpdatedAt,
-		"name":       person.Name,
-		"aliases":    person.Aliases,
-		"galleries":  galleryResponses,
+		"id":            person.ID,
+		"created_at":    person.CreatedAt,
+		"updated_at":    person.UpdatedAt,
+		"name":          person.Name,
+		"aliases":       person.Aliases,
+		"stash_id":      person.StashID,
+		"birthdate":     person.Birthdate,
+		"country":       person.Country,
+		"ethnicity":     person.Ethnicity,
+		"eye_color":     person.EyeColor,
+		"hair_color":    person.HairColor,
+		"height":        person.Height,
+		"measurements":  person.Measurements,
+		"fake_tits":     person.FakeTits,
+		"career_length": person.CareerLength,
+		"tattoos":       person.Tattoos,
+		"piercings":     person.Piercings,
+		"bio":           person.Bio,
+		"twitter":       person.Twitter,
+		"instagram":     person.Instagram,
+		"photos":        person.Photos,
+		"galleries":     galleryResponses,
 	})
 }
 
