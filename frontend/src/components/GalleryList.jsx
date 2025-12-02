@@ -113,7 +113,7 @@ function GalleryList({ galleries, onRefresh, meta, onPageChange }) {
                             <div className="gallery-thumbnail">
                                 {gallery.images && gallery.images.length > 0 ? (
                                     <img
-                                        src={`/api/thumbnails/${gallery.images[0].filename}`}
+                                        src={`/api/${gallery.images[0].thumbnail_path}`}
                                         alt={gallery.name}
                                         loading="lazy"
                                     />

@@ -74,11 +74,20 @@ func GetSources(c *gin.Context) {
 	}
 	offset := (page - 1) * limit
 
+	query := database.DB.Model(&models.Source{})
+
+	// Search filter
+	search := c.Query("q")
+	if search != "" {
+		searchPattern := "%" + search + "%"
+		query = query.Where("name LIKE ? OR location LIKE ?", searchPattern, searchPattern)
+	}
+
 	var total int64
-	database.DB.Model(&models.Source{}).Count(&total)
+	query.Count(&total)
 
 	var sources []models.Source
-	if err := database.DB.Limit(limit).Offset(offset).Find(&sources).Error; err != nil {
+	if err := query.Limit(limit).Offset(offset).Find(&sources).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch sources"})
 		return
 	}

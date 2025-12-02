@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"gallery_api/database"
 	"gallery_api/models"
 	"gallery_api/services"
@@ -12,8 +13,6 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-
-	"gorm.io/gorm"
 )
 
 // AddImageToGallery handles downloading an image from a URL and adding it to a gallery
@@ -105,9 +104,31 @@ func GetImages(c *gin.Context) {
 	database.DB.Model(&models.Image{}).Count(&total)
 
 	var images []models.Image
-	if err := database.DB.Preload("Galleries").Limit(limit).Offset(offset).Order("created_at DESC").Find(&images).Error; err != nil {
+	// Preload Galleries.Source to get source name
+	if err := database.DB.Preload("Galleries.Source").Limit(limit).Offset(offset).Order("created_at DESC").Find(&images).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch images"})
 		return
+	}
+
+	// Populate virtual paths
+	for i := range images {
+		sourceName := "uncategorized"
+		if len(images[i].Galleries) > 0 && images[i].Galleries[0].SourceID != nil {
+			// Check if Source is loaded
+			if images[i].Galleries[0].Source.Name != "" {
+				sourceName = images[i].Galleries[0].Source.Name
+			} else {
+				// Fallback if not loaded (should be loaded by Preload)
+				var source models.Source
+				if err := database.DB.First(&source, *images[i].Galleries[0].SourceID).Error; err == nil {
+					sourceName = source.Name
+				}
+			}
+		}
+
+		sanitizedSource := services.SanitizeDirectoryName(sourceName)
+		images[i].WebPath = fmt.Sprintf("/images/%s/%s", sanitizedSource, images[i].Filename)
+		images[i].ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, images[i].Filename)
 	}
 
 	totalPages := int((total + int64(limit) - 1) / int64(limit))
@@ -123,120 +144,80 @@ func GetImages(c *gin.Context) {
 	})
 }
 
-// ServeImage - finds image by filename, determines source name via DB, serves from correct subdir
+// ServeImage - serves image from path provided in URL or falls back to DB lookup
 func ServeImage(c *gin.Context) {
-	filename := c.Param("filename")
+	filepathParam := c.Param("filepath")
 
-	// Security: prevent path traversal
-	if strings.Contains(filename, "/") || strings.Contains(filename, "..") {
+	// Security: prevent path traversal (basic check, filepath.Clean handles more)
+	if strings.Contains(filepathParam, "..") {
 		c.String(http.StatusBadRequest, "Invalid filename")
 		return
 	}
 
-	var image struct {
-		ID         uint
-		Filename   string
-		SourceName string `gorm:"column:source_name"`
+	// Clean the path
+	cleanPath := filepath.Clean(filepathParam)
+	// Remove leading slash if present (filepath.Clean might leave it on unix, but we want relative to uploads)
+	cleanPath = strings.TrimPrefix(cleanPath, "/")
+	cleanPath = strings.TrimPrefix(cleanPath, "\\")
+
+	// Construct full path
+	fullPath := filepath.Join(services.UploadsDir, cleanPath)
+
+	// Verify the path is still within UploadsDir (extra security)
+	absUploads, _ := filepath.Abs(services.UploadsDir)
+	absPath, _ := filepath.Abs(fullPath)
+	if !strings.HasPrefix(absPath, absUploads) {
+		c.String(http.StatusForbidden, "Access denied")
+		return
 	}
 
-	// Find image by filename (hash), join through galleries → source
-	err := database.DB.
-		Model(&models.Image{}).
-		Select(`images.id, images.filename, sources.name AS source_name`).
-		Joins(`JOIN image_galleries ON image_galleries.image_id = images.id`).
-		Joins(`JOIN galleries ON galleries.id = image_galleries.gallery_id`).
-		Joins(`JOIN sources ON sources.id = galleries.source_id`).
-		Where(`images.filename LIKE ? OR images.filename = ?`, "%/"+filename, filename).
-		First(&image).Error
+	if fileExists(fullPath) {
+		c.File(fullPath)
+		return
+	}
 
-	// Fallback: if no source (manual/uncategorized), try root
-	if err == gorm.ErrRecordNotFound {
-		path := filepath.Join(services.UploadsDir, filename)
-		if fileExists(path) {
-			c.File(path)
-			return
+	// Fallback for backward compatibility or if path is just a filename
+	// If the path doesn't contain separators, treat as filename and look up in DB
+	if !strings.Contains(cleanPath, "/") && !strings.Contains(cleanPath, "\\") {
+		filename := cleanPath
+		var image struct {
+			ID         uint
+			Filename   string
+			SourceName string `gorm:"column:source_name"`
 		}
-		c.String(http.StatusNotFound, "Image not found")
-		return
-	}
 
-	if err != nil {
-		c.String(http.StatusInternalServerError, "Database error")
-		return
-	}
+		err := database.DB.
+			Model(&models.Image{}).
+			Select(`images.id, images.filename, sources.name AS source_name`).
+			Joins(`JOIN image_galleries ON image_galleries.image_id = images.id`).
+			Joins(`JOIN galleries ON galleries.id = image_galleries.gallery_id`).
+			Joins(`JOIN sources ON sources.id = galleries.source_id`).
+			Where(`images.filename LIKE ? OR images.filename = ?`, "%/"+filename, filename).
+			First(&image).Error
 
-	// Build path using Source.Name as subdirectory
-	sourceDir := services.SanitizeDirectoryName(image.SourceName)
-	path := filepath.Join(services.UploadsDir, sourceDir, filename)
+		if err == nil {
+			sourceDir := services.SanitizeDirectoryName(image.SourceName)
+			path := filepath.Join(services.UploadsDir, sourceDir, filename)
+			if fileExists(path) {
+				c.File(path)
+				return
+			}
+		}
 
-	if !fileExists(path) {
-		// Last-ditch: try root (in case of migration issues)
+		// Try root
 		rootPath := filepath.Join(services.UploadsDir, filename)
 		if fileExists(rootPath) {
 			c.File(rootPath)
 			return
 		}
-		c.String(http.StatusNotFound, "Image file missing")
-		return
 	}
 
-	c.File(path)
+	c.String(http.StatusNotFound, "Image not found")
 }
 
-// ServeThumbnail - same logic, but for thumbnails
+// ServeThumbnail - Deprecated, handled by ServeImage with nested path
 func ServeThumbnail(c *gin.Context) {
-	filename := c.Param("filename")
-
-	if strings.Contains(filename, "/") || strings.Contains(filename, "..") {
-		c.String(http.StatusBadRequest, "Invalid filename")
-		return
-	}
-
-	var image struct {
-		SourceName string `gorm:"column:source_name"`
-	}
-
-	err := database.DB.
-		Model(&models.Image{}).
-		Select(`sources.name AS source_name`).
-		Joins(`JOIN image_galleries ON image_galleries.image_id = images.id`).
-		Joins(`JOIN galleries ON galleries.id = image_galleries.gallery_id`).
-		Joins(`JOIN sources ON sources.id = galleries.source_id`).
-		Where(`images.filename LIKE ? OR images.filename = ?`, "%/"+filename, filename).
-		First(&image).Error
-
-	if err == gorm.ErrRecordNotFound {
-		// Try old flat thumbnail
-		oldPath := filepath.Join(services.UploadsDir, "thumbnails", filename)
-		if fileExists(oldPath) {
-			c.File(oldPath)
-			return
-		}
-		c.String(http.StatusNotFound, "Thumbnail not found")
-		return
-	}
-
-	if err != nil {
-		c.String(http.StatusInternalServerError, "Database error")
-		return
-	}
-
-	sourceDir := services.SanitizeDirectoryName(image.SourceName)
-	thumbPath := filepath.Join(services.UploadsDir, sourceDir, "thumbnails", filename)
-
-	if fileExists(thumbPath) {
-		c.File(thumbPath)
-		return
-	}
-
-	// Fallback to root thumbnails
-	oldPath := filepath.Join(services.UploadsDir, "thumbnails", filename)
-	if fileExists(oldPath) {
-		c.File(oldPath)
-		return
-	}
-
-	c.String(http.StatusNotFound, "Thumbnail missing")
+	ServeImage(c)
 }
 
 // Helper

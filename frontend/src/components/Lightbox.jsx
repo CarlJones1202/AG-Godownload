@@ -37,7 +37,7 @@ function Lightbox({ image, onClose, onNext, onPrev, currentIndex, totalImages })
 
                 <div className="lightbox-image-container">
                     <img
-                        src={`/api/images/${image.filename}`}
+                        src={image.web_path || `/api/images/${image.filename}`}
                         alt={`Image ${image.id}`}
                     />
                 </div>

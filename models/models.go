@@ -25,21 +25,24 @@ type Gallery struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 	Name      string         `json:"name"`
 	SourceID  *uint          `gorm:"index" json:"source_id"` // Nullable if created manually
+	Source    *Source        `json:"source,omitempty" gorm:"foreignKey:SourceID"`
 	Images    []Image        `json:"images,omitempty" gorm:"foreignKey:GalleryID"`
 	People    []*Person      `json:"people,omitempty" gorm:"many2many:person_galleries;"`
 }
 
 type Image struct {
-	ID          uint           `gorm:"primaryKey" json:"id"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
-	GalleryID   uint           `gorm:"index" json:"gallery_id"` // Deprecated: use Galleries
-	Gallery     *Gallery       `json:"gallery,omitempty" gorm:"foreignKey:GalleryID"`
-	Galleries   []*Gallery     `json:"galleries,omitempty" gorm:"many2many:image_galleries;"`
-	Filename    string         `json:"filename"`
-	OriginalURL string         `gorm:"index" json:"original_url"` // The hosting page URL (e.g., imagebam.com/view/...)
-	DownloadURL string         `json:"download_url"`              // The final direct image URL after ripping
+	ID            uint           `gorm:"primaryKey" json:"id"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+	DeletedAt     gorm.DeletedAt `gorm:"index" json:"-"`
+	GalleryID     uint           `gorm:"index" json:"gallery_id"` // Deprecated: use Galleries
+	Gallery       *Gallery       `json:"gallery,omitempty" gorm:"foreignKey:GalleryID"`
+	Galleries     []*Gallery     `json:"galleries,omitempty" gorm:"many2many:image_galleries;"`
+	Filename      string         `json:"filename"`
+	OriginalURL   string         `gorm:"index" json:"original_url"` // The hosting page URL (e.g., imagebam.com/view/...)
+	DownloadURL   string         `json:"download_url"`              // The final direct image URL after ripping
+	WebPath       string         `gorm:"-" json:"web_path"`
+	ThumbnailPath string         `gorm:"-" json:"thumbnail_path"`
 }
 
 type Person struct {

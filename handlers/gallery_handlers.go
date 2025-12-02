@@ -1,12 +1,14 @@
 package handlers
 
 import (
+	"fmt"
 	"gallery_api/database"
 	"gallery_api/models"
 	"gallery_api/services"
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -42,8 +44,8 @@ func GetGalleries(c *gin.Context) {
 	database.DB.Model(&models.Gallery{}).Count(&total)
 
 	var galleries []models.Gallery
-	// Load galleries without images first
-	if err := database.DB.Limit(limit).Offset(offset).Find(&galleries).Error; err != nil {
+	// Load galleries with Source preloaded
+	if err := database.DB.Preload("Source").Limit(limit).Offset(offset).Find(&galleries).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch galleries"})
 		return
 	}
@@ -63,6 +65,15 @@ func GetGalleries(c *gin.Context) {
 		// Load first image for thumbnail
 		var firstImage models.Image
 		if err := database.DB.Where("gallery_id = ?", galleries[i].ID).Order("created_at ASC").First(&firstImage).Error; err == nil {
+			// Populate path
+			sourceName := "uncategorized"
+			if galleries[i].Source != nil {
+				sourceName = galleries[i].Source.Name
+			}
+			sanitizedSource := services.SanitizeDirectoryName(sourceName)
+			firstImage.WebPath = fmt.Sprintf("/images/%s", firstImage.Filename)
+			firstImage.ThumbnailPath = strings.ReplaceAll(firstImage.Filename, sanitizedSource, fmt.Sprintf("/images/%s/thumbnails", sanitizedSource))
+
 			galleries[i].Images = []models.Image{firstImage}
 		}
 
@@ -88,9 +99,21 @@ func GetGalleries(c *gin.Context) {
 func GetGallery(c *gin.Context) {
 	id := c.Param("id")
 	var gallery models.Gallery
-	if err := database.DB.Preload("Images").First(&gallery, id).Error; err != nil {
+	if err := database.DB.Preload("Source").Preload("Images").First(&gallery, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Gallery not found"})
 		return
+	}
+
+	// Populate paths
+	sourceName := "uncategorized"
+	if gallery.Source != nil {
+		sourceName = gallery.Source.Name
+	}
+	sanitizedSource := services.SanitizeDirectoryName(sourceName)
+
+	for i := range gallery.Images {
+		gallery.Images[i].WebPath = fmt.Sprintf("/images/%s", gallery.Images[i].Filename)
+		gallery.Images[i].ThumbnailPath = strings.ReplaceAll(gallery.Images[i].Filename, sanitizedSource, fmt.Sprintf("/images/%s/thumbnails", sanitizedSource))
 	}
 
 	c.JSON(http.StatusOK, gallery)

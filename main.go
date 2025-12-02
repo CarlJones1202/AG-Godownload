@@ -68,8 +68,8 @@ func main() {
 	r.GET("/images", handlers.GetImages)
 
 	// Static file serving
-	r.GET("/images/:filename", handlers.ServeImage)
-	r.GET("/thumbnails/:filename", handlers.ServeThumbnail)
+	r.GET("/images/*filepath", handlers.ServeImage)
+	// r.GET("/thumbnails/:filename", handlers.ServeThumbnail) // Deprecated
 	r.Static("/person-images", "./uploads/person_images")
 
 	logger.Info("Server starting on :8080")

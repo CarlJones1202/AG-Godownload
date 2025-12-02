@@ -60,7 +60,7 @@ function ImageGrid({ gallery, onRefresh }) {
                         onClick={() => handleImageClick(image, index)}
                     >
                         <img
-                            src={`/api/thumbnails/${image.filename}`}
+                            src={image.thumbnail_path || `/api/thumbnails/${image.filename}`}
                             alt={`Image ${image.id}`}
                             loading="lazy"
                         />

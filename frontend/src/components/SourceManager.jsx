@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import './SourceManager.css'
 
-function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange }) {
+function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, onSearch }) {
     const [showForm, setShowForm] = useState(false)
     const [formData, setFormData] = useState({
         name: '',
@@ -89,11 +89,29 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange }
         }
     }
 
+    // Debounce search
+    const [searchTerm, setSearchTerm] = useState('')
+
+    useEffect(() => {
+        const delayDebounceFn = setTimeout(() => {
+            onSearch(searchTerm)
+        }, 500)
+
+        return () => clearTimeout(delayDebounceFn)
+    }, [searchTerm])
+
     return (
         <div className="source-manager">
             <div className="source-header">
                 <h2>Sources</h2>
-                <div>
+                <div className="source-controls">
+                    <input
+                        type="text"
+                        placeholder="Search sources..."
+                        className="search-input"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                    />
                     <button onClick={onRefresh}>🔄 Refresh</button>
                     <button onClick={() => setShowForm(!showForm)}>
                         {showForm ? 'Cancel' : '+ Add Source'}

@@ -62,10 +62,14 @@ function App() {
         }
     }
 
-    const fetchSources = async (page = 1) => {
-        setLoading(true)
+    const fetchSources = async (page = 1, search = '') => {
+        // Only set global loading if we don't have data yet (initial load)
+        if (sources.length === 0) {
+            setLoading(true)
+        }
         try {
-            const response = await fetch(`/api/sources?page=${page}&limit=50`)
+            const query = search ? `&q=${encodeURIComponent(search)}` : ''
+            const response = await fetch(`/api/sources?page=${page}&limit=50${query}`)
             const result = await response.json()
             if (result.data) {
                 setSources(result.data)
@@ -221,6 +225,7 @@ function App() {
                                 onRefresh={() => fetchSources(sourcePage)}
                                 meta={sourceMeta}
                                 onPageChange={handleSourcePageChange}
+                                onSearch={(query) => fetchSources(1, query)}
                             />
                         } />
                         <Route path="/people" element={
