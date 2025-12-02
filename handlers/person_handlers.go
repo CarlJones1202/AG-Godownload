@@ -50,11 +50,19 @@ func GetPeople(c *gin.Context) {
 	}
 	offset := (page - 1) * limit
 
+	query := c.Query("q")
+
+	db := database.DB.Model(&models.Person{})
+	if query != "" {
+		searchTerm := "%" + strings.ToLower(query) + "%"
+		db = db.Where("LOWER(name) LIKE ?", searchTerm)
+	}
+
 	var total int64
-	database.DB.Model(&models.Person{}).Count(&total)
+	db.Count(&total)
 
 	var people []models.Person
-	if err := database.DB.Limit(limit).Offset(offset).Order("name ASC").Find(&people).Error; err != nil {
+	if err := db.Limit(limit).Offset(offset).Order("name ASC").Find(&people).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch people"})
 		return
 	}

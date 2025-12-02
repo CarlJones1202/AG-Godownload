@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import './SearchBar.css'
 import ColorPicker from './ColorPicker'
+import PersonPicker from './PersonPicker'
 
 function SearchBar({ onSearch, onColorFilter, onPersonFilter }) {
     const [searchText, setSearchText] = useState('')
@@ -88,9 +89,15 @@ function SearchBar({ onSearch, onColorFilter, onPersonFilter }) {
                         <h3>Filter by Person</h3>
                         <button className="close-btn" onClick={() => setShowPersonList(false)}>✕</button>
                     </div>
-                    <div className="dropdown-content">
-                        <p className="placeholder-text">Person list coming soon...</p>
-                        {/* Person list will be implemented here */}
+                    <div className="dropdown-content" style={{ padding: 0 }}>
+                        <PersonPicker
+                            onPersonSelect={(person) => {
+                                setShowPersonList(false)
+                                if (onPersonFilter) {
+                                    onPersonFilter(person)
+                                }
+                            }}
+                        />
                     </div>
                 </div>
             )}

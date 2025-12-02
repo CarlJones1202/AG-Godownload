@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Routes, Route, NavLink, useLocation, useSearchParams } from 'react-router-dom'
+import { Routes, Route, NavLink, useLocation, useSearchParams, useNavigate } from 'react-router-dom'
 import './App.css'
 import GalleryList from './components/GalleryList'
 import SourceManager from './components/SourceManager'
@@ -10,12 +10,15 @@ import SearchBar from './components/SearchBar'
 
 function App() {
     const location = useLocation()
+    const navigate = useNavigate()
     const [searchParams, setSearchParams] = useSearchParams()
     const [galleries, setGalleries] = useState([])
     const [sources, setSources] = useState([])
     const [images, setImages] = useState([])
     const [people, setPeople] = useState([])
     const [loading, setLoading] = useState(true)
+    const [colorSearchActive, setColorSearchActive] = useState(false)
+    const [searchColor, setSearchColor] = useState(null)
 
     // Pagination state
     const [galleryPage, setGalleryPage] = useState(1)
@@ -150,12 +153,42 @@ function App() {
         fetchPeople(page)
     }
 
+    const searchByColor = async (color) => {
+        setLoading(true)
+        setColorSearchActive(true)
+        setSearchColor(color)
+        try {
+            const response = await fetch(`/api/images/search/color?color=${encodeURIComponent(color)}&threshold=30&limit=100`)
+            const result = await response.json()
+            if (result.data) {
+                setImages(result.data)
+                setImageMeta(result.meta)
+                setImagePage(1)
+            } else {
+                setImages([])
+            }
+        } catch (error) {
+            console.error('Failed to search by color:', error)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const clearColorSearch = () => {
+        setColorSearchActive(false)
+        setSearchColor(null)
+        fetchImages(1)
+    }
+
     return (
         <div className="app">
             <header className="app-header">
                 <div className="header-top">
                     <h1>📸 Image Gallery</h1>
-                    <SearchBar />
+                    <SearchBar
+                        onColorFilter={searchByColor}
+                        onPersonFilter={(person) => navigate(`/people/${person.id}`)}
+                    />
                 </div>
                 <nav className="tabs">
                     <NavLink
