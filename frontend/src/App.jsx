@@ -6,6 +6,7 @@ import SourceManager from './components/SourceManager'
 import ImageList from './components/ImageList'
 import PersonList from './components/PersonList'
 import PersonDetail from './components/PersonDetail'
+import SearchBar from './components/SearchBar'
 
 function App() {
     const location = useLocation()
@@ -152,7 +153,10 @@ function App() {
     return (
         <div className="app">
             <header className="app-header">
-                <h1>📸 Image Gallery</h1>
+                <div className="header-top">
+                    <h1>📸 Image Gallery</h1>
+                    <SearchBar />
+                </div>
                 <nav className="tabs">
                     <NavLink
                         to="/galleries"

@@ -124,3 +124,15 @@
 .pagination button:not(:disabled):hover {
     background: #e0e0e0;
 }
+.header-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 2rem;
+    margin-bottom: 1rem;
+}
+
+.app-header h1 {
+    margin: 0;
+    white-space: nowrap;
+}

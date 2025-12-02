@@ -99,7 +99,7 @@ func GetGalleries(c *gin.Context) {
 func GetGallery(c *gin.Context) {
 	id := c.Param("id")
 	var gallery models.Gallery
-	if err := database.DB.Preload("Source").Preload("Images").First(&gallery, id).Error; err != nil {
+	if err := database.DB.Preload("Source").Preload("Images.Galleries").First(&gallery, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Gallery not found"})
 		return
 	}

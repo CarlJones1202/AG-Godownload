@@ -177,10 +177,10 @@ func CrawlSource(sourceID uint) error {
 				}
 
 				// Download the actual image with retry logic
-				var destPath string
+				var result *DownloadImageResult
 				maxRetries := 3
 				for attempt := 1; attempt <= maxRetries; attempt++ {
-					destPath, err = DownloadImage(imageURL, source.Name)
+					result, err = DownloadImage(imageURL, source.Name)
 					if err == nil {
 						break
 					}
@@ -197,17 +197,18 @@ func CrawlSource(sourceID uint) error {
 				}
 
 				// Generate thumbnail
-				_, err = GenerateThumbnail(destPath)
+				_, err = GenerateThumbnail(result.Path)
 				if err != nil {
 					logger.Warnf("Failed to generate thumbnail: %v", err)
 				}
 
 				// Save to slice for batch insert
 				image := models.Image{
-					GalleryID:   gallery.ID,
-					Filename:    filepath.Base(destPath),
-					OriginalURL: src,      // The hosting page URL
-					DownloadURL: imageURL, // The final direct image URL
+					GalleryID:      gallery.ID,
+					Filename:       filepath.Base(result.Path),
+					OriginalURL:    src,      // The hosting page URL
+					DownloadURL:    imageURL, // The final direct image URL
+					DominantColors: result.DominantColors,
 				}
 				imagesMutex.Lock()
 				imagesToInsert = append(imagesToInsert, image)

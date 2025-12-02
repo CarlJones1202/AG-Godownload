@@ -79,6 +79,31 @@ function Lightbox({ image, onClose, onNext, onPrev, currentIndex, totalImages })
                             <label>Created:</label>
                             <span>{new Date(image.created_at).toLocaleDateString()}</span>
                         </div>
+                        {image.dominant_colors && (() => {
+                            try {
+                                const colors = JSON.parse(image.dominant_colors);
+                                if (colors && colors.length > 0) {
+                                    return (
+                                        <div className="metadata-item">
+                                            <label>Dominant Colors:</label>
+                                            <div className="color-palette">
+                                                {colors.map((color, index) => (
+                                                    <div
+                                                        key={index}
+                                                        className="color-swatch"
+                                                        style={{ backgroundColor: color }}
+                                                        title={color}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                }
+                            } catch (e) {
+                                return null;
+                            }
+                            return null;
+                        })()}
                     </div>
                 )}
             </div>

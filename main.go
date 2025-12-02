@@ -11,7 +11,7 @@ import (
 
 func main() {
 	// Initialize Database
-	database.Connect()
+	database.Connect("gallery.db")
 	database.Migrate()
 	database.MigrateData()
 

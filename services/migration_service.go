@@ -82,20 +82,23 @@ func MigrateImagesToNewStructure() error {
 				continue
 			}
 
-			newPath, err := DownloadImage(image.DownloadURL, sourceName)
+			result, err := DownloadImage(image.DownloadURL, sourceName)
 			if err != nil {
 				logger.Errorf("Failed to re-download %s: %v", image.Filename, err)
 				errors++
 				continue
 			}
 
-			_, err = GenerateThumbnail(newPath)
+			_, err = GenerateThumbnail(result.Path)
 			if err != nil {
 				logger.Warnf("Failed to generate thumbnail for %s: %v", image.Filename, err)
 			}
 
-			newFilename := filepath.Base(newPath)
-			if err := database.DB.Model(&models.Image{ID: image.ID}).Update("filename", newFilename).Error; err != nil {
+			newFilename := filepath.Base(result.Path)
+			if err := database.DB.Model(&models.Image{ID: image.ID}).Updates(map[string]interface{}{
+				"filename":        newFilename,
+				"dominant_colors": result.DominantColors,
+			}).Error; err != nil {
 				logger.Errorf("Failed to update filename in database: %v", err)
 				errors++
 				continue
@@ -137,18 +140,21 @@ func MigrateImagesToNewStructure() error {
 			logger.Infof("Hash collision detected for %s, re-downloading to ensure separate copy", image.Filename)
 
 			if image.DownloadURL != "" {
-				freshPath, err := DownloadImage(image.DownloadURL, sourceName)
+				result, err := DownloadImage(image.DownloadURL, sourceName)
 				if err != nil {
 					logger.Errorf("Failed to re-download %s: %v", image.Filename, err)
 					// Fall back: just point to existing file
 					database.DB.Model(&models.Image{ID: image.ID}).Update("filename", filepath.Join(sourceDir, newFilename))
 				} else {
-					_, err = GenerateThumbnail(freshPath)
+					_, err = GenerateThumbnail(result.Path)
 					if err != nil {
 						logger.Warnf("Failed to generate thumbnail: %v", err)
 					}
-					freshFilename := filepath.Base(freshPath)
-					database.DB.Model(&models.Image{ID: image.ID}).Update("filename", freshFilename)
+					freshFilename := filepath.Base(result.Path)
+					database.DB.Model(&models.Image{ID: image.ID}).Updates(map[string]interface{}{
+						"filename":        freshFilename,
+						"dominant_colors": result.DominantColors,
+					})
 					redownloaded++
 				}
 			} else {

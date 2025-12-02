@@ -59,14 +59,14 @@ func AddImageToGallery(c *gin.Context) {
 	}
 
 	// Download image
-	destPath, err := services.DownloadImage(req.URL, sourceName)
+	result, err := services.DownloadImage(req.URL, sourceName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to download image: " + err.Error()})
 		return
 	}
 
 	// Generate thumbnail
-	_, err = services.GenerateThumbnail(destPath)
+	_, err = services.GenerateThumbnail(result.Path)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate thumbnail: " + err.Error()})
 		return
@@ -75,10 +75,11 @@ func AddImageToGallery(c *gin.Context) {
 	// Save to DB
 	image := models.Image{
 		// GalleryID:   uint(galleryID), // Keep for backward compat if needed, but let's try to move to M2M
-		Filename:    filepath.Base(destPath),
-		OriginalURL: req.URL,
-		DownloadURL: req.URL,
-		Galleries:   []*models.Gallery{&gallery},
+		Filename:       filepath.Base(result.Path),
+		OriginalURL:    req.URL,
+		DownloadURL:    req.URL,
+		DominantColors: result.DominantColors,
+		Galleries:      []*models.Gallery{&gallery},
 	}
 	if err := database.DB.Create(&image).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save image record"})

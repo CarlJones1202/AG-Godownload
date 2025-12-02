@@ -10,10 +10,10 @@ import (
 
 var DB *gorm.DB
 
-func Connect() {
+func Connect(dbPath string) {
 	var err error
 	// Use glebarez/sqlite for pure Go implementation
-	DB, err = gorm.Open(sqlite.Open("gallery.db"), &gorm.Config{})
+	DB, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	if err != nil {
 		logger.Fatal("Failed to connect to database:", err)
 	}

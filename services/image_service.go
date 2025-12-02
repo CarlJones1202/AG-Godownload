@@ -39,23 +39,29 @@ func SanitizeDirectoryName(name string) string {
 	return sanitized
 }
 
+// DownloadImageResult contains the result of downloading an image
+type DownloadImageResult struct {
+	Path           string
+	DominantColors string
+}
+
 // DownloadImage downloads an image and saves it with a content-based hash filename
-// in a subdirectory named after the source
-func DownloadImage(url string, sourceName string) (string, error) {
+// in a subdirectory named after the source. Returns the path and extracted colors.
+func DownloadImage(url string, sourceName string) (*DownloadImageResult, error) {
 	resp, err := http.Get(url)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to download image: status code %d", resp.StatusCode)
+		return nil, fmt.Errorf("failed to download image: status code %d", resp.StatusCode)
 	}
 
 	// Read the entire response body into memory
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// Calculate SHA-256 hash of the content
@@ -88,31 +94,43 @@ func DownloadImage(url string, sourceName string) (string, error) {
 	// Create source subdirectory
 	fullDir := filepath.Join(UploadsDir, sourceDir)
 	if err := os.MkdirAll(fullDir, 0755); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// Full path for the image
 	destPath := filepath.Join(fullDir, filename)
 
 	// Check if file already exists (same content hash)
+	fileExists := false
 	if _, err := os.Stat(destPath); err == nil {
-		// File already exists, return the path
-		return destPath, nil
+		fileExists = true
 	}
 
-	// Write the file
-	out, err := os.Create(destPath)
+	if !fileExists {
+		// Write the file
+		out, err := os.Create(destPath)
+		if err != nil {
+			return nil, err
+		}
+		defer out.Close()
+
+		_, err = out.Write(data)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Extract dominant colors
+	colors, err := ExtractDominantColors(destPath)
 	if err != nil {
-		return "", err
-	}
-	defer out.Close()
-
-	_, err = out.Write(data)
-	if err != nil {
-		return "", err
+		// Don't fail the whole operation if color extraction fails
+		colors = "[]"
 	}
 
-	return destPath, nil
+	return &DownloadImageResult{
+		Path:           destPath,
+		DominantColors: colors,
+	}, nil
 }
 
 func GenerateThumbnail(srcPath string) (string, error) {

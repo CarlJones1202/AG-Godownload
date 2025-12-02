@@ -115,14 +115,14 @@ func VerifyDownloadedImages() error {
 
 					// This returns the FINAL path where it saved the file
 					// (e.g. /uploads/MySource/abc123.jpg or whatever it decided)
-					finalPathFromDownloader, err := DownloadImage(t.DownloadURL, t.SourceName)
+					result, err := DownloadImage(t.DownloadURL, t.SourceName)
 					if err != nil {
 						fmt.Printf("[ID %d] Re-download failed: %v\n", t.ID, err)
 						return
 					}
 
 					// --- CRITICAL FIX: ALWAYS force a unique filename in the correct source dir ---
-					ext := filepath.Ext(finalPathFromDownloader)
+					ext := filepath.Ext(result.Path)
 					newFilename := uuid.New().String() + ext
 					correctDir := filepath.Join(UploadsDir, t.SourceName)
 					correctFinalPath := filepath.Join(correctDir, newFilename)
@@ -131,14 +131,14 @@ func VerifyDownloadedImages() error {
 
 					// If DownloadImage already put it in the right place with a UUID → keep it
 					// Otherwise → move + rename to guaranteed-unique name
-					if finalPathFromDownloader != correctFinalPath {
-						if err := os.Rename(finalPathFromDownloader, correctFinalPath); err != nil {
+					if result.Path != correctFinalPath {
+						if err := os.Rename(result.Path, correctFinalPath); err != nil {
 							// If rename fails (e.g. cross-device), fall back to copy+delete
-							if err := copyFile(finalPathFromDownloader, correctFinalPath); err != nil {
+							if err := copyFile(result.Path, correctFinalPath); err != nil {
 								fmt.Printf("[ID %d] Failed to move/copy recovered file: %v\n", t.ID, err)
 								return
 							}
-							os.Remove(finalPathFromDownloader)
+							os.Remove(result.Path)
 						}
 					}
 
@@ -147,7 +147,10 @@ func VerifyDownloadedImages() error {
 
 					if err := database.DB.
 						Model(&models.Image{ID: t.ID}).
-						Update("filename", newRelativePath).Error; err != nil {
+						Updates(map[string]interface{}{
+							"filename":        newRelativePath,
+							"dominant_colors": result.DominantColors,
+						}).Error; err != nil {
 
 						fmt.Printf("[ID %d] Failed to update DB filename: %v\n", t.ID, err)
 					} else {

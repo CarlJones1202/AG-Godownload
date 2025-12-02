@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"gallery_api/database"
 	"gallery_api/models"
+	"gallery_api/services"
 	"net/http"
 	"strconv"
 	"strings"
@@ -73,12 +75,44 @@ func GetPeople(c *gin.Context) {
 			Where("person_galleries.person_id = ?", people[i].ID).
 			Count(&count)
 
-		// Get first photo from photos array
+		// Get first image for thumbnail
 		var thumbnailPath string
+
+		// First, try to get from photos array
 		if people[i].Photos != "" {
 			var photos []string
 			if err := json.Unmarshal([]byte(people[i].Photos), &photos); err == nil && len(photos) > 0 {
 				thumbnailPath = photos[0]
+			}
+		}
+
+		// If no photo in photos array, try to get from first gallery
+		if thumbnailPath == "" {
+			var firstGallery models.Gallery
+			// Find the first gallery for this person that has images
+			err := database.DB.Model(&models.Gallery{}).
+				Joins("JOIN person_galleries ON person_galleries.gallery_id = galleries.id").
+				Where("person_galleries.person_id = ?", people[i].ID).
+				Preload("Source").
+				First(&firstGallery).Error
+
+			if err == nil {
+				var firstImage models.Image
+				if err := database.DB.Where("gallery_id = ?", firstGallery.ID).Order("created_at ASC").First(&firstImage).Error; err == nil {
+					// Determine source name
+					sourceName := "uncategorized"
+					if firstGallery.Source != nil {
+						sourceName = firstGallery.Source.Name
+					} else if firstGallery.SourceID != nil {
+						var source models.Source
+						if err := database.DB.First(&source, *firstGallery.SourceID).Error; err == nil {
+							sourceName = source.Name
+						}
+					}
+
+					sanitizedSource := services.SanitizeDirectoryName(sourceName)
+					thumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, firstImage.Filename)
+				}
 			}
 		}
 
@@ -122,6 +156,9 @@ func GetPerson(c *gin.Context) {
 
 	galleryResponses := make([]GalleryResponse, len(galleries))
 	for i := range galleries {
+		// Preload Source for path generation
+		database.DB.Preload("Source").First(&galleries[i], galleries[i].ID)
+
 		// Get image count
 		var count int64
 		database.DB.Model(&models.Image{}).Where("gallery_id = ?", galleries[i].ID).Count(&count)
@@ -129,6 +166,20 @@ func GetPerson(c *gin.Context) {
 		// Load first image for thumbnail
 		var firstImage models.Image
 		if err := database.DB.Where("gallery_id = ?", galleries[i].ID).Order("created_at ASC").First(&firstImage).Error; err == nil {
+			// Determine source name
+			sourceName := "uncategorized"
+			if galleries[i].Source != nil {
+				sourceName = galleries[i].Source.Name
+			} else if galleries[i].SourceID != nil {
+				var source models.Source
+				if err := database.DB.First(&source, *galleries[i].SourceID).Error; err == nil {
+					sourceName = source.Name
+				}
+			}
+
+			sanitizedSource := services.SanitizeDirectoryName(sourceName)
+			firstImage.WebPath = fmt.Sprintf("/images/%s/%s", sanitizedSource, firstImage.Filename)
+			firstImage.ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, firstImage.Filename)
 			galleries[i].Images = []models.Image{firstImage}
 		}
 

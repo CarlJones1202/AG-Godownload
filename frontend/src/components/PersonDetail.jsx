@@ -367,7 +367,7 @@ function PersonDetail() {
                                     {gallery.images && gallery.images.length > 0 && (
                                         <div className="gallery-thumbnail">
                                             <img
-                                                src={`/api/thumbnails/${gallery.images[0].filename}`}
+                                                src={`/api/${gallery.images[0].thumbnail_path}`}
                                                 alt={gallery.name}
                                                 loading="lazy"
                                             />
