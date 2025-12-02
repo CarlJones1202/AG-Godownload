@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import './SearchBar.css'
+import ColorPicker from './ColorPicker'
 
 function SearchBar({ onSearch, onColorFilter, onPersonFilter }) {
     const [searchText, setSearchText] = useState('')
@@ -68,8 +69,15 @@ function SearchBar({ onSearch, onColorFilter, onPersonFilter }) {
                         <button className="close-btn" onClick={() => setShowColorPicker(false)}>✕</button>
                     </div>
                     <div className="dropdown-content">
-                        <p className="placeholder-text">Color wheel coming soon...</p>
-                        {/* Color wheel will be implemented here */}
+                        <ColorPicker
+                            onColorSelect={(color) => {
+                                console.log('Selected color:', color)
+                                if (onColorFilter) {
+                                    onColorFilter(color)
+                                }
+                                // Keep dropdown open so user can try different colors
+                            }}
+                        />
                     </div>
                 </div>
             )}
