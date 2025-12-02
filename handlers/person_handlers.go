@@ -60,7 +60,8 @@ func GetPeople(c *gin.Context) {
 	// Create response with gallery counts
 	type PersonResponse struct {
 		models.Person
-		GalleryCount int `json:"gallery_count"`
+		GalleryCount  int    `json:"gallery_count"`
+		ThumbnailPath string `json:"thumbnail_path"`
 	}
 
 	personResponses := make([]PersonResponse, len(people))
@@ -72,9 +73,19 @@ func GetPeople(c *gin.Context) {
 			Where("person_galleries.person_id = ?", people[i].ID).
 			Count(&count)
 
+		// Get first photo from photos array
+		var thumbnailPath string
+		if people[i].Photos != "" {
+			var photos []string
+			if err := json.Unmarshal([]byte(people[i].Photos), &photos); err == nil && len(photos) > 0 {
+				thumbnailPath = photos[0]
+			}
+		}
+
 		personResponses[i] = PersonResponse{
-			Person:       people[i],
-			GalleryCount: int(count),
+			Person:        people[i],
+			GalleryCount:  int(count),
+			ThumbnailPath: thumbnailPath,
 		}
 	}
 

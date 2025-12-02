@@ -136,6 +136,17 @@ function PersonList({ people, onRefresh, meta, onPageChange }) {
                             className="person-card"
                             onClick={() => navigate(`/people/${person.id}`)}
                         >
+                            <div className="person-thumbnail">
+                                {person.thumbnail_path ? (
+                                    <img
+                                        src={person.thumbnail_path}
+                                        alt={person.name}
+                                        loading="lazy"
+                                    />
+                                ) : (
+                                    <div className="no-image">👤</div>
+                                )}
+                            </div>
                             <div className="person-info">
                                 <h3>{person.name}</h3>
                                 {(person.country || person.birthdate) && (
