@@ -66,7 +66,7 @@ func main() {
 
 	r.DELETE("/images/:id", handlers.DeleteImage)
 	r.GET("/images", handlers.GetImages)
-	r.GET("/images/search/color", handlers.SearchByColor)
+	r.GET("/search/color", handlers.SearchByColor)
 
 	// Static file serving
 	r.GET("/images/*filepath", handlers.ServeImage)

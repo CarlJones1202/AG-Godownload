@@ -158,7 +158,7 @@ function App() {
         setColorSearchActive(true)
         setSearchColor(color)
         try {
-            const response = await fetch(`/api/images/search/color?color=${encodeURIComponent(color)}&threshold=30&limit=100`)
+            const response = await fetch(`/api/search/color?color=${encodeURIComponent(color)}&threshold=30&limit=100`)
             const result = await response.json()
             if (result.data) {
                 setImages(result.data)

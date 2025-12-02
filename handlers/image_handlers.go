@@ -74,10 +74,24 @@ func AddImageToGallery(c *gin.Context) {
 
 	// Save to DB
 	// Get relative path from uploads directory (e.g., "SourceName/filename.jpg")
-	relPath, err := filepath.Rel(services.UploadsDir, result.Path)
-	if err != nil {
-		// Fallback to just filename if Rel fails
-		relPath = filepath.Join(sourceName, filepath.Base(result.Path))
+	// Get relative path from uploads directory (e.g., "SourceName/filename.jpg")
+	// Manually strip UploadsDir prefix to be safe and consistent
+	relPath := result.Path
+	// Handle both separator types to be safe
+	prefix := services.UploadsDir + string(os.PathSeparator)
+	if strings.HasPrefix(relPath, prefix) {
+		relPath = strings.TrimPrefix(relPath, prefix)
+	} else if strings.HasPrefix(relPath, services.UploadsDir+"/") {
+		relPath = strings.TrimPrefix(relPath, services.UploadsDir+"/")
+	} else if strings.HasPrefix(relPath, services.UploadsDir+"\\") {
+		relPath = strings.TrimPrefix(relPath, services.UploadsDir+"\\")
+	} else {
+		// Fallback: construct from source name and filename
+		sanitizedSource := services.SanitizeDirectoryName(sourceName)
+		if sanitizedSource == "" {
+			sanitizedSource = "unknown"
+		}
+		relPath = filepath.Join(sanitizedSource, filepath.Base(result.Path))
 	}
 
 	image := models.Image{
