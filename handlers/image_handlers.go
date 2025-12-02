@@ -73,9 +73,16 @@ func AddImageToGallery(c *gin.Context) {
 	}
 
 	// Save to DB
+	// Get relative path from uploads directory (e.g., "SourceName/filename.jpg")
+	relPath, err := filepath.Rel(services.UploadsDir, result.Path)
+	if err != nil {
+		// Fallback to just filename if Rel fails
+		relPath = filepath.Join(sourceName, filepath.Base(result.Path))
+	}
+
 	image := models.Image{
 		// GalleryID:   uint(galleryID), // Keep for backward compat if needed, but let's try to move to M2M
-		Filename:       filepath.Base(result.Path),
+		Filename:       relPath,
 		OriginalURL:    req.URL,
 		DownloadURL:    req.URL,
 		DominantColors: result.DominantColors,
