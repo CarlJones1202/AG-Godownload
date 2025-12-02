@@ -70,6 +70,7 @@ func main() {
 	// Static file serving
 	r.GET("/images/:filename", handlers.ServeImage)
 	r.GET("/thumbnails/:filename", handlers.ServeThumbnail)
+	r.Static("/person-images", "./uploads/person_images")
 
 	logger.Info("Server starting on :8080")
 	r.Run(":8080")

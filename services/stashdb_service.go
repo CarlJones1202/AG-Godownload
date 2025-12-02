@@ -68,12 +68,18 @@ type SearchPerformersResponse struct {
 			Performers []StashPerformer `json:"performers"`
 		} `json:"queryPerformers"`
 	} `json:"data"`
+	Errors []struct {
+		Message string `json:"message"`
+	} `json:"errors"`
 }
 
 type GetPerformerResponse struct {
 	Data struct {
 		FindPerformer StashPerformer `json:"findPerformer"`
 	} `json:"data"`
+	Errors []struct {
+		Message string `json:"message"`
+	} `json:"errors"`
 }
 
 func NewStashDBService() *StashDBService {
@@ -81,9 +87,15 @@ func NewStashDBService() *StashDBService {
 	if endpoint == "" {
 		endpoint = "https://stashdb.org/graphql"
 	}
+	apiKey := os.Getenv("STASHDB_API_KEY")
+	if apiKey != "" {
+		fmt.Println("StashDB Service: API Key found")
+	} else {
+		fmt.Println("StashDB Service: API Key NOT found")
+	}
 	return &StashDBService{
 		Endpoint: endpoint,
-		APIKey:   os.Getenv("STASHDB_API_KEY"),
+		APIKey:   apiKey,
 	}
 }
 
@@ -139,6 +151,10 @@ func (s *StashDBService) SearchPerformers(name string) ([]StashPerformer, error)
 		return nil, err
 	}
 
+	if len(resp.Errors) > 0 {
+		return nil, fmt.Errorf("graphql error: %s", resp.Errors[0].Message)
+	}
+
 	return resp.Data.QueryPerformers.Performers, nil
 }
 
@@ -190,6 +206,10 @@ func (s *StashDBService) GetPerformer(id string) (*StashPerformer, error) {
 	var resp GetPerformerResponse
 	if err := s.execute(query, variables, &resp); err != nil {
 		return nil, err
+	}
+
+	if len(resp.Errors) > 0 {
+		return nil, fmt.Errorf("graphql error: %s", resp.Errors[0].Message)
 	}
 
 	return &resp.Data.FindPerformer, nil

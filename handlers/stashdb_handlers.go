@@ -121,16 +121,23 @@ func LinkStashDB(c *gin.Context) {
 		}
 	}
 
-	// Store photos
+	// Download and store images
 	var photoURLs []string
-	for _, img := range performer.Images {
-		photoURLs = append(photoURLs, img.URL)
-	}
-	photosJSON, _ := json.Marshal(photoURLs)
-	person.Photos = string(photosJSON)
+	personIDUint := person.ID
 
-	// Optionally update name if you want to sync with StashDB
-	// person.Name = performer.Name
+	for _, img := range performer.Images {
+		localPath, err := services.DownloadPersonImage(img.URL, personIDUint)
+		if err != nil {
+			fmt.Printf("Failed to download image %s: %v\n", img.URL, err)
+			continue
+		}
+		photoURLs = append(photoURLs, localPath)
+	}
+
+	if len(photoURLs) > 0 {
+		photosJSON, _ := json.Marshal(photoURLs)
+		person.Photos = string(photosJSON)
+	}
 
 	if err := database.DB.Save(&person).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update person"})

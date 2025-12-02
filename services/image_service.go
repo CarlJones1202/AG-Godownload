@@ -146,3 +146,59 @@ func GenerateThumbnail(srcPath string) (string, error) {
 
 	return thumbPath, nil
 }
+
+// DownloadPersonImage downloads an image for a person and saves it to a specific directory
+func DownloadPersonImage(url string, personID uint) (string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to download image: status code %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	// Calculate hash for filename
+	hash := sha256.Sum256(data)
+	hashStr := hex.EncodeToString(hash[:])
+
+	// Determine extension
+	ext := ".jpg"
+	contentType := resp.Header.Get("Content-Type")
+	switch contentType {
+	case "image/jpeg":
+		ext = ".jpg"
+	case "image/png":
+		ext = ".png"
+	case "image/gif":
+		ext = ".gif"
+	case "image/webp":
+		ext = ".webp"
+	}
+
+	filename := hashStr + ext
+
+	// Create person-specific directory: uploads/person_images/{id}
+	personDir := filepath.Join(UploadsDir, "person_images", fmt.Sprintf("%d", personID))
+	if err := os.MkdirAll(personDir, 0755); err != nil {
+		return "", err
+	}
+
+	destPath := filepath.Join(personDir, filename)
+
+	// Write file if it doesn't exist
+	if _, err := os.Stat(destPath); os.IsNotExist(err) {
+		if err := os.WriteFile(destPath, data, 0644); err != nil {
+			return "", err
+		}
+	}
+
+	// Return web-accessible path
+	return fmt.Sprintf("/person-images/%d/%s", personID, filename), nil
+}
