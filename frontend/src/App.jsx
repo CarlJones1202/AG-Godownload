@@ -4,6 +4,7 @@ import './App.css'
 import GalleryList from './components/GalleryList'
 import SourceManager from './components/SourceManager'
 import ImageList from './components/ImageList'
+import VideoList from './components/VideoList'
 import PersonList from './components/PersonList'
 import PersonDetail from './components/PersonDetail'
 import SearchBar from './components/SearchBar'
@@ -15,6 +16,7 @@ function App() {
     const [galleries, setGalleries] = useState([])
     const [sources, setSources] = useState([])
     const [images, setImages] = useState([])
+    const [videos, setVideos] = useState([])
     const [people, setPeople] = useState([])
     const [loading, setLoading] = useState(true)
     const [colorSearchActive, setColorSearchActive] = useState(false)
@@ -27,6 +29,8 @@ function App() {
     const [sourceMeta, setSourceMeta] = useState({ total_pages: 1, current_page: 1 })
     const [imagePage, setImagePage] = useState(1)
     const [imageMeta, setImageMeta] = useState({ total_pages: 1, current_page: 1 })
+    const [videoPage, setVideoPage] = useState(1)
+    const [videoMeta, setVideoMeta] = useState({ total_pages: 1, current_page: 1 })
     const [personPage, setPersonPage] = useState(1)
     const [personMeta, setPersonMeta] = useState({ total_pages: 1, current_page: 1 })
 
@@ -40,6 +44,8 @@ function App() {
             fetchSources(pageFromUrl)
         } else if (location.pathname === '/images') {
             fetchImages(pageFromUrl)
+        } else if (location.pathname === '/videos') {
+            fetchVideos(pageFromUrl)
         } else if (location.pathname === '/people') {
             fetchPeople(pageFromUrl)
         } else {
@@ -127,6 +133,25 @@ function App() {
         }
     }
 
+    const fetchVideos = async (page = 1) => {
+        setLoading(true)
+        try {
+            const response = await fetch(`/api/images?type=video&page=${page}&limit=50`)
+            const result = await response.json()
+            if (result.data) {
+                setVideos(result.data)
+                setVideoMeta(result.meta)
+                setVideoPage(page)
+            } else {
+                setVideos(result || [])
+            }
+        } catch (error) {
+            console.error('Failed to fetch videos:', error)
+        } finally {
+            setLoading(false)
+        }
+    }
+
     const handleSourceAdded = () => {
         fetchSources(1)
         fetchGalleries(1)
@@ -146,6 +171,11 @@ function App() {
     const handleImagePageChange = (page) => {
         setSearchParams({ page: page.toString() })
         fetchImages(page)
+    }
+
+    const handleVideoPageChange = (page) => {
+        setSearchParams({ page: page.toString() })
+        fetchVideos(page)
     }
 
     const handlePersonPageChange = (page) => {
@@ -204,6 +234,12 @@ function App() {
                         Images
                     </NavLink>
                     <NavLink
+                        to="/videos"
+                        className={({ isActive }) => isActive ? 'active' : ''}
+                    >
+                        Videos
+                    </NavLink>
+                    <NavLink
                         to="/sources"
                         className={({ isActive }) => isActive ? 'active' : ''}
                     >
@@ -253,6 +289,14 @@ function App() {
                                 onRefresh={() => fetchImages(imagePage)}
                                 meta={imageMeta}
                                 onPageChange={handleImagePageChange}
+                            />
+                        } />
+                        <Route path="/videos" element={
+                            <VideoList
+                                videos={videos}
+                                onRefresh={() => fetchVideos(videoPage)}
+                                meta={videoMeta}
+                                onPageChange={handleVideoPageChange}
                             />
                         } />
                         <Route path="/sources" element={

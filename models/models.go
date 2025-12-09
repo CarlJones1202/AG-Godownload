@@ -43,7 +43,8 @@ type Image struct {
 	DownloadURL    string         `json:"download_url"`              // The final direct image URL after ripping
 	WebPath        string         `gorm:"-" json:"web_path"`
 	ThumbnailPath  string         `gorm:"-" json:"thumbnail_path"`
-	DominantColors string         `json:"dominant_colors"` // JSON array of hex color strings
+	DominantColors string         `json:"dominant_colors"`             // JSON array of hex color strings
+	Type           string         `json:"type" gorm:"default:'image'"` // "image" or "video"
 }
 
 type Person struct {

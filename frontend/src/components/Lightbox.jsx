@@ -36,10 +36,19 @@ function Lightbox({ image, onClose, onNext, onPrev, currentIndex, totalImages })
                 </button>
 
                 <div className="lightbox-image-container">
-                    <img
-                        src={image.web_path || `/api/images/${image.filename}`}
-                        alt={`Image ${image.id}`}
-                    />
+                    {(image.type === 'video' || (typeof isVideo !== 'undefined' && isVideo)) ? (
+                        <video
+                            src={image.web_path || `/api/images/${image.filename}`}
+                            controls
+                            autoPlay
+                            style={{ maxHeight: '100%', maxWidth: '100%' }}
+                        />
+                    ) : (
+                        <img
+                            src={image.web_path || `/api/images/${image.filename}`}
+                            alt={`Image ${image.id}`}
+                        />
+                    )}
                 </div>
 
                 <button className="lightbox-nav lightbox-next" onClick={onNext}>

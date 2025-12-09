@@ -109,11 +109,21 @@ func GetImages(c *gin.Context) {
 	offset := (page - 1) * limit
 
 	var total int64
-	database.DB.Model(&models.Image{}).Count(&total)
+	query := database.DB.Model(&models.Image{})
+
+	filterType := c.Query("type")
+	if filterType == "" {
+		filterType = "image" // Default to showing only images to preserve backward compat
+	}
+	if filterType != "all" {
+		query = query.Where("type = ?", filterType)
+	}
+
+	query.Count(&total)
 
 	var images []models.Image
 	// Preload Galleries.Source to get source name
-	if err := database.DB.Preload("Galleries.Source").Limit(limit).Offset(offset).Order("created_at DESC").Find(&images).Error; err != nil {
+	if err := query.Preload("Galleries.Source").Limit(limit).Offset(offset).Order("created_at DESC").Find(&images).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch images"})
 		return
 	}

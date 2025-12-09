@@ -159,6 +159,18 @@ function PersonDetail() {
 
     const galleries = person.galleries || []
 
+    // enhance galleries with separate lists for videos and existing galleries
+    const videoGalleries = []
+    const photoGalleries = []
+
+    galleries.forEach(g => {
+        if (g.images && g.images.length > 0 && g.images[0].type === 'video') {
+            videoGalleries.push(g)
+        } else {
+            photoGalleries.push(g)
+        }
+    })
+
     return (
         <div className="person-detail">
             <div className="person-detail-header">
@@ -352,16 +364,61 @@ function PersonDetail() {
                 </div>
             )}
 
+            {/* Videos Section */}
+            {videoGalleries.length > 0 && (
+                <div className="person-galleries">
+                    <h2>Videos ({videoGalleries.length})</h2>
+                    <div className="galleries-grid">
+                        {videoGalleries.map((gallery) => (
+                            <div key={gallery.id} className="gallery-card">
+                                <div className="gallery-content" onClick={() => navigate(`/galleries/${gallery.id}`)}>
+                                    <div className="gallery-thumbnail video-thumbnail">
+                                        {gallery.images && gallery.images.length > 0 ? (
+                                            <div className="video-thumb-container">
+                                                <img
+                                                    src={`/api/${gallery.images[0].thumbnail_path}`}
+                                                    alt={gallery.name}
+                                                    loading="lazy"
+                                                    onError={(e) => {
+                                                        e.target.onerror = null;
+                                                        e.target.src = "https://via.placeholder.com/200x200?text=No+Thumb"
+                                                    }}
+                                                />
+                                                <div className="play-icon-overlay">▶</div>
+                                            </div>
+                                        ) : (
+                                            <div className="no-image">No Video</div>
+                                        )}
+                                    </div>
+                                    <div className="gallery-info">
+                                        <h3>{gallery.name}</h3>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={(e) => handleUnlinkGallery(gallery.id, e)}
+                                    className="unlink-btn"
+                                    title="Unlink video"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
             <div className="person-galleries">
-                <h2>Galleries ({galleries.length})</h2>
-                {galleries.length === 0 ? (
+                <h2>Galleries ({photoGalleries.length})</h2>
+                {photoGalleries.length === 0 ? (
                     <div className="no-galleries">
-                        <p>No galleries linked to this person yet.</p>
-                        <p>Click "Link" on the People page to automatically find matching galleries.</p>
+                        <p>No photo galleries linked to this person.</p>
+                        {videoGalleries.length === 0 && (
+                            <p>Click "Link" on the People page to automatically find matching content.</p>
+                        )}
                     </div>
                 ) : (
                     <div className="galleries-grid">
-                        {galleries.map((gallery) => (
+                        {photoGalleries.map((gallery) => (
                             <div key={gallery.id} className="gallery-card">
                                 <div className="gallery-content" onClick={() => navigate(`/galleries/${gallery.id}`)}>
                                     {gallery.images && gallery.images.length > 0 && (

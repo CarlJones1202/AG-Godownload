@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -160,6 +161,39 @@ func GenerateThumbnail(srcPath string) (string, error) {
 	err = imaging.Save(dst, thumbPath, imaging.JPEGQuality(80))
 	if err != nil {
 		return "", err
+	}
+
+	return thumbPath, nil
+}
+
+// GenerateVideoThumbnail generates a thumbnail for a video file using ffmpeg
+func GenerateVideoThumbnail(srcPath string) (string, error) {
+	// Get the directory structure from source path
+	dir := filepath.Dir(srcPath)
+	thumbnailDir := filepath.Join(dir, "thumbnails")
+
+	if err := os.MkdirAll(thumbnailDir, 0755); err != nil {
+		return "", err
+	}
+
+	// Use same filename as original + .jpg
+	filename := filepath.Base(srcPath) + ".jpg"
+	thumbPath := filepath.Join(thumbnailDir, filename)
+
+	// Check if thumbnail already exists
+	if _, err := os.Stat(thumbPath); err == nil {
+		return thumbPath, nil
+	}
+
+	// Use ffmpeg to extract a frame at 5 seconds or 10%?
+	// Let's try 00:00:01 for now to likely hit content but not black start
+	// -vframes 1: output one frame
+	// -ss 1: seek to 1 second
+	cmd := exec.Command("ffmpeg", "-y", "-i", srcPath, "-ss", "00:00:01", "-vframes", "1", thumbPath)
+
+	// Capture output in case of error
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("ffmpeg failed: %w, output: %s", err, string(output))
 	}
 
 	return thumbPath, nil

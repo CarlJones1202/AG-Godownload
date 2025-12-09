@@ -38,6 +38,16 @@ func CrawlSource(sourceID uint) error {
 		}
 	}
 
+	// Check if source is a local file
+	if IsVideoFile(source.Location) || IsLocalPath(source.Location) {
+		logger.Infof("Processing local source: %s", source.Location)
+		if err := ProcessLocalSource(source); err != nil {
+			database.DB.Model(&source).Update("Status", "error")
+			return err
+		}
+		return nil
+	}
+
 	// Fetch the URL
 	resp, err := http.Get(source.Location)
 	if err != nil {
