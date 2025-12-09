@@ -219,6 +219,7 @@ func CrawlSource(sourceID uint) error {
 					OriginalURL:    src,      // The hosting page URL
 					DownloadURL:    imageURL, // The final direct image URL
 					DominantColors: result.DominantColors,
+					Galleries:      []*models.Gallery{&gallery},
 				}
 				imagesMutex.Lock()
 				imagesToInsert = append(imagesToInsert, image)
@@ -234,10 +235,28 @@ func CrawlSource(sourceID uint) error {
 	// Batch insert all images
 	if len(imagesToInsert) > 0 {
 		logger.Infof("Batch inserting %d images...", len(imagesToInsert))
-		if err := database.DB.Create(&imagesToInsert).Error; err != nil {
+
+		// First, create the images without associations
+		// We need to clear the Galleries field temporarily for batch insert
+		imagesWithoutAssoc := make([]models.Image, len(imagesToInsert))
+		for i := range imagesToInsert {
+			imagesWithoutAssoc[i] = imagesToInsert[i]
+			imagesWithoutAssoc[i].Galleries = nil
+		}
+
+		if err := database.DB.Create(&imagesWithoutAssoc).Error; err != nil {
 			logger.Errorf("Failed to batch insert images: %v", err)
 		} else {
-			logger.Infof("Successfully inserted %d images", len(imagesToInsert))
+			logger.Infof("Successfully inserted %d images", len(imagesWithoutAssoc))
+
+			// Now update the M2M associations
+			for i := range imagesWithoutAssoc {
+				if len(imagesToInsert[i].Galleries) > 0 {
+					if err := database.DB.Model(&imagesWithoutAssoc[i]).Association("Galleries").Append(imagesToInsert[i].Galleries); err != nil {
+						logger.Warnf("Failed to associate image %d with gallery: %v", imagesWithoutAssoc[i].ID, err)
+					}
+				}
+			}
 		}
 	}
 

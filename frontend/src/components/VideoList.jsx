@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import Lightbox from './Lightbox'
+import VideoPlayer from './VideoPlayer'
 // Use ImageList CSS for now as it's a grid
 import './ImageList.css'
 
@@ -107,12 +107,11 @@ function VideoList({ videos, onRefresh, meta, onPageChange }) {
             )}
 
             {lightboxVideo && (
-                <Lightbox
-                    image={lightboxVideo}
+                <VideoPlayer
+                    video={lightboxVideo}
                     onClose={closeLightbox}
                     onNext={nextVideo}
                     onPrev={prevVideo}
-                    isVideo={true} // Hint to Lightbox to render video
                 />
             )}
         </div>

@@ -114,3 +114,25 @@
     transform: scale(1.1);
     background: rgba(211, 47, 47, 1);
 }
+
+/* Video-specific styles */
+.video-thumbnail {
+    position: relative;
+}
+
+.play-icon-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 3rem;
+    color: white;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+    pointer-events: none;
+    opacity: 0.9;
+    transition: opacity 0.2s ease;
+}
+
+.image-card:hover .play-icon-overlay {
+    opacity: 1;
+}

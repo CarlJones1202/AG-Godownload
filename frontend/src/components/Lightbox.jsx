@@ -42,7 +42,15 @@ function Lightbox({ image, onClose, onNext, onPrev, currentIndex, totalImages })
                             controls
                             autoPlay
                             style={{ maxHeight: '100%', maxWidth: '100%' }}
-                        />
+                        >
+                            {image.trickplay_vtt && (
+                                <track
+                                    kind="metadata"
+                                    src={image.trickplay_vtt}
+                                    default
+                                />
+                            )}
+                        </video>
                     ) : (
                         <img
                             src={image.web_path || `/api/images/${image.filename}`}

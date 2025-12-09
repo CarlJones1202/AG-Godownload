@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
@@ -253,4 +254,89 @@ func DownloadPersonImage(url string, personID uint) (string, error) {
 
 	// Return web-accessible path
 	return fmt.Sprintf("/person-images/%d/%s", personID, filename), nil
+}
+
+// GenerateTrickplayData generates a sprite sheet and VTT file for video scrubbing previews
+func GenerateTrickplayData(srcPath string) error {
+	// Get the directory structure from source path
+	dir := filepath.Dir(srcPath)
+	trickplayDir := filepath.Join(dir, "trickplay")
+
+	if err := os.MkdirAll(trickplayDir, 0755); err != nil {
+		return err
+	}
+
+	// Base filename without extension
+	baseFilename := strings.TrimSuffix(filepath.Base(srcPath), filepath.Ext(srcPath))
+
+	// Temporary directory for individual thumbnails
+	tempDir := filepath.Join(trickplayDir, "temp_"+baseFilename)
+	if err := os.MkdirAll(tempDir, 0755); err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempDir) // Clean up temp files
+
+	// Step 1: Extract thumbnails every 5 seconds at 160x90 resolution
+	thumbPattern := filepath.Join(tempDir, "thumb_%04d.jpg")
+	extractCmd := exec.Command("ffmpeg", "-i", srcPath, "-vf", "fps=1/5,scale=160:90", thumbPattern)
+
+	if output, err := extractCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to extract thumbnails: %w, output: %s", err, string(output))
+	}
+
+	// Step 2: Count how many thumbnails were created
+	thumbFiles, err := filepath.Glob(filepath.Join(tempDir, "thumb_*.jpg"))
+	if err != nil || len(thumbFiles) == 0 {
+		return fmt.Errorf("no thumbnails generated")
+	}
+
+	// Step 3: Calculate grid dimensions (try to make it roughly square)
+	totalThumbs := len(thumbFiles)
+	cols := int(math.Ceil(math.Sqrt(float64(totalThumbs))))
+	rows := int(math.Ceil(float64(totalThumbs) / float64(cols)))
+
+	// Step 4: Create sprite sheet using tile filter
+	spriteFile := filepath.Join(trickplayDir, baseFilename+"_sprite.jpg")
+	tileFilter := fmt.Sprintf("tile=%dx%d", cols, rows)
+
+	spriteCmd := exec.Command("ffmpeg", "-y", "-i", thumbPattern, "-filter_complex", tileFilter, spriteFile)
+	if output, err := spriteCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to create sprite: %w, output: %s", err, string(output))
+	}
+
+	// Step 5: Generate VTT file
+	vttFile := filepath.Join(trickplayDir, baseFilename+".vtt")
+	vttContent := "WEBVTT\n\n"
+
+	thumbWidth := 160
+	thumbHeight := 90
+	interval := 5.0 // seconds per thumbnail
+
+	for i := 0; i < totalThumbs; i++ {
+		startTime := float64(i) * interval
+		endTime := startTime + interval
+
+		row := i / cols
+		col := i % cols
+		x := col * thumbWidth
+		y := row * thumbHeight
+
+		vttContent += fmt.Sprintf("%s --> %s\n", formatVTTTime(startTime), formatVTTTime(endTime))
+		vttContent += fmt.Sprintf("%s_sprite.jpg#xywh=%d,%d,%d,%d\n\n", baseFilename, x, y, thumbWidth, thumbHeight)
+	}
+
+	if err := os.WriteFile(vttFile, []byte(vttContent), 0644); err != nil {
+		return fmt.Errorf("failed to write VTT file: %w", err)
+	}
+
+	return nil
+}
+
+// formatVTTTime formats seconds into VTT timestamp format (HH:MM:SS.mmm)
+func formatVTTTime(seconds float64) string {
+	hours := int(seconds) / 3600
+	minutes := (int(seconds) % 3600) / 60
+	secs := int(seconds) % 60
+	millis := int((seconds - float64(int(seconds))) * 1000)
+	return fmt.Sprintf("%02d:%02d:%02d.%03d", hours, minutes, secs, millis)
 }

@@ -31,20 +31,22 @@ type Gallery struct {
 }
 
 type Image struct {
-	ID             uint           `gorm:"primaryKey" json:"id"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
-	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
-	GalleryID      uint           `gorm:"index" json:"gallery_id"` // Deprecated: use Galleries
-	Gallery        *Gallery       `json:"gallery,omitempty" gorm:"foreignKey:GalleryID"`
-	Galleries      []*Gallery     `json:"galleries,omitempty" gorm:"many2many:image_galleries;"`
-	Filename       string         `json:"filename"`
-	OriginalURL    string         `gorm:"index" json:"original_url"` // The hosting page URL (e.g., imagebam.com/view/...)
-	DownloadURL    string         `json:"download_url"`              // The final direct image URL after ripping
-	WebPath        string         `gorm:"-" json:"web_path"`
-	ThumbnailPath  string         `gorm:"-" json:"thumbnail_path"`
-	DominantColors string         `json:"dominant_colors"`             // JSON array of hex color strings
-	Type           string         `json:"type" gorm:"default:'image'"` // "image" or "video"
+	ID              uint           `gorm:"primaryKey" json:"id"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`
+	GalleryID       uint           `gorm:"index" json:"gallery_id"` // Deprecated: use Galleries
+	Gallery         *Gallery       `json:"gallery,omitempty" gorm:"foreignKey:GalleryID"`
+	Galleries       []*Gallery     `json:"galleries,omitempty" gorm:"many2many:image_galleries;"`
+	Filename        string         `json:"filename"`
+	OriginalURL     string         `gorm:"index" json:"original_url"` // The hosting page URL (e.g., imagebam.com/view/...)
+	DownloadURL     string         `json:"download_url"`              // The final direct image URL after ripping
+	WebPath         string         `gorm:"-" json:"web_path"`
+	ThumbnailPath   string         `gorm:"-" json:"thumbnail_path"`
+	TrickplayVTT    string         `gorm:"-" json:"trickplay_vtt,omitempty"`    // VTT file path for video scrubbing
+	TrickplaySprite string         `gorm:"-" json:"trickplay_sprite,omitempty"` // Sprite sheet path for video scrubbing
+	DominantColors  string         `json:"dominant_colors"`                     // JSON array of hex color strings
+	Type            string         `json:"type" gorm:"default:'image'"`         // "image" or "video"
 }
 
 type Person struct {

@@ -78,11 +78,14 @@ func AddImageToGallery(c *gin.Context) {
 	if sanitizedSource == "" {
 		sanitizedSource = "unknown"
 	}
-	relPath := filepath.Join(sanitizedSource, filepath.Base(result.Path))
+	// relPath := filepath.Join(sanitizedSource, filepath.Base(result.Path))
+	// We want to store just the filename (basename) to be consistent with crawler logic
+	// The source folder is implicit via the Source relationship.
+	filename := filepath.Base(result.Path)
 
 	image := models.Image{
 		// GalleryID:   uint(galleryID), // Keep for backward compat if needed, but let's try to move to M2M
-		Filename:       relPath,
+		Filename:       filename,
 		OriginalURL:    req.URL,
 		DownloadURL:    req.URL,
 		DominantColors: result.DominantColors,
@@ -146,7 +149,18 @@ func GetImages(c *gin.Context) {
 
 		sanitizedSource := services.SanitizeDirectoryName(sourceName)
 		images[i].WebPath = fmt.Sprintf("/images/%s/%s", sanitizedSource, images[i].Filename)
-		images[i].ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, images[i].Filename)
+
+		// Video thumbnails have .jpg appended to the filename
+		thumbnailFilename := images[i].Filename
+		if images[i].Type == "video" {
+			thumbnailFilename = images[i].Filename + ".jpg"
+
+			// Add trickplay paths for videos
+			baseFilename := strings.TrimSuffix(images[i].Filename, filepath.Ext(images[i].Filename))
+			images[i].TrickplayVTT = fmt.Sprintf("/images/%s/trickplay/%s.vtt", sanitizedSource, baseFilename)
+			images[i].TrickplaySprite = fmt.Sprintf("/images/%s/trickplay/%s_sprite.jpg", sanitizedSource, baseFilename)
+		}
+		images[i].ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, thumbnailFilename)
 	}
 
 	totalPages := int((total + int64(limit) - 1) / int64(limit))
@@ -254,21 +268,49 @@ func DeleteImage(c *gin.Context) {
 	}
 
 	// Get image details first
+	// Get image details first (preload galleries and source)
 	var image models.Image
-	if err := database.DB.First(&image, id).Error; err != nil {
+	if err := database.DB.Preload("Galleries.Source").First(&image, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Image not found"})
 		return
 	}
 
+	// Determine source directory
+	sourceDir := "uncategorized"
+	if len(image.Galleries) > 0 {
+		if image.Galleries[0].Source != nil {
+			sourceDir = services.SanitizeDirectoryName(image.Galleries[0].Source.Name)
+		} else if image.Galleries[0].SourceID != nil {
+			var source models.Source
+			if err := database.DB.First(&source, *image.Galleries[0].SourceID).Error; err == nil {
+				sourceDir = services.SanitizeDirectoryName(source.Name)
+			}
+		}
+	}
+
 	// Delete from filesystem
-	imagePath := filepath.Join(services.UploadsDir, image.Filename)
+	// Try constructed path first
+	imagePath := filepath.Join(services.UploadsDir, sourceDir, filepath.Base(image.Filename))
+
+	// Fallback to direct check if not found (in case it was stored as relative path)
+	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+		directPath := filepath.Join(services.UploadsDir, image.Filename)
+		if _, err := os.Stat(directPath); err == nil {
+			imagePath = directPath
+			// If we found it via direct path which includes directory, we might need to adjust logic
+			// But usually directPath is for legacy cases.
+			// Re-eval sourceDir for thumbnail? If image.Filename was "source/file.jpg", Base is "file.jpg".
+		}
+	}
+
 	if err := services.DeleteFile(imagePath); err != nil {
 		// Log but don't fail if file doesn't exist
 		println("Warning: Failed to delete image file:", err.Error())
 	}
 
 	// Delete thumbnail
-	thumbnailPath := filepath.Join(services.UploadsDir, "thumbnails", image.Filename)
+	// Delete thumbnail
+	thumbnailPath := filepath.Join(services.UploadsDir, sourceDir, "thumbnails", filepath.Base(image.Filename))
 	if err := services.DeleteFile(thumbnailPath); err != nil {
 		println("Warning: Failed to delete thumbnail:", err.Error())
 	}

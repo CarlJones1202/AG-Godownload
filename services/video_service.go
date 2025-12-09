@@ -85,6 +85,11 @@ func ImportLocalVideo(sourcePath string, sourceName string) (*DownloadImageResul
 		fmt.Printf("Warning: Failed to generate video thumbnail: %v\n", err)
 	}
 
+	// Generate trickplay data (sprite sheet + VTT file)
+	if err := GenerateTrickplayData(destPath); err != nil {
+		fmt.Printf("Warning: Failed to generate trickplay data: %v\n", err)
+	}
+
 	return &DownloadImageResult{
 		Path:           destPath,
 		DominantColors: "[]",

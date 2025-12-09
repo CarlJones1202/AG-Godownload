@@ -69,7 +69,7 @@ function ImageList({ images, onRefresh, meta, onPageChange }) {
                         >
                             <div className="image-thumbnail">
                                 <img
-                                    src={`/api/thumbnails/${image.filename}`}
+                                    src={image.thumbnail_path || `/api/thumbnails/${image.filename}`}
                                     alt={image.filename}
                                     loading="lazy"
                                 />

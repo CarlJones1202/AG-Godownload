@@ -5,6 +5,7 @@ import (
 	"gallery_api/models"
 	"gallery_api/services"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 
@@ -130,10 +131,26 @@ func DeleteSource(c *gin.Context) {
 		if err := database.DB.Preload("Images").Where("source_id = ?", id).First(&gallery).Error; err == nil {
 			if deleteImages {
 				// Delete all images
+				sourceDir := services.SanitizeDirectoryName(source.Name)
 				for _, image := range gallery.Images {
-					imagePath := filepath.Join(services.UploadsDir, image.Filename)
+					// Filename might be just basename or relative path.
+					// Construct path based on source name.
+					imagePath := filepath.Join(services.UploadsDir, sourceDir, filepath.Base(image.Filename))
+
+					// If file doesn't exist at constructed path, try utilizing the stored filename directly
+					// in case it was stored as a relative path "source/file.jpg"
+					if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+						directPath := filepath.Join(services.UploadsDir, image.Filename)
+						if _, err := os.Stat(directPath); err == nil {
+							imagePath = directPath
+						}
+					}
+
 					services.DeleteFile(imagePath)
-					thumbnailPath := filepath.Join(services.UploadsDir, "thumbnails", image.Filename)
+
+					// Handle thumbnail
+					// Thumbnails are usually in uploads/source_name/thumbnails/filename
+					thumbnailPath := filepath.Join(services.UploadsDir, sourceDir, "thumbnails", filepath.Base(image.Filename))
 					services.DeleteFile(thumbnailPath)
 				}
 				database.DB.Where("gallery_id = ?", gallery.ID).Delete(&models.Image{})

@@ -51,6 +51,7 @@ func ProcessLocalSource(source models.Source) error {
 			DownloadURL:    fmt.Sprintf("file://%s", result.Path),
 			DominantColors: "[]",
 			Type:           "video",
+			Galleries:      []*models.Gallery{&gallery},
 		}
 
 		if err := database.DB.Create(&image).Error; err != nil {
@@ -77,6 +78,7 @@ func ProcessLocalSource(source models.Source) error {
 			DownloadURL:    fmt.Sprintf("file://%s", result.Path),
 			DominantColors: result.DominantColors,
 			Type:           "image",
+			Galleries:      []*models.Gallery{&gallery},
 		}
 
 		// If it's an image, we should try to extract colors/thumb
