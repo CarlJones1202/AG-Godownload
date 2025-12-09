@@ -7,6 +7,8 @@ import (
 	"gallery_api/models"
 	"gallery_api/services"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -264,6 +266,27 @@ func DeletePerson(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Person not found"})
 		return
 	}
+
+	// Clean up photos from disk
+	if person.Photos != "" {
+		var photoPaths []string
+		if err := json.Unmarshal([]byte(person.Photos), &photoPaths); err == nil {
+			for _, webPath := range photoPaths {
+				// Convert web path to system path
+				// webPath: /person-images/123/hash.jpg
+				// sysPath: uploads/person_images/123/hash.jpg
+				relativePath := strings.TrimPrefix(webPath, "/person-images/")
+				if relativePath != webPath { // cleanup only if prefix matched
+					fullPath := filepath.Join(services.UploadsDir, "person_images", filepath.FromSlash(relativePath))
+					services.DeleteFile(fullPath)
+				}
+			}
+		}
+	}
+
+	// Remove the person's image directory
+	personDir := filepath.Join(services.UploadsDir, "person_images", fmt.Sprintf("%d", person.ID))
+	os.RemoveAll(personDir)
 
 	if err := database.DB.Delete(&person).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete person"})

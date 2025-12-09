@@ -33,6 +33,11 @@ func main() {
 		} else {
 			logger.Info("Background verification completed successfully")
 		}
+
+		logger.Info("Starting background verification of person images...")
+		if err := services.VerifyPersonImages(); err != nil {
+			logger.Error("Person image verification failed:", err)
+		}
 	}()
 
 	// Start background crawler worker

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"encoding/json"
 	"fmt"
 	"gallery_api/database"
 	"gallery_api/logger"
@@ -8,11 +9,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // VerifyDownloadedImages checks all images in the database and re-downloads any missing files
@@ -121,44 +121,30 @@ func VerifyDownloadedImages() error {
 						return
 					}
 
-					// --- CRITICAL FIX: ALWAYS force a unique filename in the correct source dir ---
-					ext := filepath.Ext(result.Path)
-					newFilename := uuid.New().String() + ext
-					correctDir := filepath.Join(UploadsDir, t.SourceName)
-					correctFinalPath := filepath.Join(correctDir, newFilename)
-
-					os.MkdirAll(correctDir, 0o755)
-
-					// If DownloadImage already put it in the right place with a UUID → keep it
-					// Otherwise → move + rename to guaranteed-unique name
-					if result.Path != correctFinalPath {
-						if err := os.Rename(result.Path, correctFinalPath); err != nil {
-							// If rename fails (e.g. cross-device), fall back to copy+delete
-							if err := copyFile(result.Path, correctFinalPath); err != nil {
-								fmt.Printf("[ID %d] Failed to move/copy recovered file: %v\n", t.ID, err)
-								return
-							}
-							os.Remove(result.Path)
-						}
+					// We now trust DownloadImage to handle hashing and storage consistently.
+					// We just need to calculate the relative path for the DB.
+					// result.Path is like "uploads\Source\hash.jpg"
+					// We want "Source\hash.jpg"
+					relPath, err := filepath.Rel(UploadsDir, result.Path)
+					if err != nil {
+						fmt.Printf("[ID %d] Failed to get relative path: %v\n", t.ID, err)
+						relPath = filepath.Join(t.SourceName, filepath.Base(result.Path)) // Fallback
 					}
-
-					// --- ALWAYS update DB to the new guaranteed-unique relative path ---
-					newRelativePath := filepath.Join(t.SourceName, newFilename)
 
 					if err := database.DB.
 						Model(&models.Image{ID: t.ID}).
 						Updates(map[string]interface{}{
-							"filename":        newRelativePath,
+							"filename":        relPath,
 							"dominant_colors": result.DominantColors,
 						}).Error; err != nil {
 
 						fmt.Printf("[ID %d] Failed to update DB filename: %v\n", t.ID, err)
 					} else {
-						fmt.Printf("[ID %d] Recovered → %s\n", t.ID, newRelativePath)
+						fmt.Printf("[ID %d] Recovered → %s\n", t.ID, relPath)
 					}
 
 					// Generate thumbnail
-					if _, err := GenerateThumbnail(correctFinalPath); err != nil {
+					if _, err := GenerateThumbnail(result.Path); err != nil {
 						fmt.Printf("[ID %d] Thumbnail generation failed: %v\n", t.ID, err)
 					}
 
@@ -176,6 +162,107 @@ func VerifyDownloadedImages() error {
 
 		fmt.Printf("Verification complete — Missing: %d | Recovered: %d\n",
 			missingCount, atomic.LoadInt32(&recoveredCount))
+	}()
+
+	return nil
+}
+
+// VerifyPersonImages checks all people with a StashID and re-downloads missing photos
+func VerifyPersonImages() error {
+	logger.Info("Verifying person images...")
+
+	var people []models.Person
+	// Find all people that are linked to StashDB
+	if err := database.DB.Where("stash_id != ? AND stash_id != ''", "").Find(&people).Error; err != nil {
+		return fmt.Errorf("failed to query people: %w", err)
+	}
+
+	go func() {
+		var recoveredCount int32 = 0
+
+		for _, person := range people {
+			if person.Photos == "" {
+				continue
+			}
+
+			var photoPaths []string
+			if err := json.Unmarshal([]byte(person.Photos), &photoPaths); err != nil {
+				continue
+			}
+
+			needsRecovery := false
+			for _, webPath := range photoPaths {
+				// webPath is like "/person-images/1/abc.jpg"
+				// We need to convert it to "uploads/person_images/1/abc.jpg"
+
+				// Remove the leading "/" if present
+				relativePath := strings.TrimPrefix(webPath, "/")
+				if strings.HasPrefix(relativePath, "person-images/") {
+					// It's in our expected format.
+					// We need to map "person-images" to "uploads/person_images" technically?
+					// Wait, DownloadPersonImage returns `/person-images/...`
+					// And `r.Static("/person-images", "./uploads/person_images")` in main.go
+					// So `/person-images/` on web maps to `./uploads/person_images/` on disk.
+
+					// Replace "person-images" with "uploads/person_images" for filesystem check
+					// BUT filepath.Join handles separators.
+					// Let's strip "person-images/" and join with UploadsDir + "person_images"
+
+					parts := strings.SplitN(relativePath, "/", 2)
+					if len(parts) == 2 {
+						// parts[1] is "1/abc.jpg"
+						// On windows this needs to become "uploads\person_images\1\abc.jpg"
+						localPath := filepath.Join(UploadsDir, "person_images", filepath.FromSlash(parts[1]))
+						if _, err := os.Stat(localPath); os.IsNotExist(err) {
+							fmt.Printf("Missing person image: %s (Person ID: %d)\n", localPath, person.ID)
+							needsRecovery = true
+							break
+						}
+					}
+				}
+			}
+
+			if needsRecovery {
+				fmt.Printf("Recovering images for person %s (ID: %d, StashID: %s)...\n", person.Name, person.ID, person.StashID)
+
+				stashService := NewStashDBService()
+				performer, err := stashService.GetPerformer(person.StashID)
+				if err != nil {
+					fmt.Printf("Failed to fetch performer %s from StashDB: %v\n", person.StashID, err)
+					continue
+				}
+
+				var newPhotoURLs []string
+				personIDUint := person.ID
+
+				for _, img := range performer.Images {
+					localPath, err := DownloadPersonImage(img.URL, personIDUint)
+					if err != nil {
+						fmt.Printf("Failed to re-download image %s: %v\n", img.URL, err)
+						continue
+					}
+					newPhotoURLs = append(newPhotoURLs, localPath)
+				}
+
+				if len(newPhotoURLs) > 0 {
+					photosJSON, _ := json.Marshal(newPhotoURLs)
+
+					// Update DB
+					if err := database.DB.Model(&models.Person{ID: person.ID}).Update("photos", string(photosJSON)).Error; err != nil {
+						fmt.Printf("Failed to update person photos for ID %d: %v\n", person.ID, err)
+					} else {
+						atomic.AddInt32(&recoveredCount, 1)
+						fmt.Printf("Successfully recovered images for person ID %d\n", person.ID)
+					}
+				}
+			}
+		}
+
+		if recoveredCount > 0 {
+			logger.Info(fmt.Sprintf("Completed verification of person images. Recovered: %d people.", recoveredCount))
+		} else {
+			logger.Info("Person image verification complete. No missing images found.")
+		}
 	}()
 
 	return nil
