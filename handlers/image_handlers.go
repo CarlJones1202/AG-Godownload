@@ -125,8 +125,9 @@ func GetImages(c *gin.Context) {
 	query.Count(&total)
 
 	var images []models.Image
-	// Preload Galleries.Source to get source name
-	if err := query.Preload("Galleries.Source").Limit(limit).Offset(offset).Order("created_at DESC").Find(&images).Error; err != nil {
+	// Preload Galleries.Source to get source name for images
+	// Preload Source to get source name for videos (direct association)
+	if err := query.Preload("Galleries.Source").Preload("Source").Limit(limit).Offset(offset).Order("created_at DESC").Find(&images).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch images"})
 		return
 	}
@@ -134,8 +135,20 @@ func GetImages(c *gin.Context) {
 	// Populate virtual paths
 	for i := range images {
 		sourceName := "uncategorized"
-		if len(images[i].Galleries) > 0 && images[i].Galleries[0].SourceID != nil {
-			// Check if Source is loaded
+
+		// For videos, check direct Source association first
+		if images[i].Type == "video" && images[i].SourceID != nil {
+			if images[i].Source != nil && images[i].Source.Name != "" {
+				sourceName = images[i].Source.Name
+			} else {
+				// Fallback: load source if not preloaded
+				var source models.Source
+				if err := database.DB.First(&source, *images[i].SourceID).Error; err == nil {
+					sourceName = source.Name
+				}
+			}
+		} else if len(images[i].Galleries) > 0 && images[i].Galleries[0].SourceID != nil {
+			// For images, use gallery source
 			if images[i].Galleries[0].Source.Name != "" {
 				sourceName = images[i].Galleries[0].Source.Name
 			} else {

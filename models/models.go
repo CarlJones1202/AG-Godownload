@@ -38,6 +38,8 @@ type Image struct {
 	GalleryID       uint           `gorm:"index" json:"gallery_id"` // Deprecated: use Galleries
 	Gallery         *Gallery       `json:"gallery,omitempty" gorm:"foreignKey:GalleryID"`
 	Galleries       []*Gallery     `json:"galleries,omitempty" gorm:"many2many:image_galleries;"`
+	SourceID        *uint          `gorm:"index" json:"source_id,omitempty"` // Direct source association for videos
+	Source          *Source        `json:"source,omitempty" gorm:"foreignKey:SourceID"`
 	Filename        string         `json:"filename"`
 	OriginalURL     string         `gorm:"index" json:"original_url"` // The hosting page URL (e.g., imagebam.com/view/...)
 	DownloadURL     string         `json:"download_url"`              // The final direct image URL after ripping

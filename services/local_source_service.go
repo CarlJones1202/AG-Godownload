@@ -25,18 +25,6 @@ func IsLocalPath(path string) bool {
 func ProcessLocalSource(source models.Source) error {
 	path := source.Location
 
-	// Find or create gallery
-	var gallery models.Gallery
-	if err := database.DB.Where("source_id = ?", source.ID).First(&gallery).Error; err != nil {
-		gallery = models.Gallery{
-			Name:     source.Name,
-			SourceID: &source.ID,
-		}
-		if err := database.DB.Create(&gallery).Error; err != nil {
-			return err
-		}
-	}
-
 	if IsVideoFile(path) {
 		logger.Infof("Importing video file: %s", path)
 		result, err := ImportLocalVideo(path, source.Name)
@@ -44,14 +32,14 @@ func ProcessLocalSource(source models.Source) error {
 			return fmt.Errorf("failed to import video: %w", err)
 		}
 
+		// For videos, create image record without gallery but with direct source reference
 		image := models.Image{
-			GalleryID:      gallery.ID,
+			SourceID:       &source.ID,
 			Filename:       filepath.Base(result.Path),
 			OriginalURL:    fmt.Sprintf("file://%s", path),
 			DownloadURL:    fmt.Sprintf("file://%s", result.Path),
 			DominantColors: "[]",
 			Type:           "video",
-			Galleries:      []*models.Gallery{&gallery},
 		}
 
 		if err := database.DB.Create(&image).Error; err != nil {
@@ -60,10 +48,18 @@ func ProcessLocalSource(source models.Source) error {
 		logger.Infof("Successfully imported video")
 
 	} else {
-		// Just an image file on disk?
-		// User didn't explicitly ask for local images, but "straight path" implies general local support.
-		// Let's support it reusing ImportLocalVideo logic (which actually just copies/hashes)
-		// but set Type="image"
+		// For images, create gallery first
+		var gallery models.Gallery
+		if err := database.DB.Where("source_id = ?", source.ID).First(&gallery).Error; err != nil {
+			gallery = models.Gallery{
+				Name:     source.Name,
+				SourceID: &source.ID,
+			}
+			if err := database.DB.Create(&gallery).Error; err != nil {
+				return err
+			}
+		}
+
 		logger.Infof("Importing local image file: %s", path)
 
 		result, err := ImportLocalVideo(path, source.Name)
