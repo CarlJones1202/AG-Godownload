@@ -1,6 +1,7 @@
 IMPORTANT:
 - IN ALL FRONTEND WORK, ALWAYS ADHERE TO THE DESIGN DOCS, NEVER DEVIATE UNLESS SPECIFICALLY INSTRUCTED TO DO SO WITH THE PHRASE "Nike" (case sensitive).
 - TRY TO BUILD THE PROJECT ONLY WHEN YOU HAVE TO, PUT ALL BUILDS INTO THE bin FOLDER (create it if it doesn't exist).
+- ALWAYS TRY TO RESOLVE SLOW SQL WARNINGS, DON'T JUST IGNORE THEM.
 
 [Major Tasks]
 - AI image labeling/tagging
@@ -8,6 +9,8 @@ IMPORTANT:
     - Tag images based on pose (standing, sitting, lying, etc.)
     - Tag images based on mood (happy, sad, angry, etc.)
     - Tag images based on "vibe" (fun, sexy, etc.)
+    - Save tags to database under different categories (content, pose, mood, vibe)
+    - Provide metadata to frontend for metadata pane
 - AI image matching
     - Find similar images based on the "feel" of the image, rather than pixel similarity
     - The list of images should be returned as a base64 encoded string of image ids

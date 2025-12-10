@@ -48,7 +48,69 @@ func VerifyDownloadedVideos() error {
 		}
 
 		var tasks []recoveryTask
+
 		var mu sync.Mutex
+
+		// Channel for batched updates
+		type videoUpdateResult struct {
+			ID       uint
+			RelPath  string
+			Duration float64
+			Width    int
+			Height   int
+			SizeMB   float64
+		}
+		resultChan := make(chan videoUpdateResult, 50) // Smaller buffer as videos process slower
+		var wgBatch sync.WaitGroup
+
+		// Start batch processor
+		wgBatch.Add(1)
+		go func() {
+			defer wgBatch.Done()
+			var buffer []videoUpdateResult
+			const batchSize = 20
+			ticker := time.NewTicker(2 * time.Second)
+			defer ticker.Stop()
+
+			flush := func() {
+				if len(buffer) == 0 {
+					return
+				}
+				tx := database.DB.Begin()
+				for _, res := range buffer {
+					if err := tx.Model(&models.Image{ID: res.ID}).
+						Updates(map[string]interface{}{
+							"filename": res.RelPath,
+							"duration": res.Duration,
+							"width":    res.Width,
+							"height":   res.Height,
+							"size_mb":  res.SizeMB,
+						}).Error; err != nil {
+						logger.Errorf("Failed to update video %d in batch: %v", res.ID, err)
+					} else {
+						atomic.AddInt32(&recoveredCount, 1)
+					}
+				}
+				tx.Commit()
+				buffer = make([]videoUpdateResult, 0, batchSize)
+			}
+
+			for {
+				select {
+				case res, ok := <-resultChan:
+					if !ok {
+						flush() // Flush remaining items
+						return
+					}
+					buffer = append(buffer, res)
+					if len(buffer) >= batchSize {
+						flush()
+					}
+				case <-ticker.C:
+					flush()
+				}
+			}
+		}()
 
 		// Phase 1: scan and collect missing files
 		for _, video := range videos {
@@ -188,24 +250,18 @@ func VerifyDownloadedVideos() error {
 						relPath = filepath.Join(t.SourceName, filepath.Base(result.Path)) // Fallback
 					}
 
-					// Update database
-					if err := database.DB.
-						Model(&models.Image{ID: t.ID}).
-						Updates(map[string]interface{}{
-							"filename": relPath,
-							"duration": result.Duration,
-							"width":    result.Width,
-							"height":   result.Height,
-							"size_mb":  result.SizeMB,
-						}).Error; err != nil {
-
-						logger.Warnf("[Video ID %d] [Source: %s] Failed to update DB: %v", t.ID, t.SourceName, err)
-						atomic.AddInt32(&skippedCount, 1)
-					} else {
-						logger.Infof("[Video ID %d] [Source: %s] [Page: %s] Recovered → %s (%dx%d, %.1fs, %.1fMB)",
-							t.ID, t.SourceName, t.OriginalURL, relPath, result.Width, result.Height, result.Duration, result.SizeMB)
-						atomic.AddInt32(&recoveredCount, 1)
+					// Send result to batch processor
+					resultChan <- videoUpdateResult{
+						ID:       t.ID,
+						RelPath:  relPath,
+						Duration: result.Duration,
+						Width:    result.Width,
+						Height:   result.Height,
+						SizeMB:   result.SizeMB,
 					}
+
+					logger.Infof("[Video ID %d] [Source: %s] [Page: %s] Recovered → %s (%dx%d, %.1fs, %.1fMB)",
+						t.ID, t.SourceName, t.OriginalURL, relPath, result.Width, result.Height, result.Duration, result.SizeMB)
 
 					// Generate thumbnail (DownloadVideo already does this, but just in case)
 					if _, err := GenerateVideoThumbnail(result.Path); err != nil {
@@ -225,6 +281,8 @@ func VerifyDownloadedVideos() error {
 			}
 
 			wg.Wait()
+			close(resultChan) // Signal batch processor to finish
+			wgBatch.Wait()    // Wait for batch processor to complete writes
 		}
 
 		logger.Infof("Video verification complete — Missing: %d | Recovered: %d | Skipped: %d",

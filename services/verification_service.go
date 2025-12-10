@@ -47,6 +47,61 @@ func VerifyDownloadedImages() error {
 		var tasks []recoveryTask
 		var mu sync.Mutex
 
+		// Channel for batched updates
+		type updateResult struct {
+			ID             uint
+			RelPath        string
+			DominantColors string
+		}
+		resultChan := make(chan updateResult, 100)
+		var wgBatch sync.WaitGroup
+
+		// Start batch processor
+		wgBatch.Add(1)
+		go func() {
+			defer wgBatch.Done()
+			var buffer []updateResult
+			const batchSize = 20
+			ticker := time.NewTicker(2 * time.Second)
+			defer ticker.Stop()
+
+			flush := func() {
+				if len(buffer) == 0 {
+					return
+				}
+				tx := database.DB.Begin()
+				for _, res := range buffer {
+					if err := tx.Model(&models.Image{ID: res.ID}).
+						Updates(map[string]interface{}{
+							"filename":        res.RelPath,
+							"dominant_colors": res.DominantColors,
+						}).Error; err != nil {
+						logger.Errorf("Failed to update image %d in batch: %v", res.ID, err)
+					} else {
+						atomic.AddInt32(&recoveredCount, 1)
+					}
+				}
+				tx.Commit()
+				buffer = make([]updateResult, 0, batchSize)
+			}
+
+			for {
+				select {
+				case res, ok := <-resultChan:
+					if !ok {
+						flush() // Flush remaining items
+						return
+					}
+					buffer = append(buffer, res)
+					if len(buffer) >= batchSize {
+						flush()
+					}
+				case <-ticker.C:
+					flush()
+				}
+			}
+		}()
+
 		// Phase 1: scan and collect missing files
 		for _, img := range images {
 			expectedFullPath := filepath.Join(UploadsDir, img.Filename)
@@ -132,15 +187,11 @@ func VerifyDownloadedImages() error {
 						relPath = filepath.Join(t.SourceName, filepath.Base(result.Path)) // Fallback
 					}
 
-					if err := database.DB.
-						Model(&models.Image{ID: t.ID}).
-						Updates(map[string]interface{}{
-							"filename":        relPath,
-							"dominant_colors": result.DominantColors,
-						}).Error; err != nil {
-						// Failed to update DB
-					} else {
-						atomic.AddInt32(&recoveredCount, 1)
+					// Send result to batch processor instead of updating directly
+					resultChan <- updateResult{
+						ID:             t.ID,
+						RelPath:        relPath,
+						DominantColors: result.DominantColors,
 					}
 
 					// Generate thumbnail
@@ -154,6 +205,8 @@ func VerifyDownloadedImages() error {
 			}
 
 			wg.Wait()
+			close(resultChan) // Signal batch processor to finish
+			wgBatch.Wait()    // Wait for batch processor to complete writes
 		}
 
 		recovered := atomic.LoadInt32(&recoveredCount)
