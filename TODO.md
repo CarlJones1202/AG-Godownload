@@ -37,6 +37,7 @@ IMPORTANT:
 
 
 [Minor Tasks]
+- If a video has progress played on it, show the progress in the UI of the All videos page
 - Favoriting images
     - Favorite/unfavorite images from any pages
     - 'f' key favorites/unfavorites the currently selected image
@@ -46,3 +47,7 @@ IMPORTANT:
     - When a person is created, run the link process
     - When a person is given a new alias, run the link process
     - When a new source is added, run the link process across all people
+
+- Add support for VR videos (without headset)
+    - Add support for 360 videos
+    - Add support for 180 videos

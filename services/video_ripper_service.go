@@ -322,19 +322,20 @@ func RipPMVHaven(pageURL string) (string, string, error) {
 		}
 		text := s.Text()
 
-		// Specific look for fileUrl or similar keys common in Nuxt apps or this specific site
-		// Based on loose analysis, searching for .mp4 is the most robust start
-		// We want to avoid "preview" or "trailer" if possible, but usually main video is the largest file.
 		// Regex to find mp4 URLs
-		// This regex looks for https://... .mp4
 		re := regexp.MustCompile(`https?://[^"'\s<>]+\.mp4`)
 		matches := re.FindAllString(text, -1)
 
+		if len(matches) > 0 {
+			logger.Debugf("Script %d: Found %d potential mp4 matches", i, len(matches))
+		}
+
 		for _, match := range matches {
-			// Filter out obviously wrong ones if needed (e.g. storage.pmvhaven.com often hosts the videos)
+			logger.Debugf("Checking match: %s", match)
+			// Filter out obviously wrong ones if needed
 			if strings.Contains(match, "pmvhaven.com") {
 				videoURL = match
-				logger.Debugf("Found candidate video URL in script: %s", videoURL)
+				logger.Infof("Found candidate video URL in script: %s", videoURL)
 				return
 			}
 		}
