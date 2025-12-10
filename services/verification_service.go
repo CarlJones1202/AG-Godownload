@@ -53,7 +53,6 @@ func VerifyDownloadedImages() error {
 
 			if _, err := os.Stat(expectedFullPath); os.IsNotExist(err) {
 				missingCount++
-				fmt.Printf("Missing: %s (ID: %d)\n", img.Filename, img.ID)
 
 				// Optional: regenerate thumbnail if main file exists but thumb doesn't
 				thumbPath := filepath.Join(UploadsDir, "thumbnails", filepath.Base(img.Filename))
@@ -64,7 +63,6 @@ func VerifyDownloadedImages() error {
 				}
 
 				if img.DownloadURL == "" {
-					fmt.Printf("No DownloadURL for ID %d → cannot recover\n", img.ID)
 					continue
 				}
 
@@ -80,9 +78,11 @@ func VerifyDownloadedImages() error {
 					Scan(&sourceID).Error
 				if err == nil && sourceID != nil {
 					var src models.Source
-					if database.DB.Select("name").First(&src, *sourceID).Error == nil {
+					// Use Find() instead of First() to avoid "record not found" errors
+					if database.DB.Select("name").Find(&src, *sourceID).RowsAffected > 0 {
 						sourceName = src.Name
 					}
+					// If source not found (deleted), sourceName remains "uncategorized"
 				}
 
 				mu.Lock()
@@ -96,9 +96,12 @@ func VerifyDownloadedImages() error {
 			}
 		}
 
+		if missingCount > 0 {
+			fmt.Printf("Found %d missing images\n", missingCount)
+		}
+
 		// Phase 2: concurrent recovery – THE IMPORTANT PART
 		if len(tasks) > 0 {
-			fmt.Printf("Recovering %d missing images (max 12 concurrent)...\n", len(tasks))
 
 			const maxConcurrent = 12
 			sem := make(chan struct{}, maxConcurrent)
@@ -117,7 +120,6 @@ func VerifyDownloadedImages() error {
 					// (e.g. /uploads/MySource/abc123.jpg or whatever it decided)
 					result, err := DownloadImage(t.DownloadURL, t.SourceName)
 					if err != nil {
-						fmt.Printf("[ID %d] Re-download failed: %v\n", t.ID, err)
 						return
 					}
 
@@ -127,7 +129,6 @@ func VerifyDownloadedImages() error {
 					// We want "Source\hash.jpg"
 					relPath, err := filepath.Rel(UploadsDir, result.Path)
 					if err != nil {
-						fmt.Printf("[ID %d] Failed to get relative path: %v\n", t.ID, err)
 						relPath = filepath.Join(t.SourceName, filepath.Base(result.Path)) // Fallback
 					}
 
@@ -137,31 +138,29 @@ func VerifyDownloadedImages() error {
 							"filename":        relPath,
 							"dominant_colors": result.DominantColors,
 						}).Error; err != nil {
-
-						fmt.Printf("[ID %d] Failed to update DB filename: %v\n", t.ID, err)
+						// Failed to update DB
 					} else {
-						fmt.Printf("[ID %d] Recovered → %s\n", t.ID, relPath)
+						atomic.AddInt32(&recoveredCount, 1)
 					}
 
 					// Generate thumbnail
-					if _, err := GenerateThumbnail(result.Path); err != nil {
-						fmt.Printf("[ID %d] Thumbnail generation failed: %v\n", t.ID, err)
-					}
+					GenerateThumbnail(result.Path)
 
 					duration := time.Since(start)
 					if duration > 5*time.Second {
 						time.Sleep(1 * time.Second) // polite pause
 					}
-
-					atomic.AddInt32(&recoveredCount, 1)
 				}(task)
 			}
 
 			wg.Wait()
 		}
 
-		fmt.Printf("Verification complete — Missing: %d | Recovered: %d\n",
-			missingCount, atomic.LoadInt32(&recoveredCount))
+		recovered := atomic.LoadInt32(&recoveredCount)
+		stillMissing := missingCount - int(recovered)
+		if missingCount > 0 {
+			fmt.Printf("Image verification complete — Downloaded: %d | Still missing: %d\n", recovered, stillMissing)
+		}
 	}()
 
 	return nil

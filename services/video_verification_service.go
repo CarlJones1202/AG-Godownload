@@ -64,12 +64,12 @@ func VerifyDownloadedVideos() error {
 					localPath := strings.TrimPrefix(video.OriginalURL, "file://")
 					if _, err := os.Stat(localPath); os.IsNotExist(err) {
 						// Local file no longer exists, skip gracefully
-						logger.Infof("Local video file no longer exists, skipping: %s (ID: %d)", localPath, video.ID)
+						logger.Infof("[Source: %s] Local video file no longer exists, skipping: %s (ID: %d)", video.OriginalURL, localPath, video.ID)
 						atomic.AddInt32(&skippedCount, 1)
 						continue
 					}
 					// Local file exists, we could re-import it, but for now just log
-					logger.Infof("Local video file still exists but not in expected location: %s (ID: %d)", localPath, video.ID)
+					logger.Infof("[Source: %s] Local video file still exists but not in expected location: %s (ID: %d)", video.OriginalURL, localPath, video.ID)
 					atomic.AddInt32(&skippedCount, 1)
 					continue
 				}
@@ -144,15 +144,47 @@ func VerifyDownloadedVideos() error {
 					// Download the video
 					result, err := DownloadVideo(t.DownloadURL, t.SourceName, pageURL, t.Title)
 					if err != nil {
-						logger.Warnf("[Video ID %d] Re-download failed: %v", t.ID, err)
-						atomic.AddInt32(&skippedCount, 1)
-						return
+						// Attempt to refresh URL if download failed
+						refreshed := false
+						if t.OriginalURL != "" {
+							var newVideoURL, newTitle string
+							var ripErr error
+
+							if strings.Contains(t.OriginalURL, "tnaflix.com") {
+								logger.Infof("[Video ID %d] Attempting to refresh TnaFlix URL from %s", t.ID, t.OriginalURL)
+								newVideoURL, newTitle, ripErr = RipTnaFlix(t.OriginalURL)
+							} else if strings.Contains(t.OriginalURL, "pornhub.com") {
+								logger.Infof("[Video ID %d] Attempting to refresh Pornhub URL from %s", t.ID, t.OriginalURL)
+								newVideoURL, newTitle, ripErr = RipPornhub(t.OriginalURL)
+							}
+
+							if ripErr == nil && newVideoURL != "" {
+								logger.Infof("[Video ID %d] Successfully refreshed URL. Retrying download...", t.ID)
+
+								// Update DB with new URL
+								database.DB.Model(&models.Image{ID: t.ID}).Update("download_url", newVideoURL)
+
+								// Retry download
+								result, err = DownloadVideo(newVideoURL, t.SourceName, pageURL, newTitle)
+								if err == nil {
+									refreshed = true
+								}
+							} else if ripErr != nil {
+								logger.Warnf("[Video ID %d] Failed to refresh URL: %v", t.ID, ripErr)
+							}
+						}
+
+						if !refreshed {
+							logger.Warnf("[Video ID %d] [Source: %s] [Page: %s] [DL: %s] Re-download failed: %v", t.ID, t.SourceName, t.OriginalURL, t.DownloadURL, err)
+							atomic.AddInt32(&skippedCount, 1)
+							return
+						}
 					}
 
 					// Calculate relative path for DB
 					relPath, err := filepath.Rel(UploadsDir, result.Path)
 					if err != nil {
-						logger.Warnf("[Video ID %d] Failed to get relative path: %v", t.ID, err)
+						logger.Warnf("[Video ID %d] [Source: %s] Failed to get relative path: %v", t.ID, t.SourceName, err)
 						relPath = filepath.Join(t.SourceName, filepath.Base(result.Path)) // Fallback
 					}
 
@@ -167,22 +199,22 @@ func VerifyDownloadedVideos() error {
 							"size_mb":  result.SizeMB,
 						}).Error; err != nil {
 
-						logger.Warnf("[Video ID %d] Failed to update DB: %v", t.ID, err)
+						logger.Warnf("[Video ID %d] [Source: %s] Failed to update DB: %v", t.ID, t.SourceName, err)
 						atomic.AddInt32(&skippedCount, 1)
 					} else {
-						logger.Infof("[Video ID %d] Recovered → %s (%dx%d, %.1fs, %.1fMB)",
-							t.ID, relPath, result.Width, result.Height, result.Duration, result.SizeMB)
+						logger.Infof("[Video ID %d] [Source: %s] [Page: %s] Recovered → %s (%dx%d, %.1fs, %.1fMB)",
+							t.ID, t.SourceName, t.OriginalURL, relPath, result.Width, result.Height, result.Duration, result.SizeMB)
 						atomic.AddInt32(&recoveredCount, 1)
 					}
 
 					// Generate thumbnail (DownloadVideo already does this, but just in case)
 					if _, err := GenerateVideoThumbnail(result.Path); err != nil {
-						logger.Warnf("[Video ID %d] Thumbnail generation failed: %v", t.ID, err)
+						logger.Warnf("[Video ID %d] [Source: %s] Thumbnail generation failed: %v", t.ID, t.SourceName, err)
 					}
 
 					// Generate trickplay data (DownloadVideo already does this, but just in case)
 					if err := GenerateTrickplayData(result.Path); err != nil {
-						logger.Warnf("[Video ID %d] Trickplay generation failed: %v", t.ID, err)
+						logger.Warnf("[Video ID %d] [Source: %s] Trickplay generation failed: %v", t.ID, t.SourceName, err)
 					}
 
 					duration := time.Since(start)

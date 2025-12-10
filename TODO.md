@@ -25,6 +25,12 @@ IMPORTANT:
     - Gather gallery information (publish date, number of images, rating, description, etc)
     - Save metadata to database
     - Update gallery page with metadata
+- Search sources when adding a new source
+    - When a user goes to add a source, search for the source via the name and similar URLs
+    - If the source is found provide a warning/information to the user saying something like "Similar source found: [name] from [url]"
+- AI auto extract name from source URL
+    - Train on all existing source names
+    - When a user goes to add a source, auto extract the name from the URL and suggest it to the user (allow them to type their own or modify it as needed)
 
 
 [Minor Tasks]
