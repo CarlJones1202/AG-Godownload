@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import './PersonDetail.css'
 import './PersonDetail_identifiers.css'
 import './AutoTag.css'
+import PersonStats from './PersonStats'
 import AutoTagModal from './AutoTagModal'
 
 function PersonDetail() {
@@ -451,6 +452,9 @@ function PersonDetail() {
                             {person.piercings && <div className="info-item wide"><span className="label">Piercings</span> <span className="value">{person.piercings}</span></div>}
                         </div>
                     )}
+
+                    {/* Stats Section */}
+                    {!isEditing && <PersonStats personId={person.id} />}
                 </div>
             </div>
 

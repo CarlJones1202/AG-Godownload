@@ -129,5 +129,8 @@ func IsVideoURL(url string) bool {
 	if strings.Contains(url, "tnaflix.com") {
 		return true
 	}
+	if strings.Contains(url, "pornhub.com") {
+		return true
+	}
 	return false
 }

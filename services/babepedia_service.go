@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -186,10 +187,13 @@ func (s *BabepediaService) parseProfileData(htmlContent string, performerID stri
 	// Babepedia uses text nodes with labels like "Born:", "Birthplace:", etc.
 	// We need to find these labels and extract the following text
 	pageText := doc.Text()
+	fmt.Printf("DEBUG: Full Page Text Length: %d\n", len(pageText))
+	// fmt.Printf("DEBUG: Page Text Sample: %q\n", pageText[:1000]) // Inspect start
 
-	// Extract birthdate - look for "Born:" followed by date text
-	if birthdate := extractFieldFromText(pageText, "Born:"); birthdate != "" {
-		data.Birthdate = birthdate
+	// Extract details using text analysis
+	if born := extractFieldFromText(pageText, "Born:"); born != "" {
+		data.Birthdate = born
+		fmt.Printf("DEBUG: Extracted Born: %q\n", born)
 	}
 
 	// Birthplace
@@ -257,17 +261,69 @@ func (s *BabepediaService) parseProfileData(htmlContent string, performerID stri
 		data.Instagram = match[1]
 	}
 
-	// Extract profile images using goquery
+	// Extract profile images using goquery - be very selective
+	// Look for images in specific gallery/profile contexts
 	doc.Find("img").Each(func(i int, sel *goquery.Selection) {
 		if src, exists := sel.Attr("src"); exists {
-			// Filter out small icons and logos
-			if !strings.Contains(src, "icon") && !strings.Contains(src, "logo") && !strings.Contains(src, "avatar") {
-				// Make sure it's a full URL
-				if strings.HasPrefix(src, "http") {
-					data.Photos = append(data.Photos, src)
-				} else if strings.HasPrefix(src, "/") {
-					data.Photos = append(data.Photos, s.BaseURL+src)
+			// Skip if URL contains common UI element indicators
+			srcLower := strings.ToLower(src)
+			if strings.Contains(srcLower, "icon") ||
+				strings.Contains(srcLower, "logo") ||
+				strings.Contains(srcLower, "avatar") ||
+				strings.Contains(srcLower, "button") ||
+				strings.Contains(srcLower, "sprite") ||
+				strings.Contains(srcLower, "/static/") ||
+				strings.Contains(srcLower, "/assets/") ||
+				strings.Contains(srcLower, "social") ||
+				strings.Contains(srcLower, "badge") {
+				return
+			}
+
+			// Check if image has reasonable dimensions (skip tiny icons)
+			if width, exists := sel.Attr("width"); exists {
+				if w, err := strconv.Atoi(width); err == nil && w < 100 {
+					return
 				}
+			}
+			if height, exists := sel.Attr("height"); exists {
+				if h, err := strconv.Atoi(height); err == nil && h < 100 {
+					return
+				}
+			}
+
+			// Check parent context - look for gallery or profile image containers
+			parent := sel.Parent()
+			parentClass, _ := parent.Attr("class")
+			parentId, _ := parent.Attr("id")
+
+			// Skip if in navigation, header, footer, or sidebar
+			if strings.Contains(parentClass, "nav") ||
+				strings.Contains(parentClass, "header") ||
+				strings.Contains(parentClass, "footer") ||
+				strings.Contains(parentClass, "sidebar") ||
+				strings.Contains(parentId, "nav") ||
+				strings.Contains(parentId, "header") {
+				return
+			}
+
+			// Only include if it looks like a content image (has reasonable path structure)
+			if strings.Contains(src, "/babe/") ||
+				strings.Contains(src, "/photo/") ||
+				strings.Contains(src, "/image/") ||
+				strings.Contains(src, "/gallery/") ||
+				(strings.HasPrefix(src, "http") && strings.Contains(src, ".jpg") || strings.Contains(src, ".jpeg") || strings.Contains(src, ".png")) {
+
+				// Make sure it's a full URL
+				fullURL := src
+				if strings.HasPrefix(src, "http") {
+					fullURL = src
+				} else if strings.HasPrefix(src, "/") {
+					fullURL = s.BaseURL + src
+				} else {
+					return // Skip relative URLs without leading slash
+				}
+
+				data.Photos = append(data.Photos, fullURL)
 				if len(data.Photos) >= 10 {
 					return
 				}
@@ -300,16 +356,22 @@ func extractFieldFromText(text, label string) string {
 
 	// Try to find end by looking for patterns that indicate a new field or section
 	nextFieldPatterns := []string{
-		"\nBorn:",
-		"\nBirthplace:",
-		"\nEthnicity:",
-		"\nHair color:",
-		"\nEye color:",
-		"\nHeight:",
-		"\nWeight:",
-		"\nMeasurements:",
-		"\nTattoos:",
-		"\nPiercings:",
+		"Born:",
+		"Birthplace:",
+		"Ethnicity:",
+		"Nationality:",
+		"Profession:",
+		"Hair color:",
+		"Eye color:",
+		"Height:",
+		"Weight:",
+		"Measurements:",
+		"Tattoos:",
+		"Piercings:",
+		"Bra/cup size:",
+		"Boobs:",
+		"Pubic hair:",
+		"Performances:",
 		"\n\n",
 	}
 

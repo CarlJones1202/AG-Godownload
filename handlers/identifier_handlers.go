@@ -111,8 +111,8 @@ func LinkIdentifier(c *gin.Context) {
 	}
 
 	// Download and store photos
+	var photoURLs []string
 	if len(personData.Photos) > 0 {
-		var photoURLs []string
 		for _, imgURL := range personData.Photos {
 			localPath, err := services.DownloadPersonImage(imgURL, person.ID)
 			if err != nil {
@@ -121,12 +121,11 @@ func LinkIdentifier(c *gin.Context) {
 			}
 			photoURLs = append(photoURLs, localPath)
 		}
-
-		if len(photoURLs) > 0 {
-			photosJSON, _ := json.Marshal(photoURLs)
-			person.Photos = string(photosJSON)
-		}
 	}
+
+	// Always update photos list (even if empty, to clear old ones)
+	photosJSON, _ := json.Marshal(photoURLs)
+	person.Photos = string(photosJSON)
 
 	// Save person
 	if err := database.DB.Save(&person).Error; err != nil {
