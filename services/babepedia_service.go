@@ -262,7 +262,7 @@ func (s *BabepediaService) parseProfileData(htmlContent string, performerID stri
 	}
 
 	// Extract profile images using goquery
-	// Babepedia typically has images in the content area with specific patterns
+	// Start with a permissive approach and filter out obvious non-content images
 	seen := make(map[string]bool)
 	imageCount := 0
 	doc.Find("img").Each(func(i int, sel *goquery.Selection) {
@@ -275,67 +275,34 @@ func (s *BabepediaService) parseProfileData(htmlContent string, performerID stri
 
 		fmt.Printf("DEBUG: Image %d - src: %s\n", i, src)
 
-		// Skip common UI elements by URL pattern
+		// Skip only obvious UI elements
 		srcLower := strings.ToLower(src)
-		if strings.Contains(srcLower, "icon") ||
-			strings.Contains(srcLower, "logo") ||
-			strings.Contains(srcLower, "button") ||
+		if strings.Contains(srcLower, "logo") ||
+			strings.Contains(srcLower, "icon") ||
 			strings.Contains(srcLower, "sprite") ||
-			strings.Contains(srcLower, "banner") ||
-			strings.Contains(srcLower, "ad") ||
 			strings.HasSuffix(srcLower, ".gif") {
-			fmt.Printf("DEBUG: Image %d - skipped (UI element)\n", i)
+			fmt.Printf("DEBUG: Image %d - skipped (UI element: logo/icon/sprite/gif)\n", i)
 			return
 		}
 
-		// Skip very small images (likely icons)
+		// Skip very small images (likely icons/buttons)
 		if width, exists := sel.Attr("width"); exists {
-			if w, err := strconv.Atoi(width); err == nil && w < 100 {
-				fmt.Printf("DEBUG: Image %d - skipped (width %d < 100)\n", i, w)
+			if w, err := strconv.Atoi(width); err == nil && w < 50 {
+				fmt.Printf("DEBUG: Image %d - skipped (width %d < 50)\n", i, w)
 				return
 			}
 		}
 		if height, exists := sel.Attr("height"); exists {
-			if h, err := strconv.Atoi(height); err == nil && h < 100 {
-				fmt.Printf("DEBUG: Image %d - skipped (height %d < 100)\n", i, h)
+			if h, err := strconv.Atoi(height); err == nil && h < 50 {
+				fmt.Printf("DEBUG: Image %d - skipped (height %d < 50)\n", i, h)
 				return
 			}
 		}
 
-		// Check parent context - skip navigation/header/footer
-		parent := sel.Parent()
-		parentClass := strings.ToLower(parent.AttrOr("class", ""))
-		parentId := strings.ToLower(parent.AttrOr("id", ""))
-
-		if strings.Contains(parentClass, "nav") ||
-			strings.Contains(parentClass, "header") ||
-			strings.Contains(parentClass, "footer") ||
-			strings.Contains(parentClass, "sidebar") ||
-			strings.Contains(parentClass, "menu") ||
-			strings.Contains(parentId, "nav") ||
-			strings.Contains(parentId, "header") ||
-			strings.Contains(parentId, "footer") ||
-			strings.Contains(parentId, "menu") {
-			fmt.Printf("DEBUG: Image %d - skipped (parent context: class=%s, id=%s)\n", i, parentClass, parentId)
-			return
-		}
-
-		// Look for Babepedia-specific image patterns
-		// Accept images that are:
-		// 1. In /babe/, /photo/, /image/, /gallery/ paths
-		// 2. Have image extensions and are from external CDNs
-		// 3. Are in the main content area (not in static/assets folders)
-		isContentImage := strings.Contains(src, "/babe/") ||
-			strings.Contains(src, "/photo/") ||
-			strings.Contains(src, "/image/") ||
-			strings.Contains(src, "/gallery/") ||
-			strings.Contains(src, "/pictures/") ||
-			strings.Contains(src, "/content/") ||
-			(strings.HasPrefix(src, "http") && !strings.Contains(src, "/static/") && !strings.Contains(src, "/assets/") &&
-				(strings.HasSuffix(srcLower, ".jpg") || strings.HasSuffix(srcLower, ".jpeg") || strings.HasSuffix(srcLower, ".png") || strings.HasSuffix(srcLower, ".webp")))
-
-		if !isContentImage {
-			fmt.Printf("DEBUG: Image %d - skipped (not content image)\n", i)
+		// Accept any image that looks like a real photo
+		// Skip only if it's clearly in static/assets folders
+		if strings.Contains(src, "/static/") || strings.Contains(src, "/assets/") {
+			fmt.Printf("DEBUG: Image %d - skipped (in /static/ or /assets/)\n", i)
 			return
 		}
 
@@ -349,7 +316,7 @@ func (s *BabepediaService) parseProfileData(htmlContent string, performerID stri
 			fullURL = "https:" + src
 		} else {
 			fmt.Printf("DEBUG: Image %d - skipped (relative URL without leading slash)\n", i)
-			return // Skip other relative URLs
+			return
 		}
 
 		// Avoid duplicates
