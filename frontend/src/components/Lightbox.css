@@ -67,7 +67,8 @@
     color: rgba(255, 255, 255, 0.4);
     border: none;
     font-size: 3rem;
-    padding: 2rem 1rem;
+    padding: 2rem 1.5rem;
+    /* Larger hit area */
     cursor: pointer;
     transition: all 0.2s;
     line-height: 1;
@@ -90,17 +91,18 @@
 /* Top Right Controls */
 .lightbox-controls {
     position: absolute;
-    top: 20px;
-    right: 20px;
+    top: 25px;
+    right: 30px;
     display: flex;
-    gap: 1rem;
+    gap: 1.25rem;
     z-index: 2100;
     /* Above everything */
 }
 
 .control-btn-icon {
-    width: 44px;
-    height: 44px;
+    width: 60px;
+    /* SCALED UP BUTTON */
+    height: 60px;
     border-radius: 50%;
     background: rgba(255, 255, 255, 0.1);
     backdrop-filter: blur(8px);

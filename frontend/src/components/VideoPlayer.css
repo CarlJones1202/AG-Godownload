@@ -31,6 +31,8 @@
 .video-element {
     width: 100%;
     height: 100%;
+    object-fit: contain;
+    /* Ensure video fits comfortably */
 }
 
 /* Controls Gradient Overlays */
@@ -39,9 +41,9 @@
     top: 0;
     left: 0;
     right: 0;
-    height: 80px;
-    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.7), transparent);
-    padding: 1.5rem;
+    height: 100px;
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), transparent);
+    padding: 2rem;
     display: flex;
     justify-content: flex-end;
     opacity: 0;
@@ -59,11 +61,11 @@
     bottom: 0;
     left: 0;
     right: 0;
-    background: linear-gradient(to top, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.4) 50%, transparent);
-    padding: 0 1.5rem 1.5rem 1.5rem;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.6) 60%, transparent);
+    padding: 0 2rem 2rem 2rem;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 1rem;
     opacity: 0;
     transition: opacity 0.3s ease;
     pointer-events: none;
@@ -79,31 +81,37 @@
     background: transparent;
     border: none;
     color: white;
-    width: 40px;
-    height: 40px;
+    width: 52px;
+    height: 52px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     transition: background 0.2s;
+    padding: 0;
+    flex-shrink: 0;
+    /* Never shrink */
 }
 
 .icon-btn:hover {
     background: rgba(255, 255, 255, 0.15);
 }
 
+.icon-btn svg {
+    display: block;
+}
+
 /* Timeline */
 .timeline-track {
     width: 100%;
-    height: 12px;
+    height: 16px;
     position: relative;
     cursor: pointer;
     display: flex;
     align-items: center;
     margin-bottom: 0.5rem;
-    padding: 4px 0;
-    /* Increase hit area */
+    padding: 6px 0;
 }
 
 .timeline-bar-bg {
@@ -140,7 +148,7 @@
 /* Scrubbing Preview */
 .preview-box {
     position: absolute;
-    bottom: 25px;
+    bottom: 30px;
     transform: translateX(-50%);
     background: #000;
     border: 2px solid #fff;
@@ -158,56 +166,94 @@
     width: 100%;
     background: #000;
     color: #fff;
-    font-size: 0.8rem;
+    font-size: 0.85rem;
     text-align: center;
-    padding: 2px 0;
+    padding: 4px 0;
     font-weight: 600;
 }
 
-/* Controls Row (Play, Volume, etc) */
+/* Controls Row */
 .controls-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 1rem;
+    width: 100%;
+    /* Ensure full width */
 }
 
 .controls-left,
 .controls-right {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 1.5rem;
+}
+
+.controls-left {
+    flex: 1;
+    min-width: 0;
+    /* Critical for left side to handle content correctly without overflow */
+    justify-content: flex-start;
 }
 
 .time-text {
-    color: #ddd;
-    font-size: 0.9rem;
+    color: #eee;
+    font-size: 1rem;
     font-variant-numeric: tabular-nums;
-    margin-left: 0.5rem;
+    font-weight: 500;
+    white-space: nowrap;
+    /* Prevent wrapping */
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    margin-left: 1rem;
+    /* Specific spacing from volume */
 }
 
 .volume-container {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    width: 120px;
+    gap: 0.75rem;
+    width: 140px;
+    /* Fixed width */
+    max-width: 140px;
+    /* Enforced max width */
     color: white;
+    flex-shrink: 0;
+    /* ABSOLUTELY DO NOT SQUISH OR GROW */
+}
+
+.icon-btn-small {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
 }
 
 .volume-slider {
     flex: 1;
+    /* Take remaining space within the container */
     height: 4px;
     -webkit-appearance: none;
     background: rgba(255, 255, 255, 0.3);
     border-radius: 2px;
     cursor: pointer;
+    outline: none;
+    min-width: 50px;
+    /* Ensure slider has minimum width */
 }
 
 .volume-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 12px;
-    height: 12px;
+    width: 14px;
+    height: 14px;
     background: white;
     border-radius: 50%;
+    transition: transform 0.1s;
+}
+
+.volume-slider:hover::-webkit-slider-thumb {
+    transform: scale(1.2);
 }
 
 /* Sidebar */
@@ -250,6 +296,13 @@
     color: #888;
     cursor: pointer;
     font-size: 1.25rem;
+    padding: 0.5rem;
+    border-radius: 50%;
+}
+
+.close-sidebar-btn:hover {
+    color: white;
+    background: rgba(255, 255, 255, 0.1);
 }
 
 .sidebar-content {
@@ -295,11 +348,13 @@
     font-size: 0.85rem;
     border: 1px solid #333;
     cursor: pointer;
+    transition: background 0.2s;
 }
 
 .person-tag:hover {
     background: #333;
     border-color: #555;
+    color: white;
 }
 
 .empty-tag {

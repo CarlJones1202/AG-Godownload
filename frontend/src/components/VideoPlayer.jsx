@@ -207,7 +207,12 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
 
                 {/* Top Controls (Close) */}
                 <div className={`video-controls-top ${showControls ? 'visible' : ''}`}>
-                    <button className="icon-btn" onClick={onClose} title="Close">✕</button>
+                    <button className="icon-btn" onClick={onClose} title="Close">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
                 </div>
 
                 {/* Bottom Controls */}
@@ -241,14 +246,16 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
                         <div className="controls-left">
                             <button className="icon-btn" onClick={togglePlay}>
                                 {isPlaying ? (
-                                    <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+                                    <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
                                 ) : (
-                                    <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+                                    <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
                                 )}
                             </button>
 
                             <div className="volume-container">
-                                <span className="icon-btn-small">🔊</span>
+                                <span className="icon-btn-small">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" /></svg>
+                                </span>
                                 <input
                                     type="range" min="0" max="1" step="0.05"
                                     value={volume}
@@ -268,24 +275,33 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
                         <div className="controls-right">
                             {!showMetadata && (
                                 <button className="icon-btn" onClick={() => setShowMetadata(true)} title="Info">
-                                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
+                                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <circle cx="12" cy="12" r="10"></circle>
+                                        <line x1="12" y1="16" x2="12" y2="12"></line>
+                                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                                    </svg>
                                 </button>
                             )}
                             <button className="icon-btn" onClick={toggleFullscreen} title="Fullscreen">
-                                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" /></svg>
+                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                                </svg>
                             </button>
                         </div>
                     </div>
                 </div>
-
-                {/* Big central Play/Pause animation could go here */}
             </div>
 
             {/* Sidebar Metadata (Docked) */}
             <div className={`video-sidebar ${showMetadata ? 'open' : ''}`}>
                 <div className="sidebar-header">
                     <h3>Video Info</h3>
-                    <button onClick={() => setShowMetadata(false)} className="close-sidebar-btn">✕</button>
+                    <button onClick={() => setShowMetadata(false)} className="close-sidebar-btn">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
                 </div>
                 <div className="sidebar-content">
                     <div className="info-group">
