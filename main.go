@@ -34,6 +34,13 @@ func main() {
 			logger.Info("Background verification completed successfully")
 		}
 
+		logger.Info("Starting scanning for missing video metadata...")
+		if err := services.ScanMissingMetadata(database.DB, false); err != nil {
+			logger.Error("Video metadata scan failed:", err)
+		} else {
+			logger.Info("Video metadata scan completed successfully")
+		}
+
 		logger.Info("Starting background verification of person images...")
 		if err := services.VerifyPersonImages(); err != nil {
 			logger.Error("Person image verification failed:", err)

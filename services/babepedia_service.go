@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 
+	"github.com/PuerkitoBio/goquery"
 	"golang.org/x/net/html"
 )
 
@@ -29,35 +31,90 @@ func (s *BabepediaService) GetName() string {
 
 // Search implements IdentifierProvider interface
 func (s *BabepediaService) Search(name string) ([]IdentifierResult, error) {
-	// Babepedia uses URL format: /babe/Name_Name
-	// Convert "Jane Doe" to "Jane_Doe"
-	urlName := strings.ReplaceAll(name, " ", "_")
+	var results []IdentifierResult
 
-	// Try direct profile access
+	// 1. Try direct profile access (Fast Path)
+	// Babepedia uses URL format: /babe/Name_Name
+	urlName := strings.ReplaceAll(name, " ", "_")
 	profileURL := fmt.Sprintf("%s/babe/%s", s.BaseURL, urlName)
 
 	resp, err := s.Client.Get(profileURL)
+	if err == nil && resp.StatusCode == 200 {
+		resp.Body.Close()
+		results = append(results, IdentifierResult{
+			ExternalID:     urlName,
+			Name:           name,
+			Disambiguation: "Direct Match",
+			PreviewData: map[string]interface{}{
+				"profile_url": profileURL,
+			},
+		})
+		// If we found a direct match, we might still want to search if the user
+		// might be looking for someone else, but usually direct match is good enough.
+		// However, to be robust, let's also search if the direct match isn't perfect
+		// or if we want to show alternatives. For now, returning direct match is efficient.
+		return results, nil
+	}
+	if resp != nil {
+		resp.Body.Close()
+	}
+
+	// 2. Search Scraping (Fallback)
+	searchURL := fmt.Sprintf("%s/search/%s", s.BaseURL, url.QueryEscape(name))
+	resp, err = s.Client.Get(searchURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 200 {
-		// Profile exists
-		return []IdentifierResult{
-			{
-				ExternalID:     urlName,
-				Name:           name,
-				Disambiguation: "Babepedia Profile",
-				PreviewData: map[string]interface{}{
-					"profile_url": profileURL,
-				},
-			},
-		}, nil
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("search returned status %d", resp.StatusCode)
 	}
 
-	// Profile not found
-	return []IdentifierResult{}, nil
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("parsing search results: %w", err)
+	}
+
+	// Babepedia search results usually list profiles.
+	// We look for links pointing to /babe/XXXX
+	seen := make(map[string]bool)
+
+	// Selector might need adjustment based on actual site structure
+	// Assuming a generic list of links for now since I cannot inspect the DOM
+	doc.Find("a[href^='/babe/']").Each(func(i int, sel *goquery.Selection) {
+		href, _ := sel.Attr("href")
+		// href is like /babe/Name_Surname
+		externalID := strings.TrimPrefix(href, "/babe/")
+
+		if seen[externalID] || externalID == "" {
+			return
+		}
+		seen[externalID] = true
+
+		displayName := strings.TrimSpace(sel.Text())
+		if displayName == "" {
+			displayName = strings.ReplaceAll(externalID, "_", " ")
+		}
+
+		// Try to find an image thumbnail if present inside the anchor or nearby
+		thumbURL := ""
+		if img := sel.Find("img").First(); img.Length() > 0 {
+			thumbURL = img.AttrOr("src", "")
+		}
+
+		results = append(results, IdentifierResult{
+			ExternalID:     externalID,
+			Name:           displayName,
+			Disambiguation: "Search Result",
+			PreviewData: map[string]interface{}{
+				"profile_url": fmt.Sprintf("%s%s", s.BaseURL, href),
+				"thumbnail":   thumbURL,
+			},
+		})
+	})
+
+	return results, nil
 }
 
 // GetDetails implements IdentifierProvider interface

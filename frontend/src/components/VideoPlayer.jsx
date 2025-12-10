@@ -15,6 +15,7 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
     const [vttData, setVttData] = useState([])
     const [spriteImage, setSpriteImage] = useState(null)
     const [showPersonModal, setShowPersonModal] = useState(false)
+    const [showMetadata, setShowMetadata] = useState(false)
     const [people, setPeople] = useState([])
     const [taggedPeople, setTaggedPeople] = useState(video.people || [])
     const [searchQuery, setSearchQuery] = useState('')
@@ -275,8 +276,8 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
                     onPause={() => setIsPlaying(false)}
                 />
 
-                {/* Tagged People Display */}
-                {taggedPeople.length > 0 && (
+                {/* Tagged People Display - REMOVED, moving to metadata overlay */}
+                {/* {taggedPeople.length > 0 && (
                     <div className="video-tagged-people">
                         {taggedPeople.map(person => (
                             <div key={person.id} className="tagged-person-chip">
@@ -285,7 +286,7 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
                             </div>
                         ))}
                     </div>
-                )}
+                )} */}
 
                 <div className="video-controls">
                     <button onClick={togglePlay} className="play-btn">
@@ -349,17 +350,73 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
 
                     <button onClick={onPrev} className="nav-btn">⏮</button>
                     <button onClick={onNext} className="nav-btn">⏭</button>
+
                     <button
-                        onClick={() => {
-                            fetchPeople()
-                            setShowPersonModal(true)
-                        }}
-                        className="tag-person-btn"
-                        title="Tag Person"
+                        onClick={() => setShowMetadata(true)}
+                        className="metadata-btn"
+                        title="Video Info & People"
                     >
-                        👤+
+                        ℹ️
                     </button>
                 </div>
+
+                {/* Metadata Overlay */}
+                {showMetadata && (
+                    <div className="metadata-overlay">
+                        <div className="metadata-header">
+                            <div className="metadata-title">
+                                <h2>{video.title || video.filename}</h2>
+                                <span className="metadata-source">
+                                    {video.source?.name || video.galleries?.[0]?.source?.name || 'Unknown Source'}
+                                </span>
+                            </div>
+                            <button className="close-metadata-btn" onClick={() => setShowMetadata(false)}>✕</button>
+                        </div>
+
+                        <div className="metadata-info-grid">
+                            <div className="metadata-item">
+                                <span className="metadata-label">Duration</span>
+                                <span className="metadata-value">{formatTime(duration)}</span>
+                            </div>
+                            <div className="metadata-item">
+                                <span className="metadata-label">Quality</span>
+                                <span className="metadata-value">
+                                    {video.height ? `${video.height}p` : 'Unknown'}
+                                    {video.width >= 3840 ? ' (4K)' : ''}
+                                </span>
+                            </div>
+                            <div className="metadata-item">
+                                <span className="metadata-label">Size</span>
+                                <span className="metadata-value">
+                                    {video.size_mb ? `${Math.round(video.size_mb)} MB` : 'Unknown'}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="metadata-people-section">
+                            <h3>People in this video</h3>
+                            <div className="metadata-people-list">
+                                {taggedPeople.map(person => (
+                                    <div key={person.id} className="metadata-person-tag">
+                                        <span>{person.name}</span>
+                                        <button onClick={() => handleUntagPerson(person.id)} title="Remove tag">✕</button>
+                                    </div>
+                                ))}
+                                <button
+                                    onClick={() => {
+                                        fetchPeople()
+                                        setShowPersonModal(true)
+                                        // Metadata overlay stays open, modal opens on top
+                                    }}
+                                    className="metadata-person-tag"
+                                    style={{ background: 'rgba(255, 255, 255, 0.2)', cursor: 'pointer' }}
+                                >
+                                    + Add Person
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Person Tagging Modal */}
                 {showPersonModal && (

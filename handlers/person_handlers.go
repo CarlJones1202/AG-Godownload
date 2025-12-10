@@ -121,7 +121,7 @@ func GetPeople(c *gin.Context) {
 					}
 
 					sanitizedSource := services.SanitizeDirectoryName(sourceName)
-					thumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, firstImage.Filename)
+					thumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, filepath.Base(firstImage.Filename))
 				}
 			}
 		}
@@ -188,8 +188,8 @@ func GetPerson(c *gin.Context) {
 			}
 
 			sanitizedSource := services.SanitizeDirectoryName(sourceName)
-			firstImage.WebPath = fmt.Sprintf("/images/%s/%s", sanitizedSource, firstImage.Filename)
-			firstImage.ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, firstImage.Filename)
+			firstImage.WebPath = fmt.Sprintf("/images/%s/%s", sanitizedSource, filepath.Base(firstImage.Filename))
+			firstImage.ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, filepath.Base(firstImage.Filename))
 			galleries[i].Images = []models.Image{firstImage}
 		}
 

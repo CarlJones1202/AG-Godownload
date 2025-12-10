@@ -15,8 +15,8 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
-// RipTnaFlix extracts the direct video URL from a TnaFlix page
-func RipTnaFlix(pageURL string) (string, error) {
+// RipTnaFlix extracts the direct video URL and title from a TnaFlix page
+func RipTnaFlix(pageURL string) (string, string, error) {
 	logger.Debugf("Starting RipTnaFlix for %s", pageURL)
 
 	// Extract video ID from URL
@@ -24,7 +24,7 @@ func RipTnaFlix(pageURL string) (string, error) {
 	videoIDRegex := regexp.MustCompile(`video(\d+)`)
 	matches := videoIDRegex.FindStringSubmatch(pageURL)
 	if len(matches) < 2 {
-		return "", fmt.Errorf("could not extract video ID from URL: %s", pageURL)
+		return "", "", fmt.Errorf("could not extract video ID from URL: %s", pageURL)
 	}
 	videoID := matches[1]
 	logger.Debugf("Extracted video ID: %s", videoID)
@@ -33,38 +33,87 @@ func RipTnaFlix(pageURL string) (string, error) {
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", pageURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("creating request: %w", err)
+		return "", "", fmt.Errorf("creating request: %w", err)
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("fetching page: %w", err)
+		return "", "", fmt.Errorf("fetching page: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("page returned status %d", resp.StatusCode)
+		return "", "", fmt.Errorf("page returned status %d", resp.StatusCode)
 	}
 
 	// Parse HTML to look for video configuration
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("parsing HTML: %w", err)
+		return "", "", fmt.Errorf("parsing HTML: %w", err)
+	}
+
+	// Extract Title
+	title := strings.TrimSpace(doc.Find("h1").First().Text())
+	// Use regex to remove trailing site name if common, e.g., "- TnaFlix"
+	title = strings.TrimSuffix(title, " - TnaFlix")
+	if title == "" {
+		title = "Unknown Video " + videoID
 	}
 
 	// Look for video source in various places
 	var videoURL string
 
-	// Method 1: Check for HTML5 video source tags
+	// Method 1: Check for HTML5 video source tags (Highest Priority)
+	type VideoCandidate struct {
+		URL     string
+		Quality int
+	}
+	var candidates []VideoCandidate
+
 	doc.Find("video source").Each(func(i int, s *goquery.Selection) {
-		if src, exists := s.Attr("src"); exists && strings.Contains(src, ".mp4") {
-			videoURL = src
-			logger.Debugf("Found video source in HTML5 tag: %s", videoURL)
+		src, exists := s.Attr("src")
+		if !exists || !strings.Contains(src, ".mp4") {
+			return
 		}
+
+		quality := 0
+
+		// Try to get size attribute
+		if sizeStr, ok := s.Attr("size"); ok {
+			var q int
+			fmt.Sscanf(sizeStr, "%d", &q)
+			quality = q
+		}
+
+		// Fallback: try to parse from URL (e.g. "1080p")
+		if quality == 0 {
+			re := regexp.MustCompile(`(\d{3,4})p`)
+			matches := re.FindStringSubmatch(src)
+			if len(matches) > 1 {
+				var q int
+				fmt.Sscanf(matches[1], "%d", &q)
+				quality = q
+			}
+		}
+
+		logger.Debugf("Found candidate: %s (Quality: %d)", src, quality)
+		candidates = append(candidates, VideoCandidate{URL: src, Quality: quality})
 	})
 
-	// Method 2: Look for JavaScript config variables
+	// Select best quality
+	if len(candidates) > 0 {
+		bestCandidate := candidates[0]
+		for _, c := range candidates {
+			if c.Quality > bestCandidate.Quality {
+				bestCandidate = c
+			}
+		}
+		videoURL = bestCandidate.URL
+		logger.Infof("Selected best quality video (%dp): %s", bestCandidate.Quality, videoURL)
+	}
+
+	// Method 2: Look for JavaScript config variables (Fallback)
 	if videoURL == "" {
 		doc.Find("script").Each(func(i int, s *goquery.Selection) {
 			scriptContent := s.Text()
@@ -91,44 +140,41 @@ func RipTnaFlix(pageURL string) (string, error) {
 		})
 	}
 
-	// Method 3: Construct URL using known CDN patterns
+	// Method 3: Check for HTML5 video source tags (Lowest Priority usually defaults)
 	if videoURL == "" {
-		// Try multiple quality levels and CDN patterns
-		cdnPatterns := []string{
-			fmt.Sprintf("https://cdn.tnaflix.com/contents/videos/%s/720p.mp4", videoID),
-			fmt.Sprintf("https://cdn.tnaflix.com/contents/videos/%s/480p.mp4", videoID),
-			fmt.Sprintf("https://static.tnaflix.com/contents/videos_sources/%s/file.mp4", videoID),
-			fmt.Sprintf("https://media.tnaflix.com/progressive/%s/720/video.mp4", videoID),
-		}
-
-		for _, pattern := range cdnPatterns {
-			// Try HEAD request to check if URL exists
-			headReq, _ := http.NewRequest("HEAD", pattern, nil)
-			headReq.Header.Set("Referer", pageURL)
-			headReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0")
-
-			headResp, err := client.Do(headReq)
-			if err == nil && headResp.StatusCode == 200 {
-				videoURL = pattern
-				logger.Debugf("Found working CDN URL: %s", videoURL)
-				headResp.Body.Close()
-				break
+		doc.Find("video source").Each(func(i int, s *goquery.Selection) {
+			if src, exists := s.Attr("src"); exists && strings.Contains(src, ".mp4") {
+				videoURL = src
+				logger.Debugf("Found video source in HTML5 tag: %s", videoURL)
 			}
-			if headResp != nil {
-				headResp.Body.Close()
-			}
+		})
+	}
+
+	// Fallback Check
+	if videoURL == "" {
+		// Fallback for base "file.mp4" which is usually low quality but better than nothing
+		fallbackURL := fmt.Sprintf("https://static.tnaflix.com/contents/videos_sources/%s/file.mp4", videoID)
+		headReq, _ := http.NewRequest("HEAD", fallbackURL, nil)
+		headReq.Header.Set("Referer", pageURL)
+		headResp, err := client.Do(headReq)
+		if err == nil && headResp.StatusCode == 200 {
+			videoURL = fallbackURL
+			logger.Debugf("Found fallback CDN URL: %s", videoURL)
+			headResp.Body.Close()
+		} else if headResp != nil {
+			headResp.Body.Close()
 		}
 	}
 
 	if videoURL == "" {
-		return "", fmt.Errorf("could not find video URL for video ID %s", videoID)
+		return "", "", fmt.Errorf("could not find video URL for video ID %s", videoID)
 	}
 
-	return videoURL, nil
+	return videoURL, title, nil
 }
 
 // DownloadVideo downloads a video from a direct URL and saves it with hash-based naming
-func DownloadVideo(videoURL string, sourceName string, pageURL string) (*DownloadImageResult, error) {
+func DownloadVideo(videoURL string, sourceName string, pageURL string, title string) (*DownloadImageResult, error) {
 	logger.Infof("Downloading video from %s", videoURL)
 
 	// Create HTTP client with proper headers
@@ -213,30 +259,20 @@ func DownloadVideo(videoURL string, sourceName string, pageURL string) (*Downloa
 		logger.Warnf("Failed to generate trickplay data: %v", err)
 	}
 
+	// Parse Video Metadata
+	meta, err := GetVideoMetadata(destPath)
+	if err != nil {
+		logger.Warnf("Failed to get video metadata: %v", err)
+		meta = &VideoMetadata{}
+	}
+
 	return &DownloadImageResult{
 		Path:           destPath,
+		Title:          title,
+		Duration:       meta.Duration,
+		Width:          meta.Width,
+		Height:         meta.Height,
+		SizeMB:         meta.SizeMB,
 		DominantColors: "[]", // Videos don't need color extraction
 	}, nil
-}
-
-// IsVideoURL checks if a URL points to a known video hosting site
-func IsVideoURL(url string) bool {
-	videoSites := []string{
-		"tnaflix.com",
-		"pornhub.com",
-		"xvideos.com",
-		"redtube.com",
-		"tube8.com",
-		"youporn.com",
-		"spankbang.com",
-	}
-
-	lowerURL := strings.ToLower(url)
-	for _, site := range videoSites {
-		if strings.Contains(lowerURL, site) {
-			return true
-		}
-	}
-
-	return false
 }

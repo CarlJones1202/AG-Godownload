@@ -38,6 +38,11 @@ func ProcessLocalSource(source models.Source) error {
 			Filename:       filepath.Base(result.Path),
 			OriginalURL:    fmt.Sprintf("file://%s", path),
 			DownloadURL:    fmt.Sprintf("file://%s", result.Path),
+			Title:          result.Title,
+			Duration:       result.Duration,
+			Width:          result.Width,
+			Height:         result.Height,
+			SizeMB:         result.SizeMB,
 			DominantColors: "[]",
 			Type:           "video",
 		}

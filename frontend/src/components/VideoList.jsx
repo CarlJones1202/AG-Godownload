@@ -2,6 +2,7 @@ import { useState } from 'react'
 import VideoPlayer from './VideoPlayer'
 // Use ImageList CSS for now as it's a grid
 import './ImageList.css'
+import './VideoList.css'
 
 function VideoList({ videos, onRefresh, meta, onPageChange }) {
     const [lightboxVideo, setLightboxVideo] = useState(null)
@@ -61,13 +62,13 @@ function VideoList({ videos, onRefresh, meta, onPageChange }) {
                     {videos.map((video, index) => (
                         <div
                             key={video.id}
-                            className="image-card"
+                            className="video-card"
                             onClick={() => openLightbox(video, index)}
                         >
-                            <div className="image-thumbnail video-thumbnail">
+                            <div className="video-thumbnail-container">
                                 <img
                                     src={video.thumbnail_path || `/api/thumbnails/${video.filename}`}
-                                    alt={video.filename}
+                                    alt={video.title || video.filename}
                                     loading="lazy"
                                     onError={(e) => {
                                         e.target.onerror = null;
@@ -75,7 +76,37 @@ function VideoList({ videos, onRefresh, meta, onPageChange }) {
                                     }}
                                 />
                                 <div className="play-icon-overlay">▶</div>
+
+                                {/* Duration Badge */}
+                                {video.duration > 0 && (
+                                    <div className="video-duration-badge">
+                                        {(() => {
+                                            const h = Math.floor(video.duration / 3600);
+                                            const m = Math.floor((video.duration % 3600) / 60);
+                                            const s = Math.floor(video.duration % 60);
+                                            return h > 0
+                                                ? `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+                                                : `${m}:${s.toString().padStart(2, '0')}`;
+                                        })()}
+                                    </div>
+                                )}
+
+                                {/* Quality Badge */}
+                                {video.height > 0 && (
+                                    <div className="video-quality-badge">
+                                        {video.width >= 3840 ? '4K' :
+                                            video.height >= 1080 ? '1080p' :
+                                                video.height >= 720 ? '720p' : `${video.height}p`}
+                                    </div>
+                                )}
                             </div>
+
+                            <div className="video-info">
+                                <h3 className="video-title" title={video.source?.name || video.title}>
+                                    {video.source?.name || video.title || "Untitled Video"}
+                                </h3>
+                            </div>
+
                             <button
                                 className="delete-image-btn"
                                 onClick={(e) => handleDeleteVideo(video.id, e)}

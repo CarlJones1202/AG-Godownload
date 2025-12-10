@@ -162,7 +162,7 @@ func GetImages(c *gin.Context) {
 		}
 
 		sanitizedSource := services.SanitizeDirectoryName(sourceName)
-		images[i].WebPath = fmt.Sprintf("/images/%s/%s", sanitizedSource, images[i].Filename)
+		images[i].WebPath = fmt.Sprintf("/images/%s/%s", sanitizedSource, filepath.Base(images[i].Filename))
 
 		// Video thumbnails have .jpg appended to the filename
 		thumbnailFilename := images[i].Filename
@@ -170,11 +170,11 @@ func GetImages(c *gin.Context) {
 			thumbnailFilename = images[i].Filename + ".jpg"
 
 			// Add trickplay paths for videos
-			baseFilename := strings.TrimSuffix(images[i].Filename, filepath.Ext(images[i].Filename))
+			baseFilename := strings.TrimSuffix(filepath.Base(images[i].Filename), filepath.Ext(images[i].Filename))
 			images[i].TrickplayVTT = fmt.Sprintf("/images/%s/trickplay/%s.vtt", sanitizedSource, baseFilename)
 			images[i].TrickplaySprite = fmt.Sprintf("/images/%s/trickplay/%s_sprite.jpg", sanitizedSource, baseFilename)
 		}
-		images[i].ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, thumbnailFilename)
+		images[i].ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, filepath.Base(thumbnailFilename))
 	}
 
 	totalPages := int((total + int64(limit) - 1) / int64(limit))

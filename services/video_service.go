@@ -53,10 +53,6 @@ func ImportLocalVideo(sourcePath string, sourceName string) (*DownloadImageResul
 
 	// Check collision
 	if _, err := os.Stat(destPath); os.IsNotExist(err) {
-		// Copy file (better than move to avoid deleting original if something goes wrong, though user said "move it")
-		// User said: "just move it from the folder to our uploads folder"
-		// Okay, I'll attempt a Move (Rename), if valid. If different drive, copy+delete.
-
 		// Close the reader first
 		f.Close()
 
@@ -70,18 +66,12 @@ func ImportLocalVideo(sourcePath string, sourceName string) (*DownloadImageResul
 		}
 	} else {
 		// If file exists, we still might want to delete the source if we are "moving" it
-		// But only if hash is identical (which it is, by definition of filename)
 		f.Close()
 		os.Remove(sourcePath)
 	}
 
 	// Generate thumbnail
 	if _, err := GenerateVideoThumbnail(destPath); err != nil {
-		// Log error but don't fail import?
-		// Since we can't easily log here without importing logger (circular dependency risk if not careful, but services package is same)
-		// actually same package, so it's fine.
-		// But function signature returns error. Let's return error for now to be safe or ignore.
-		// video_service is in package services.
 		fmt.Printf("Warning: Failed to generate video thumbnail: %v\n", err)
 	}
 
@@ -90,10 +80,33 @@ func ImportLocalVideo(sourcePath string, sourceName string) (*DownloadImageResul
 		fmt.Printf("Warning: Failed to generate trickplay data: %v\n", err)
 	}
 
+	// Parse Video Metadata
+	meta, err := GetVideoMetadata(destPath)
+	if err != nil {
+		fmt.Printf("Warning: Failed to get video metadata: %v\n", err)
+		meta = &VideoMetadata{}
+	}
+
 	return &DownloadImageResult{
 		Path:           destPath,
+		Title:          CleanTitle(sourcePath), // Use cleaned filename as title
+		Duration:       meta.Duration,
+		Width:          meta.Width,
+		Height:         meta.Height,
+		SizeMB:         meta.SizeMB,
 		DominantColors: "[]",
 	}, nil
+}
+
+// Helper to clean filename for title
+func CleanTitle(filename string) string {
+	name := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
+	// Replace underscores and dots with spaces
+	name = strings.ReplaceAll(name, "_", " ")
+	name = strings.ReplaceAll(name, ".", " ")
+	// Also handle dashes
+	name = strings.ReplaceAll(name, "-", " ")
+	return strings.TrimSpace(name)
 }
 
 // IsVideoFile checks if extension matches common video formats
@@ -101,6 +114,19 @@ func IsVideoFile(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".mp4", ".mkv", ".webm", ".avi", ".mov", ".wmv", ".flv":
+		return true
+	}
+	return false
+}
+
+// IsVideoURL checks if a URL points to a video based on extension or domain
+func IsVideoURL(url string) bool {
+	// Check extension
+	if IsVideoFile(url) {
+		return true
+	}
+	// Check known video sites
+	if strings.Contains(url, "tnaflix.com") {
 		return true
 	}
 	return false

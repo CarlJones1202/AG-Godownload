@@ -298,11 +298,11 @@ func ProcessVideoSource(source models.Source, gallery models.Gallery) error {
 	logger.Infof("Processing video source: %s", source.Location)
 
 	// Extract video URL based on the hosting site
-	var videoURL string
+	var videoURL, videoTitle string
 	var err error
 
 	if strings.Contains(source.Location, "tnaflix.com") {
-		videoURL, err = RipTnaFlix(source.Location)
+		videoURL, videoTitle, err = RipTnaFlix(source.Location)
 		if err != nil {
 			return fmt.Errorf("failed to extract TnaFlix video: %w", err)
 		}
@@ -314,8 +314,9 @@ func ProcessVideoSource(source models.Source, gallery models.Gallery) error {
 	logger.Infof("Extracted video URL: %s", videoURL)
 
 	// Check if video already exists in database
-	var existingImage models.Image
-	if err := database.DB.Where("download_url = ?", videoURL).First(&existingImage).Error; err == nil {
+	var images []models.Image
+	if err := database.DB.Where("download_url = ?", videoURL).Limit(1).Find(&images).Error; err == nil && len(images) > 0 {
+		existingImage := images[0]
 		logger.Infof("Video already exists in database: %s", videoURL)
 
 		// Associate with this gallery if not already associated
@@ -336,7 +337,7 @@ func ProcessVideoSource(source models.Source, gallery models.Gallery) error {
 	}
 
 	// Download the video
-	result, err := DownloadVideo(videoURL, source.Name, source.Location)
+	result, err := DownloadVideo(videoURL, source.Name, source.Location, videoTitle)
 	if err != nil {
 		return fmt.Errorf("failed to download video: %w", err)
 	}
@@ -356,6 +357,11 @@ func ProcessVideoSource(source models.Source, gallery models.Gallery) error {
 		Filename:       relPath,
 		OriginalURL:    source.Location,
 		DownloadURL:    videoURL,
+		Title:          result.Title,
+		Duration:       result.Duration,
+		Width:          result.Width,
+		Height:         result.Height,
+		SizeMB:         result.SizeMB,
 		DominantColors: result.DominantColors,
 		Type:           "video",
 		Galleries:      []*models.Gallery{&gallery},

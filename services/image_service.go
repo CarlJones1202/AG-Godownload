@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"gallery_api/logger"
+	"gallery_api/models"
 	"io"
 	"math"
 	"net/http"
@@ -14,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/disintegration/imaging"
+	"gorm.io/gorm"
 )
 
 const (
@@ -44,7 +47,12 @@ func SanitizeDirectoryName(name string) string {
 // DownloadImageResult contains the result of downloading an image
 type DownloadImageResult struct {
 	Path           string
-	DominantColors string
+	Title          string // extracted title for videos
+	DominantColors string // JSON array of hex colors
+	Duration       float64
+	Width          int
+	Height         int
+	SizeMB         float64
 }
 
 // DownloadImage downloads an image and saves it with a content-based hash filename
@@ -165,6 +173,71 @@ func GenerateThumbnail(srcPath string) (string, error) {
 	}
 
 	return thumbPath, nil
+}
+
+// VideoMetadata stores extracted video information
+type VideoMetadata struct {
+	Duration float64
+	Width    int
+	Height   int
+	SizeMB   float64
+}
+
+// GetVideoMetadata extracts duration and dimensions using ffprobe
+func GetVideoMetadata(srcPath string) (*VideoMetadata, error) {
+	// Check if file exists
+	info, err := os.Stat(srcPath)
+	if err != nil {
+		return nil, err
+	}
+	sizeMB := float64(info.Size()) / (1024 * 1024)
+
+	// Use ffprobe to get metadata
+	// -v error: show only errors
+	// -select_streams v:0: select first video stream
+	// -show_entries: specify what to output
+	// -of csv=p=0: output as csv without header
+	cmd := exec.Command("ffprobe",
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=width,height,duration",
+		"-of", "csv=p=0",
+		srcPath)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return &VideoMetadata{SizeMB: sizeMB}, fmt.Errorf("ffprobe failed: %w", err)
+	}
+
+	// Parse output "width,height,duration" (e.g., "1920,1080,120.5")
+	parts := strings.Split(strings.TrimSpace(string(output)), ",")
+	if len(parts) >= 2 { // Sometimes duration might be missing or in format container
+		var meta VideoMetadata
+		meta.SizeMB = sizeMB
+
+		fmt.Sscanf(parts[0], "%d", &meta.Width)
+		fmt.Sscanf(parts[1], "%d", &meta.Height)
+
+		if len(parts) >= 3 {
+			fmt.Sscanf(parts[2], "%f", &meta.Duration)
+		}
+
+		// If duration is 0, try container duration
+		if meta.Duration == 0 {
+			cmd = exec.Command("ffprobe",
+				"-v", "error",
+				"-show_entries", "format=duration",
+				"-of", "default=noprint_wrappers=1:nokey=1",
+				srcPath)
+			if out, err := cmd.Output(); err == nil {
+				fmt.Sscanf(strings.TrimSpace(string(out)), "%f", &meta.Duration)
+			}
+		}
+
+		return &meta, nil
+	}
+
+	return &VideoMetadata{SizeMB: sizeMB}, fmt.Errorf("failed to parse ffprobe output: %s", string(output))
 }
 
 // GenerateVideoThumbnail generates a thumbnail for a video file using ffmpeg
@@ -339,4 +412,148 @@ func formatVTTTime(seconds float64) string {
 	secs := int(seconds) % 60
 	millis := int((seconds - float64(int(seconds))) * 1000)
 	return fmt.Sprintf("%02d:%02d:%02d.%03d", hours, minutes, secs, millis)
+}
+
+// ScanMissingMetadata finds videos with missing metadata and updates them
+func ScanMissingMetadata(db *gorm.DB, force bool) error {
+	var videos []models.Image
+
+	query := db.Where("type = ?", "video")
+
+	if !force {
+		// Find videos with type='video' AND (missing metadata OR dirty titles)
+		// We want to fix:
+		// 1. Missing Duration (0)
+		// 2. Missing Width (0)
+		// 3. Titles with underscores or dots (likely raw filenames)
+		query = query.Where("duration = ? OR width = ? OR title LIKE ? OR title LIKE ?", 0, 0, "%_%", "%.%")
+	}
+
+	if err := query.Find(&videos).Error; err != nil {
+		return err
+	}
+
+	if len(videos) == 0 {
+		return nil
+	}
+
+	logger.Infof("Found %d videos with missing metadata. Starting scan...", len(videos))
+
+	for _, video := range videos {
+		// Construct full path
+		// We need to resolve the path similar to how ServeImage does or use what we know about storage
+		// Usually UploadsDir + SourceName + Filename
+		// But image.Filename might be relative or absolute-ish depending on legacy
+
+		var sourceName string
+		if video.SourceID != nil {
+			var source models.Source
+			if err := db.First(&source, *video.SourceID).Error; err == nil {
+				sourceName = source.Name
+			}
+		} else {
+			// Try gallery
+			var gallery models.Gallery
+			if err := db.Joins("JOIN image_galleries ON image_galleries.gallery_id = galleries.id").
+				Where("image_galleries.image_id = ?", video.ID).First(&gallery).Error; err == nil {
+				if gallery.SourceID != nil {
+					var source models.Source
+					if err := db.First(&source, *gallery.SourceID).Error; err == nil {
+						sourceName = source.Name
+					}
+				}
+			}
+		}
+
+		if sourceName == "" {
+			sourceName = "uncategorized"
+		}
+
+		// Sanitize
+		dirName := SanitizeDirectoryName(sourceName)
+		fullPath := filepath.Join(UploadsDir, dirName, filepath.Base(video.Filename))
+
+		// Verify file exists
+		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+			// Try direct if video.Filename contains path
+			if _, err := os.Stat(filepath.Join(UploadsDir, video.Filename)); err == nil {
+				fullPath = filepath.Join(UploadsDir, video.Filename)
+			} else if _, err := os.Stat(video.Filename); err == nil {
+				// Handle absolute path stored in DB
+				fullPath = video.Filename
+			} else {
+				// Fallback: Recursive search in uploads folder
+				foundPath := ""
+				baseName := filepath.Base(video.Filename)
+				err := filepath.Walk(UploadsDir, func(path string, info os.FileInfo, err error) error {
+					if err != nil {
+						return err
+					}
+					if !info.IsDir() && filepath.Base(path) == baseName {
+						foundPath = path
+						return io.EOF // Stop search
+					}
+					// Also check if filename matches without processing (legacy reasons)
+					if !info.IsDir() && info.Name() == video.Filename {
+						foundPath = path
+						return io.EOF
+					}
+					return nil
+				})
+
+				if err != nil && err != io.EOF {
+					logger.Warnf("Recursive search error for video %d: %v", video.ID, err)
+				}
+
+				if foundPath != "" {
+					fullPath = foundPath
+					logger.Infof("Found moved video file for %d at: %s", video.ID, fullPath)
+				} else {
+					logger.Warnf("Could not find file for video %d. Checked: %s and recursive search", video.ID, fullPath)
+					continue
+				}
+			}
+		}
+
+		// Get Metadata
+		meta, err := GetVideoMetadata(fullPath)
+		if err != nil {
+			logger.Warnf("Failed to extract metadata for video %d: %v", video.ID, err)
+			continue
+		}
+
+		// Update DB
+		video.Duration = meta.Duration
+		video.Width = meta.Width
+		video.Height = meta.Height
+		video.SizeMB = meta.SizeMB
+
+		// Backfill title if missing or if it looks like a filename (contains underscores)
+		// We want to improve titles even if they "exist" but look like "my_video_file"
+		shouldUpdateTitle := video.Title == "" || strings.Contains(video.Title, "_") || strings.Contains(video.Title, ".")
+
+		if shouldUpdateTitle {
+			// Use filename without extension and clean it
+			baseName := filepath.Base(video.Filename)
+			ext := filepath.Ext(baseName)
+			rawName := strings.TrimSuffix(baseName, ext)
+
+			// Replace separators
+			cleanName := strings.ReplaceAll(rawName, "_", " ")
+			cleanName = strings.ReplaceAll(cleanName, ".", " ")
+			video.Title = strings.TrimSpace(cleanName)
+		}
+
+		// If title is empty or same as filename, try to prettify it or leave it
+		// For now, let's just fix the technical metadata. User complained about "Unknown" size/quality.
+
+		if err := db.Save(&video).Error; err != nil {
+			logger.Errorf("Failed to save metadata for video %d: %v", video.ID, err)
+		} else {
+			logger.Infof("Updated metadata for video %d: %s (%dp)", video.ID, video.Filename, video.Height)
+		}
+	}
+
+	logger.Infof("Metadata scan complete.")
+	return nil
 }

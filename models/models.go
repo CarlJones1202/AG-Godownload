@@ -41,6 +41,11 @@ type Image struct {
 	SourceID        *uint          `gorm:"index" json:"source_id,omitempty"` // Direct source association for videos
 	Source          *Source        `json:"source,omitempty" gorm:"foreignKey:SourceID"`
 	Filename        string         `json:"filename"`
+	Title           string         `json:"title"`                     // Video title or display name
+	Duration        float64        `json:"duration"`                  // Runtime in seconds
+	Width           int            `json:"width"`                     // Video width in pixels
+	Height          int            `json:"height"`                    // Video height in pixels
+	SizeMB          float64        `json:"size_mb"`                   // File size in MB
 	OriginalURL     string         `gorm:"index" json:"original_url"` // The hosting page URL (e.g., imagebam.com/view/...)
 	DownloadURL     string         `json:"download_url"`              // The final direct image URL after ripping
 	WebPath         string         `gorm:"-" json:"web_path"`
@@ -89,12 +94,13 @@ type PersonIdentifier struct {
 	ExternalID string    `json:"external_id"`         // The ID from the external source
 	Data       string    `json:"data"`                // JSON blob for source-specific data
 }
+
 // PersonExclusion tracks content that should NOT be tagged to a specific person
 // Used to prevent auto-tagging false positives
 type PersonExclusion struct {
-ID        uint       `gorm:"primaryKey" json:"id"`
-CreatedAt time.Time  `json:"created_at"`
-PersonID  uint       `gorm:"index" json:"person_id"`
-GalleryID *uint      `gorm:"index" json:"gallery_id,omitempty"` // Gallery to exclude (nullable)
-ImageID   *uint      `gorm:"index" json:"image_id,omitempty"`   // Image/video to exclude (nullable)
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	PersonID  uint      `gorm:"index" json:"person_id"`
+	GalleryID *uint     `gorm:"index" json:"gallery_id,omitempty"` // Gallery to exclude (nullable)
+	ImageID   *uint     `gorm:"index" json:"image_id,omitempty"`   // Image/video to exclude (nullable)
 }

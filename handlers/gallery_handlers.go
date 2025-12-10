@@ -72,8 +72,28 @@ func GetGalleries(c *gin.Context) {
 				sourceName = galleries[i].Source.Name
 			}
 			sanitizedSource := services.SanitizeDirectoryName(sourceName)
-			firstImage.WebPath = fmt.Sprintf("/images/%s", firstImage.Filename)
-			firstImage.ThumbnailPath = strings.ReplaceAll(firstImage.Filename, sanitizedSource, fmt.Sprintf("/images/%s/thumbnails", sanitizedSource))
+			firstImage.WebPath = fmt.Sprintf("/images/%s", filepath.ToSlash(firstImage.Filename))
+
+			// Construct thumbnail path
+			thumbPath := firstImage.Filename
+			if firstImage.Type == "video" {
+				// Replace extension with .jpg for video thumbnails
+				ext := filepath.Ext(thumbPath)
+				thumbPath = strings.TrimSuffix(thumbPath, ext) + ".jpg"
+			}
+
+			// Inject "thumbnails" into the path
+			// Assumption: Filename is like "Source/file.ext"
+			// We want "/images/Source/thumbnails/file.ext"
+			parts := strings.Split(filepath.ToSlash(thumbPath), "/")
+			if len(parts) > 1 {
+				// Insert "thumbnails" before the filename
+				parts = append(parts[:len(parts)-1], append([]string{"thumbnails"}, parts[len(parts)-1:]...)...)
+				firstImage.ThumbnailPath = "/images/" + strings.Join(parts, "/")
+			} else {
+				// Fallback
+				firstImage.ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, filepath.Base(thumbPath))
+			}
 
 			galleries[i].Images = []models.Image{firstImage}
 		}
@@ -113,8 +133,21 @@ func GetGallery(c *gin.Context) {
 	sanitizedSource := services.SanitizeDirectoryName(sourceName)
 
 	for i := range gallery.Images {
-		gallery.Images[i].WebPath = fmt.Sprintf("/images/%s", gallery.Images[i].Filename)
-		gallery.Images[i].ThumbnailPath = strings.ReplaceAll(gallery.Images[i].Filename, sanitizedSource, fmt.Sprintf("/images/%s/thumbnails", sanitizedSource))
+		gallery.Images[i].WebPath = fmt.Sprintf("/images/%s", filepath.ToSlash(gallery.Images[i].Filename))
+
+		thumbPath := gallery.Images[i].Filename
+		if gallery.Images[i].Type == "video" {
+			ext := filepath.Ext(thumbPath)
+			thumbPath = strings.TrimSuffix(thumbPath, ext) + ".jpg"
+		}
+
+		parts := strings.Split(filepath.ToSlash(thumbPath), "/")
+		if len(parts) > 1 {
+			parts = append(parts[:len(parts)-1], append([]string{"thumbnails"}, parts[len(parts)-1:]...)...)
+			gallery.Images[i].ThumbnailPath = "/images/" + strings.Join(parts, "/")
+		} else {
+			gallery.Images[i].ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, filepath.Base(thumbPath))
+		}
 	}
 
 	c.JSON(http.StatusOK, gallery)
