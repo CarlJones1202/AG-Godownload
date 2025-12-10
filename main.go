@@ -94,6 +94,18 @@ func main() {
 	r.GET("/stashdb/search", handlers.SearchStashDB)
 	r.POST("/people/:id/stashdb/link", handlers.LinkStashDB)
 
+	// Stats routes
+	r.GET("/people/:id/stats", handlers.GetPersonStats)
+
+	// Tag routes
+	r.GET("/tags", handlers.GetTags)
+	r.GET("/tags/top", handlers.GetTopTags)
+	r.GET("/tags/search", handlers.SearchTags)
+	r.POST("/tags", handlers.CreateTag)
+	r.POST("/images/:imageId/tags/:tagId", handlers.LinkTagToImage)
+	r.DELETE("/images/:imageId/tags/:tagId", handlers.UnlinkTagFromImage)
+
+	// Image routes
 	r.DELETE("/images/:id", handlers.DeleteImage)
 	r.GET("/images", handlers.GetImages)
 	r.GET("/search/color", handlers.SearchByColor)

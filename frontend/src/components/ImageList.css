@@ -6,7 +6,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 1.5rem;
+    margin-bottom: var(--spacing-lg);
 }
 
 .image-header h2 {
@@ -14,64 +14,47 @@
     font-size: 1.25rem;
     font-weight: 600;
     letter-spacing: -0.02em;
+    color: var(--color-text-primary);
 }
 
 .images-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 1rem;
+    gap: var(--spacing-md);
 }
 
 .image-card {
-    background: #ffffff;
-    border-radius: 12px;
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-lg);
     overflow: hidden;
     cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    border: 1px solid rgba(0, 0, 0, 0.06);
+    transition: all var(--transition-base);
+    border: 1px solid var(--color-border-primary);
     position: relative;
     aspect-ratio: 1;
 }
 
 .image-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-    border-color: rgba(0, 0, 0, 0.1);
-}
-
-@media (prefers-color-scheme: dark) {
-    .image-card {
-        background: #1a1a1a;
-        border-color: rgba(255, 255, 255, 0.06);
-    }
-
-    .image-card:hover {
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-        border-color: rgba(255, 255, 255, 0.1);
-    }
+    box-shadow: var(--shadow-lg);
+    border-color: var(--color-border-secondary);
 }
 
 .image-thumbnail {
     width: 100%;
     height: 100%;
-    background: linear-gradient(135deg, #f5f5f5 0%, #e5e5e5 100%);
+    background: linear-gradient(135deg, var(--color-bg-tertiary) 0%, var(--color-bg-primary) 100%);
     display: flex;
     align-items: center;
     justify-content: center;
     overflow: hidden;
 }
 
-@media (prefers-color-scheme: dark) {
-    .image-thumbnail {
-        background: linear-gradient(135deg, #1a1a1a 0%, #0f0f0f 100%);
-    }
-}
-
 .image-thumbnail img {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform 0.3s ease;
+    transition: transform var(--transition-slow);
 }
 
 .image-card:hover .image-thumbnail img {
@@ -80,15 +63,15 @@
 
 .no-images {
     text-align: center;
-    padding: 4rem;
-    color: #888;
+    padding: var(--spacing-xl);
+    color: var(--color-text-secondary);
     font-size: 0.9375rem;
 }
 
 .delete-image-btn {
     position: absolute;
-    top: 0.5rem;
-    right: 0.5rem;
+    top: var(--spacing-sm);
+    right: var(--spacing-sm);
     width: 28px;
     height: 28px;
     border-radius: 50%;
@@ -99,7 +82,7 @@
     line-height: 1;
     cursor: pointer;
     opacity: 0;
-    transition: opacity 0.2s ease, transform 0.1s ease;
+    transition: opacity var(--transition-base), transform var(--transition-fast);
     padding: 0;
     display: flex;
     align-items: center;
@@ -130,7 +113,7 @@
     text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
     pointer-events: none;
     opacity: 0.9;
-    transition: opacity 0.2s ease;
+    transition: opacity var(--transition-base);
 }
 
 .image-card:hover .play-icon-overlay {

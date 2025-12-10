@@ -6,7 +6,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 1.5rem;
+    margin-bottom: var(--spacing-lg);
 }
 
 .person-header h2 {
@@ -14,106 +14,75 @@
     font-size: 1.25rem;
     font-weight: 600;
     letter-spacing: -0.02em;
+    color: var(--color-text-primary);
 }
 
 .person-form-card {
-    background: #ffffff;
-    border-radius: 12px;
-    padding: 1.5rem;
-    margin-bottom: 1.5rem;
-    border: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-@media (prefers-color-scheme: dark) {
-    .person-form-card {
-        background: #1a1a1a;
-        border-color: rgba(255, 255, 255, 0.06);
-    }
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    margin-bottom: var(--spacing-lg);
+    border: 1px solid var(--color-border-primary);
 }
 
 .form-group {
-    margin-bottom: 1rem;
+    margin-bottom: var(--spacing-md);
 }
 
 .form-group label {
     display: block;
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--spacing-sm);
     font-weight: 500;
     font-size: 0.875rem;
+    color: var(--color-text-primary);
 }
 
 .form-group input {
     width: 100%;
-    padding: 0.5rem;
-    border: 1px solid rgba(0, 0, 0, 0.1);
-    border-radius: 6px;
+    padding: var(--spacing-sm);
+    border: 1px solid var(--color-border-primary);
+    border-radius: var(--radius-sm);
     font-size: 0.875rem;
-}
-
-@media (prefers-color-scheme: dark) {
-    .form-group input {
-        background: #0a0a0a;
-        border-color: rgba(255, 255, 255, 0.1);
-        color: white;
-    }
 }
 
 .people-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 1rem;
+    gap: var(--spacing-md);
 }
 
 .person-card {
-    background: #ffffff;
-    border-radius: 12px;
-    padding: 1.5rem;
-    border: 1px solid rgba(0, 0, 0, 0.06);
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    border: 1px solid var(--color-border-primary);
     overflow: hidden;
-    transition: all 0.2s ease;
+    transition: all var(--transition-base);
 }
 
 .person-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-    border-color: rgba(0, 0, 0, 0.1);
-}
-
-@media (prefers-color-scheme: dark) {
-    .person-card {
-        background: #1a1a1a;
-        border-color: rgba(255, 255, 255, 0.06);
-    }
-
-    .person-card:hover {
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-        border-color: rgba(255, 255, 255, 0.1);
-    }
+    box-shadow: var(--shadow-lg);
+    border-color: var(--color-border-secondary);
 }
 
 .person-thumbnail {
     width: 100%;
     aspect-ratio: 1;
-    background: linear-gradient(135deg, #f5f5f5 0%, #e5e5e5 100%);
-    border-radius: 8px;
+    background: linear-gradient(135deg, var(--color-bg-tertiary) 0%, var(--color-bg-primary) 100%);
+    border-radius: var(--radius-md);
     overflow: hidden;
-    margin-bottom: 1rem;
+    margin-bottom: var(--spacing-md);
     display: flex;
     align-items: center;
     justify-content: center;
-}
-
-@media (prefers-color-scheme: dark) {
-    .person-thumbnail {
-        background: linear-gradient(135deg, #2a2a2a 0%, #1f1f1f 100%);
-    }
 }
 
 .person-thumbnail img {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform 0.3s ease;
+    transition: transform var(--transition-slow);
 }
 
 .person-card:hover .person-thumbnail img {
@@ -123,38 +92,38 @@
 .person-thumbnail .no-image {
     font-size: 2rem;
     opacity: 0.2;
+    color: var(--color-text-tertiary);
 }
-
 
 .alias-tag {
     background: rgba(100, 108, 255, 0.1);
     color: #646cff;
     padding: 0.25rem 0.5rem;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     font-size: 0.75rem;
     font-weight: 500;
 }
 
 .gallery-count {
     margin: 0;
-    color: #888;
+    color: var(--color-text-secondary);
     font-size: 0.875rem;
 }
 
 .person-actions {
     display: flex;
-    gap: 0.5rem;
-    margin-top: 1rem;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-md);
 }
 
 .link-btn,
 .delete-btn {
     padding: 0.5rem 1rem;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
     font-size: 0.875rem;
-    transition: all 0.2s ease;
+    transition: all var(--transition-base);
 }
 
 .link-btn {
@@ -165,6 +134,7 @@
 
 .link-btn:hover {
     background: #535bf2;
+    transform: translateY(-1px);
 }
 
 .delete-btn {
@@ -174,11 +144,12 @@
 
 .delete-btn:hover {
     background: rgba(244, 67, 54, 0.2);
+    transform: translateY(-1px);
 }
 
 .no-people {
     text-align: center;
-    padding: 4rem;
-    color: #888;
+    padding: var(--spacing-xl);
+    color: var(--color-text-secondary);
     font-size: 0.9375rem;
 }

@@ -29,6 +29,7 @@ func Migrate() {
 		&models.Person{},
 		&models.PersonIdentifier{},
 		&models.PersonExclusion{},
+		&models.Tag{},
 	)
 	if err != nil {
 		logger.Fatal("Failed to migrate database:", err)

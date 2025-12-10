@@ -99,7 +99,7 @@ func AddImageToGallery(c *gin.Context) {
 	c.JSON(http.StatusCreated, image)
 }
 
-// GetImages returns all images with pagination
+// GetImages returns all images with pagination, filtering, and sorting
 func GetImages(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
@@ -114,6 +114,7 @@ func GetImages(c *gin.Context) {
 	var total int64
 	query := database.DB.Model(&models.Image{})
 
+	// Type filter
 	filterType := c.Query("type")
 	if filterType == "" {
 		filterType = "image" // Default to showing only images to preserve backward compat
@@ -122,13 +123,50 @@ func GetImages(c *gin.Context) {
 		query = query.Where("type = ?", filterType)
 	}
 
+	// Tag filter
+	if tagIDs := c.Query("filter_tags"); tagIDs != "" {
+		query = query.Joins("JOIN image_tags ON image_tags.image_id = images.id").
+			Where("image_tags.tag_id IN (?)", strings.Split(tagIDs, ",")).
+			Distinct()
+	}
+
+	// Person filter
+	if personID := c.Query("filter_person"); personID != "" {
+		query = query.Joins("JOIN person_images ON person_images.image_id = images.id").
+			Where("person_images.person_id = ?", personID).
+			Distinct()
+	}
+
+	// Color filter (approximate match)
+	if color := c.Query("filter_color"); color != "" {
+		query = query.Where("dominant_colors LIKE ?", "%"+color+"%")
+	}
+
+	// Sorting
+	sortBy := c.DefaultQuery("sort", "newest")
+	switch sortBy {
+	case "newest":
+		query = query.Order("created_at DESC")
+	case "oldest":
+		query = query.Order("created_at ASC")
+	case "largest":
+		query = query.Order("size_mb DESC")
+	case "smallest":
+		query = query.Order("size_mb ASC")
+	case "random":
+		query = query.Order("RANDOM()")
+	default:
+		query = query.Order("created_at DESC")
+	}
+
 	query.Count(&total)
 
 	var images []models.Image
 	// Preload Galleries.Source to get source name for images
 	// Preload Source to get source name for videos (direct association)
 	// Preload People for videos (direct association)
-	if err := query.Preload("Galleries.Source").Preload("Source").Preload("People").Limit(limit).Offset(offset).Order("created_at DESC").Find(&images).Error; err != nil {
+	// Preload Tags for all images
+	if err := query.Preload("Galleries.Source").Preload("Source").Preload("People").Preload("Tags").Limit(limit).Offset(offset).Find(&images).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch images"})
 		return
 	}

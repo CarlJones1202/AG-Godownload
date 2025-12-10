@@ -6,7 +6,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 1.5rem;
+    margin-bottom: var(--spacing-lg);
 }
 
 .source-header h2 {
@@ -16,24 +16,22 @@
     letter-spacing: -0.02em;
 }
 
-.source-header div {
+.source-controls {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--spacing-sm);
+    align-items: center;
+}
+
+.search-input {
+    min-width: 200px;
 }
 
 .source-form {
-    background: #ffffff;
-    padding: 1.5rem;
-    border-radius: 12px;
-    margin-bottom: 1.5rem;
-    border: 1px solid rgba(0, 0, 0, 0.08);
-}
-
-@media (prefers-color-scheme: dark) {
-    .source-form {
-        background: #1a1a1a;
-        border-color: rgba(255, 255, 255, 0.08);
-    }
+    background: var(--color-bg-secondary);
+    padding: var(--spacing-lg);
+    border-radius: var(--radius-lg);
+    margin-bottom: var(--spacing-lg);
+    border: 1px solid var(--color-border-primary);
 }
 
 .form-group {
@@ -41,15 +39,16 @@
 }
 
 .form-group:last-of-type {
-    margin-bottom: 1.5rem;
+    margin-bottom: var(--spacing-lg);
 }
 
 .form-group label {
     display: block;
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--spacing-sm);
     font-weight: 500;
     font-size: 0.875rem;
     letter-spacing: -0.01em;
+    color: var(--color-text-primary);
 }
 
 .form-group input,
@@ -64,31 +63,19 @@
 }
 
 .source-card {
-    background: #ffffff;
+    background: var(--color-bg-secondary);
     padding: 1.125rem;
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border: 1px solid rgba(0, 0, 0, 0.06);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1px solid var(--color-border-primary);
+    transition: all var(--transition-base);
 }
 
 .source-card:hover {
-    border-color: rgba(0, 0, 0, 0.12);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-}
-
-@media (prefers-color-scheme: dark) {
-    .source-card {
-        background: #1a1a1a;
-        border-color: rgba(255, 255, 255, 0.06);
-    }
-
-    .source-card:hover {
-        border-color: rgba(255, 255, 255, 0.12);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-    }
+    border-color: var(--color-border-secondary);
+    box-shadow: var(--shadow-sm);
 }
 
 .source-info {
@@ -100,20 +87,14 @@
     font-size: 0.9375rem;
     font-weight: 600;
     letter-spacing: -0.01em;
+    color: var(--color-text-primary);
 }
 
 .source-url {
     margin: 0 0 0.625rem 0;
-    color: #666;
+    color: var(--color-text-secondary);
     font-size: 0.8125rem;
     word-break: break-all;
-    opacity: 0.8;
-}
-
-@media (prefers-color-scheme: dark) {
-    .source-url {
-        color: #888;
-    }
 }
 
 .source-meta {
@@ -125,151 +106,7 @@
 
 .status {
     padding: 0.25rem 0.625rem;
-    border-radius: 6px;
-    font-weight: 600;
-    text-transform: uppercase;
-    font-size: 0.6875rem;
-    letter-spacing: 0.03em;
-}
-
-.status-idle {
-    background: rgba(34, 197, 94, 0.12);
-    color: #16a34a;
-}
-
-.status-crawling {
-    background: rgba(251, 146, 60, 0.12);
-    color: #ea580c;
-}
-
-.source-manager {
-    width: 100%;
-}
-
-.source-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1.5rem;
-}
-
-.source-header h2 {
-    margin: 0;
-    font-size: 1.25rem;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-}
-
-.source-header div {
-    display: flex;
-    gap: 0.5rem;
-}
-
-.source-form {
-    background: #ffffff;
-    padding: 1.5rem;
-    border-radius: 12px;
-    margin-bottom: 1.5rem;
-    border: 1px solid rgba(0, 0, 0, 0.08);
-}
-
-@media (prefers-color-scheme: dark) {
-    .source-form {
-        background: #1a1a1a;
-        border-color: rgba(255, 255, 255, 0.08);
-    }
-}
-
-.form-group {
-    margin-bottom: 1.125rem;
-}
-
-.form-group:last-of-type {
-    margin-bottom: 1.5rem;
-}
-
-.form-group label {
-    display: block;
-    margin-bottom: 0.5rem;
-    font-weight: 500;
-    font-size: 0.875rem;
-    letter-spacing: -0.01em;
-}
-
-.form-group input,
-.form-group select {
-    width: 100%;
-}
-
-.source-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.625rem;
-}
-
-.source-card {
-    background: #ffffff;
-    padding: 1.125rem;
-    border-radius: 12px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border: 1px solid rgba(0, 0, 0, 0.06);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.source-card:hover {
-    border-color: rgba(0, 0, 0, 0.12);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-}
-
-@media (prefers-color-scheme: dark) {
-    .source-card {
-        background: #1a1a1a;
-        border-color: rgba(255, 255, 255, 0.06);
-    }
-
-    .source-card:hover {
-        border-color: rgba(255, 255, 255, 0.12);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-    }
-}
-
-.source-info {
-    flex: 1;
-}
-
-.source-info h3 {
-    margin: 0 0 0.375rem 0;
-    font-size: 0.9375rem;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-}
-
-.source-url {
-    margin: 0 0 0.625rem 0;
-    color: #666;
-    font-size: 0.8125rem;
-    word-break: break-all;
-    opacity: 0.8;
-}
-
-@media (prefers-color-scheme: dark) {
-    .source-url {
-        color: #888;
-    }
-}
-
-.source-meta {
-    display: flex;
-    gap: 0.875rem;
-    align-items: center;
-    font-size: 0.75rem;
-}
-
-.status {
-    padding: 0.25rem 0.625rem;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     font-weight: 600;
     text-transform: uppercase;
     font-size: 0.6875rem;
@@ -292,12 +129,12 @@
 }
 
 .last-checked {
-    color: #888;
+    color: var(--color-text-tertiary);
 }
 
 .source-actions {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--spacing-sm);
     align-items: center;
 }
 
@@ -311,4 +148,23 @@
 .delete-source-btn:hover {
     background: rgba(211, 47, 47, 1);
     transform: translateY(-1px);
+}
+
+.pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: var(--spacing-md);
+    margin-top: var(--spacing-lg);
+}
+
+.pagination span {
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+}
+
+.empty-state {
+    text-align: center;
+    padding: var(--spacing-xl);
+    color: var(--color-text-secondary);
 }
