@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
-	"golang.org/x/net/html"
 )
 
 type BabepediaService struct {
@@ -174,62 +173,70 @@ func (s *BabepediaService) parseProfileData(htmlContent string, performerID stri
 		RawData: make(map[string]interface{}),
 	}
 
-	// Extract name from title or h1
-	nameRegex := regexp.MustCompile(`<h1[^>]*>([^<]+)</h1>`)
-	if match := nameRegex.FindStringSubmatch(htmlContent); len(match) > 1 {
-		data.Name = strings.TrimSpace(match[1])
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
+	if err != nil {
+		// Fallback to basic name if parsing fails
+		return data
 	}
 
-	// Babepedia has structured data in info boxes
-	// Extract birthdate
-	if birthdate := extractBabepediaField(htmlContent, `(?i)born[:\s]*</[^>]+>\s*([^<]+)`); birthdate != "" {
+	// Extract name from title or h1
+	if h1 := doc.Find("h1").First(); h1.Length() > 0 {
+		data.Name = strings.TrimSpace(h1.Text())
+	}
+
+	// Babepedia uses text nodes with labels like "Born:", "Birthplace:", etc.
+	// We need to find these labels and extract the following text
+	pageText := doc.Text()
+
+	// Extract birthdate - look for "Born:" followed by date text
+	if birthdate := extractFieldFromText(pageText, "Born:"); birthdate != "" {
 		data.Birthdate = birthdate
 	}
 
 	// Birthplace
-	if birthplace := extractBabepediaField(htmlContent, `(?i)birthplace[:\s]*</[^>]+>\s*([^<]+)`); birthplace != "" {
+	if birthplace := extractFieldFromText(pageText, "Birthplace:"); birthplace != "" {
 		data.Country = birthplace
 		data.RawData["birthplace"] = birthplace
 	}
 
 	// Ethnicity
-	if ethnicity := extractBabepediaField(htmlContent, `(?i)ethnicity[:\s]*</[^>]+>\s*([^<]+)`); ethnicity != "" {
+	if ethnicity := extractFieldFromText(pageText, "Ethnicity:"); ethnicity != "" {
 		data.Ethnicity = ethnicity
 	}
 
 	// Hair Color
-	if hair := extractBabepediaField(htmlContent, `(?i)hair\s+color[:\s]*</[^>]+>\s*([^<]+)`); hair != "" {
+	if hair := extractFieldFromText(pageText, "Hair color:"); hair != "" {
 		data.HairColor = hair
 	}
 
 	// Eye Color
-	if eyes := extractBabepediaField(htmlContent, `(?i)eye\s+color[:\s]*</[^>]+>\s*([^<]+)`); eyes != "" {
+	if eyes := extractFieldFromText(pageText, "Eye color:"); eyes != "" {
 		data.EyeColor = eyes
 	}
 
 	// Height
-	if height := extractBabepediaField(htmlContent, `(?i)height[:\s]*</[^>]+>\s*([^<]+)`); height != "" {
+	if height := extractFieldFromText(pageText, "Height:"); height != "" {
 		data.Height = height
 	}
 
 	// Measurements
-	if measurements := extractBabepediaField(htmlContent, `(?i)measurements[:\s]*</[^>]+>\s*([^<]+)`); measurements != "" {
+	if measurements := extractFieldFromText(pageText, "Measurements:"); measurements != "" {
 		data.Measurements = measurements
 	}
 
 	// Tattoos
-	if tattoos := extractBabepediaField(htmlContent, `(?i)tattoos[:\s]*</[^>]+>\s*([^<]+)`); tattoos != "" {
+	if tattoos := extractFieldFromText(pageText, "Tattoos:"); tattoos != "" {
 		data.Tattoos = tattoos
 	}
 
 	// Piercings
-	if piercings := extractBabepediaField(htmlContent, `(?i)piercings[:\s]*</[^>]+>\s*([^<]+)`); piercings != "" {
+	if piercings := extractFieldFromText(pageText, "Piercings:"); piercings != "" {
 		data.Piercings = piercings
 	}
 
 	// Extract aliases
-	aliasRegex := regexp.MustCompile(`(?i)(?:aka|also\s+known\s+as|aliases?)[:\s]*</[^>]+>\s*([^<]+)`)
-	if match := aliasRegex.FindStringSubmatch(htmlContent); len(match) > 1 {
+	aliasRegex := regexp.MustCompile(`(?i)(?:aka|also\s+known\s+as|aliases?):\s*([^\n]+)`)
+	if match := aliasRegex.FindStringSubmatch(pageText); len(match) > 1 {
 		aliasText := match[1]
 		aliases := regexp.MustCompile(`[,;]`).Split(aliasText, -1)
 		for _, alias := range aliases {
@@ -251,21 +258,23 @@ func (s *BabepediaService) parseProfileData(htmlContent string, performerID stri
 		data.Instagram = match[1]
 	}
 
-	// Extract profile images
-	imgRegex := regexp.MustCompile(`<img[^>]+src="(https?://[^"]+(?:jpg|jpeg|png|webp))"[^>]*>`)
-	matches := imgRegex.FindAllStringSubmatch(htmlContent, -1)
-	for _, match := range matches {
-		if len(match) > 1 {
-			imgURL := match[1]
+	// Extract profile images using goquery
+	doc.Find("img").Each(func(i int, sel *goquery.Selection) {
+		if src, exists := sel.Attr("src"); exists {
 			// Filter out small icons and logos
-			if !strings.Contains(imgURL, "icon") && !strings.Contains(imgURL, "logo") && !strings.Contains(imgURL, "avatar") {
-				data.Photos = append(data.Photos, imgURL)
+			if !strings.Contains(src, "icon") && !strings.Contains(src, "logo") && !strings.Contains(src, "avatar") {
+				// Make sure it's a full URL
+				if strings.HasPrefix(src, "http") {
+					data.Photos = append(data.Photos, src)
+				} else if strings.HasPrefix(src, "/") {
+					data.Photos = append(data.Photos, s.BaseURL+src)
+				}
 				if len(data.Photos) >= 10 {
-					break
+					return
 				}
 			}
 		}
-	}
+	})
 
 	data.RawData["source"] = "babepedia"
 	data.RawData["profile_url"] = fmt.Sprintf("%s/babe/%s", s.BaseURL, performerID)
@@ -273,14 +282,66 @@ func (s *BabepediaService) parseProfileData(htmlContent string, performerID stri
 	return data
 }
 
-// extractBabepediaField is a helper to extract field values from Babepedia HTML
-func extractBabepediaField(htmlContent, pattern string) string {
-	re := regexp.MustCompile(pattern)
-	if match := re.FindStringSubmatch(htmlContent); len(match) > 1 {
-		value := strings.TrimSpace(match[1])
-		value = html.UnescapeString(value)
-		value = regexp.MustCompile(`<[^>]+>`).ReplaceAllString(value, "")
-		return strings.TrimSpace(value)
+// extractFieldFromText extracts a field value from plain text after a label
+func extractFieldFromText(text, label string) string {
+	// Find the label in the text
+	idx := strings.Index(text, label)
+	if idx == -1 {
+		return ""
 	}
-	return ""
+
+	// Get text after the label
+	after := text[idx+len(label):]
+
+	// Trim leading whitespace and colons
+	after = strings.TrimLeft(after, " :\t")
+
+	// Find the end - look for double newline, or certain keywords that indicate next field
+	endIdx := -1
+
+	// Try to find end by looking for patterns that indicate a new field or section
+	nextFieldPatterns := []string{
+		"\nBorn:",
+		"\nBirthplace:",
+		"\nEthnicity:",
+		"\nHair color:",
+		"\nEye color:",
+		"\nHeight:",
+		"\nWeight:",
+		"\nMeasurements:",
+		"\nTattoos:",
+		"\nPiercings:",
+		"\n\n",
+	}
+
+	for _, pattern := range nextFieldPatterns {
+		if pos := strings.Index(after, pattern); pos != -1 {
+			if endIdx == -1 || pos < endIdx {
+				endIdx = pos
+			}
+		}
+	}
+
+	// If no pattern found, look for single newline but allow for some length
+	if endIdx == -1 {
+		endIdx = strings.IndexAny(after, "\n\r")
+		// If line is very short (likely just the value), take it.
+		// If it's long, we might have missed a field, but better to cut short than take too much.
+	}
+
+	// If still nothing, limit to reasonable length
+	if endIdx == -1 {
+		endIdx = len(after)
+		if endIdx > 200 {
+			endIdx = 200
+		}
+	}
+
+	value := strings.TrimSpace(after[:endIdx])
+
+	// Clean up common artifacts
+	value = strings.TrimPrefix(value, ":")
+	value = strings.TrimSpace(value)
+
+	return value
 }

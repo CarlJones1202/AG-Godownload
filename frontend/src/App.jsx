@@ -8,6 +8,7 @@ import VideoList from './components/VideoList'
 import PersonList from './components/PersonList'
 import PersonDetail from './components/PersonDetail'
 import SearchBar from './components/SearchBar'
+import GalleryDetail from './components/GalleryDetail'
 
 function App() {
     const location = useLocation()
@@ -275,14 +276,7 @@ function App() {
                                 onPageChange={handleGalleryPageChange}
                             />
                         } />
-                        <Route path="/galleries/:id" element={
-                            <GalleryList
-                                galleries={galleries}
-                                onRefresh={() => fetchGalleries(galleryPage)}
-                                meta={galleryMeta}
-                                onPageChange={handleGalleryPageChange}
-                            />
-                        } />
+                        <Route path="/galleries/:id" element={<GalleryDetail />} />
                         <Route path="/images" element={
                             <ImageList
                                 images={images}

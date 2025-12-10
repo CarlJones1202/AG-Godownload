@@ -278,13 +278,40 @@ func CrawlSource(sourceID uint) error {
 		} else {
 			logger.Infof("Successfully inserted %d images", len(imagesWithoutAssoc))
 
-			// Now update the M2M associations
+			// Now update the M2M associations using raw SQL for performance to avoid N+1 updates
+			var valueStrings []string
+			var valueArgs []interface{}
+
 			for i := range imagesWithoutAssoc {
-				if len(imagesToInsert[i].Galleries) > 0 {
-					if err := database.DB.Model(&imagesWithoutAssoc[i]).Association("Galleries").Append(imagesToInsert[i].Galleries); err != nil {
-						logger.Warnf("Failed to associate image %d with gallery: %v", imagesWithoutAssoc[i].ID, err)
+				for _, g := range imagesToInsert[i].Galleries {
+					valueStrings = append(valueStrings, "(?, ?)")
+					valueArgs = append(valueArgs, imagesWithoutAssoc[i].ID, g.ID)
+				}
+			}
+
+			// Chunked insert to avoid SQLite variable limit
+			const chunkSize = 100
+			totalAssocs := len(valueStrings)
+			if totalAssocs > 0 {
+				for i := 0; i < totalAssocs; i += chunkSize {
+					end := i + chunkSize
+					if end > totalAssocs {
+						end = totalAssocs
+					}
+
+					chunkStrings := valueStrings[i:end]
+					// Each entry corresponds to 2 arguments (image_id, gallery_id)
+					chunkArgs := valueArgs[i*2 : end*2]
+
+					stmt := fmt.Sprintf("INSERT INTO image_galleries (image_id, gallery_id) VALUES %s",
+						strings.Join(chunkStrings, ","))
+					stmt += " ON CONFLICT DO NOTHING"
+
+					if err := database.DB.Exec(stmt, chunkArgs...).Error; err != nil {
+						logger.Warnf("Failed to batch associate images chunk: %v", err)
 					}
 				}
+				logger.Infof("Successfully associated %d images with galleries", len(imagesWithoutAssoc))
 			}
 		}
 	}

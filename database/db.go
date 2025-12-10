@@ -13,7 +13,8 @@ var DB *gorm.DB
 func Connect(dbPath string) {
 	var err error
 	// Use glebarez/sqlite for pure Go implementation
-	DB, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	// Enable WAL mode for better concurrency and set busy timeout
+	DB, err = gorm.Open(sqlite.Open(dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"), &gorm.Config{})
 	if err != nil {
 		logger.Fatal("Failed to connect to database:", err)
 	}

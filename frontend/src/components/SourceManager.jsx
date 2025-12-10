@@ -9,20 +9,17 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
         location: ''
     })
     const [submitting, setSubmitting] = useState(false)
+    const [searchTerm, setSearchTerm] = useState('')
 
     const handleSubmit = async (e) => {
         e.preventDefault()
         setSubmitting(true)
-
         try {
             const response = await fetch('/api/sources', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(formData),
             })
-
             if (response.ok) {
                 setFormData({ name: '', type: 'url', location: '' })
                 setShowForm(false)
@@ -41,9 +38,7 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
 
     const handleCrawl = async (sourceId) => {
         try {
-            await fetch(`/api/sources/${sourceId}/crawl`, {
-                method: 'POST',
-            })
+            await fetch(`/api/sources/${sourceId}/crawl`, { method: 'POST' })
             alert('Crawl started! Check back in a few moments.')
             onRefresh()
         } catch (error) {
@@ -54,30 +49,24 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
 
     const handleDeleteSource = async (sourceId, e) => {
         e.stopPropagation()
-
         const deleteGallery = confirm(
             'Delete associated gallery too?\n\nOK = Delete source AND gallery\nCancel = Delete source only'
         )
-
         let deleteImages = false
         if (deleteGallery) {
             deleteImages = confirm(
                 'Delete all images in the gallery?\n\nOK = Delete gallery AND images\nCancel = Delete gallery only'
             )
         }
-
         if (!confirm(`Are you sure you want to delete this source${deleteGallery ? ' and gallery' : ''}${deleteImages ? ' and images' : ''}?`)) {
             return
         }
-
         try {
             const params = new URLSearchParams()
             if (deleteGallery) params.append('delete_gallery', 'true')
             if (deleteImages) params.append('delete_images', 'true')
-
             const url = `/api/sources/${sourceId}${params.toString() ? '?' + params.toString() : ''}`
             const response = await fetch(url, { method: 'DELETE' })
-
             if (response.ok) {
                 onRefresh()
             } else {
@@ -89,38 +78,68 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
         }
     }
 
-    // Debounce search
-    const [searchTerm, setSearchTerm] = useState('')
-
     useEffect(() => {
         const delayDebounceFn = setTimeout(() => {
             onSearch(searchTerm)
         }, 500)
-
         return () => clearTimeout(delayDebounceFn)
     }, [searchTerm])
+
+    // Simple Icons
+    const RefreshIcon = () => (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M23 4v6h-6"></path>
+            <path d="M1 20v-6h6"></path>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+        </svg>
+    )
+
+    const TrashIcon = () => (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+        </svg>
+    )
+
+    const PlusIcon = () => (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+    )
+
+    const PlayIcon = () => (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+        </svg>
+    )
 
     return (
         <div className="source-manager">
             <div className="source-header">
-                <h2>Sources</h2>
+                <h2>Source Manager</h2>
                 <div className="source-controls">
-                    <input
-                        type="text"
-                        placeholder="Search sources..."
-                        className="search-input"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                    <button onClick={onRefresh}>🔄 Refresh</button>
-                    <button onClick={() => setShowForm(!showForm)}>
-                        {showForm ? 'Cancel' : '+ Add Source'}
+                    <div className="search-wrapper">
+                        <input
+                            type="text"
+                            placeholder="Search sources..."
+                            className="search-input"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+                    <button onClick={onRefresh} className="control-btn secondary" title="Refresh">
+                        <RefreshIcon />
+                    </button>
+                    <button onClick={() => setShowForm(!showForm)} className={`control-btn ${showForm ? 'secondary' : 'primary'}`}>
+                        {showForm ? 'Cancel' : <><PlusIcon /> Add Source</>}
                     </button>
                 </div>
             </div>
 
             {showForm && (
-                <form className="source-form" onSubmit={handleSubmit}>
+                <form className="source-form panel" onSubmit={handleSubmit}>
+                    <h3>Add New Source</h3>
                     <div className="form-group">
                         <label>Name</label>
                         <input
@@ -128,7 +147,7 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
                             value={formData.name}
                             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                             required
-                            placeholder="My Gallery"
+                            placeholder="e.g. My Favorite Gallery"
                         />
                     </div>
                     <div className="form-group">
@@ -137,7 +156,7 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
                             value={formData.type}
                             onChange={(e) => setFormData({ ...formData, type: e.target.value })}
                         >
-                            <option value="url">URL</option>
+                            <option value="url">URL Scraper</option>
                         </select>
                     </div>
                     <div className="form-group">
@@ -147,10 +166,10 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
                             value={formData.location}
                             onChange={(e) => setFormData({ ...formData, location: e.target.value })}
                             required
-                            placeholder="https://example.com/thread/12345"
+                            placeholder="https://example.com/thread/..."
                         />
                     </div>
-                    <button type="submit" disabled={submitting}>
+                    <button type="submit" disabled={submitting} className="submit-btn">
                         {submitting ? 'Adding...' : 'Add Source'}
                     </button>
                 </form>
@@ -159,22 +178,26 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
             <div className="source-list">
                 {sources.length === 0 ? (
                     <div className="empty-state">
-                        <p>No sources yet. Add one to start crawling!</p>
+                        <p>No sources found. Add one to start collecting content!</p>
                     </div>
                 ) : (
                     sources.map(source => (
-                        <div key={source.id} className="source-card">
-                            <div className="source-info">
-                                <h3>{source.name}</h3>
-                                <p className="source-url">{source.location}</p>
-                                <div className="source-meta">
-                                    <span className={`status status-${source.status || 'idle'}`}>
+                        <div key={source.id} className="source-item">
+                            <div className="source-main">
+                                <div className="source-info-header">
+                                    <h3>{source.name}</h3>
+                                    <span className={`status-badge ${source.status || 'idle'}`}>
                                         {source.status || 'idle'}
                                     </span>
-                                    {source.last_checked_at && source.last_checked_at !== '0001-01-01T00:00:00Z' && (
-                                        <span className="last-checked">
-                                            Last checked: {new Date(source.last_checked_at).toLocaleString()}
-                                        </span>
+                                </div>
+                                <a href={source.location} target="_blank" rel="noopener noreferrer" className="source-url">
+                                    {source.location}
+                                </a>
+                                <div className="source-meta">
+                                    {source.last_checked_at && source.last_checked_at !== '0001-01-01T00:00:00Z' ? (
+                                        <span>Last checked: {new Date(source.last_checked_at).toLocaleString()}</span>
+                                    ) : (
+                                        <span>Never checked</span>
                                     )}
                                 </div>
                             </div>
@@ -182,21 +205,22 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
                                 <button
                                     onClick={() => handleCrawl(source.id)}
                                     disabled={source.status === 'crawling'}
+                                    className="action-btn secondary"
+                                    title="Start Crawl"
                                 >
-                                    {source.status === 'crawling' ? 'Crawling...' : '🔄 Crawl'}
+                                    <PlayIcon /> {source.status === 'crawling' ? 'Running...' : 'Run'}
                                 </button>
                                 <button
-                                    className="delete-source-btn"
+                                    className="action-btn danger-ghost"
                                     onClick={(e) => handleDeleteSource(source.id, e)}
-                                    title="Delete source"
+                                    title="Delete Source"
                                 >
-                                    🗑️
+                                    <TrashIcon />
                                 </button>
                             </div>
                         </div>
                     ))
                 )}
-
             </div>
 
             {meta && meta.total_pages > 1 && (
@@ -204,6 +228,7 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
                     <button
                         disabled={meta.current_page === 1}
                         onClick={() => onPageChange(meta.current_page - 1)}
+                        className="page-btn"
                     >
                         Previous
                     </button>
@@ -211,6 +236,7 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
                     <button
                         disabled={meta.current_page === meta.total_pages}
                         onClick={() => onPageChange(meta.current_page + 1)}
+                        className="page-btn"
                     >
                         Next
                     </button>
