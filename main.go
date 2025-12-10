@@ -1,4 +1,4 @@
-package main
+﻿package main
 
 import (
 	"gallery_api/database"
@@ -44,6 +44,13 @@ func main() {
 		logger.Info("Starting background verification of person images...")
 		if err := services.VerifyPersonImages(); err != nil {
 			logger.Error("Person image verification failed:", err)
+		}
+
+		logger.Info("Starting background verification of videos...")
+		if err := services.VerifyDownloadedVideos(); err != nil {
+			logger.Error("Video verification failed:", err)
+		} else {
+			logger.Info("Video verification started successfully")
 		}
 	}()
 

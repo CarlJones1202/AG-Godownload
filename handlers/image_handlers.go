@@ -312,7 +312,7 @@ func fileExists(path string) bool {
 
 // DeleteImage removes an image from both database and filesystem
 func DeleteImage(c *gin.Context) {
-	idStr := c.Param("id")
+	idStr := c.Param("imageId")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid image ID"})

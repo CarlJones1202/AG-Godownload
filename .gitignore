@@ -2,3 +2,9 @@ uploads/*
 old_uploads/*
 frontend/node_modules
 **/*.exe
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+gallery_api.exe

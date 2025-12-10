@@ -263,3 +263,4 @@ hover: background: --bg-tertiary;
 - Premium feel
 - Photography emphasis
 - Minimal UI chrome
+
