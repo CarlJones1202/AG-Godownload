@@ -127,7 +127,8 @@ func GetImages(c *gin.Context) {
 	var images []models.Image
 	// Preload Galleries.Source to get source name for images
 	// Preload Source to get source name for videos (direct association)
-	if err := query.Preload("Galleries.Source").Preload("Source").Limit(limit).Offset(offset).Order("created_at DESC").Find(&images).Error; err != nil {
+	// Preload People for videos (direct association)
+	if err := query.Preload("Galleries.Source").Preload("Source").Preload("People").Limit(limit).Offset(offset).Order("created_at DESC").Find(&images).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch images"})
 		return
 	}

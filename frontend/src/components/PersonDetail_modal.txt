@@ -1,0 +1,16 @@
+﻿
+            {/* Auto-Tag Modal */}
+            <AutoTagModal
+                show={showAutoTagModal}
+                onClose={() => setShowAutoTagModal(false)}
+                suggestions={autoTagSuggestions}
+                loading={autoTagging}
+                selectedSuggestions={selectedSuggestions}
+                onToggleSuggestion={handleToggleSuggestion}
+                onApply={handleApplySuggestions}
+            />
+        </div>
+    )
+}
+
+export default PersonDetail

@@ -48,6 +48,17 @@ func CrawlSource(sourceID uint) error {
 		return nil
 	}
 
+	// Check if source is a video URL
+	if IsVideoURL(source.Location) {
+		logger.Infof("Processing video URL: %s", source.Location)
+		if err := ProcessVideoSource(source, gallery); err != nil {
+			database.DB.Model(&source).Update("Status", "error")
+			return err
+		}
+		database.DB.Model(&source).Update("Status", "idle")
+		return nil
+	}
+
 	// Fetch the URL
 	resp, err := http.Get(source.Location)
 	if err != nil {
@@ -140,7 +151,11 @@ func CrawlSource(sourceID uint) error {
 					imageURL, err = RipImageBox(src)
 				case strings.Contains(src, "imx.to"):
 					logger.Debug("Ripping from Imx.to")
-					imageURL, err = RipImx(imgSrc)
+					// Use the anchor href instead of img src
+					// The 'src' variable in this goroutine already holds the anchor href.
+					// The 'imgSrc' variable holds the img src.
+					// The instruction is to use the anchor href for imx.to.
+					imageURL, err = RipImx(src)
 				case strings.Contains(src, "turboimagehost"):
 					logger.Debug("Ripping from TurboImageHost")
 					imageURL, err = RipTurboImg(src)
@@ -150,6 +165,13 @@ func CrawlSource(sourceID uint) error {
 				case strings.Contains(src, "pixhost"):
 					logger.Debug("Ripping from PixHost")
 					imageURL, err = RipPixHost(imgSrc)
+				case strings.Contains(src, "postimages.org"):
+					logger.Debug("Ripping from PostImages")
+					imageURL, err = RipPostImages(src)
+				case strings.Contains(src, "imagetwist"):
+					logger.Debug("Ripping from Imagetwist")
+					// Use anchor href (src)
+					imageURL, err = RipImagetwist(src)
 				case strings.Contains(src, "acidimg"):
 					logger.Debug("Ripping from AcidImg")
 					imageURL, err = RipAcidImg(imgSrc)
@@ -213,9 +235,16 @@ func CrawlSource(sourceID uint) error {
 				}
 
 				// Save to slice for batch insert
+				// Calculate relative path for DB (e.g. "Source/file.jpg")
+				relPath, err := filepath.Rel(UploadsDir, result.Path)
+				if err != nil {
+					// Fallback if Rel fails
+					relPath = filepath.Base(result.Path)
+				}
+
 				image := models.Image{
 					GalleryID:      gallery.ID,
-					Filename:       filepath.Base(result.Path),
+					Filename:       relPath,
 					OriginalURL:    src,      // The hosting page URL
 					DownloadURL:    imageURL, // The final direct image URL
 					DominantColors: result.DominantColors,
@@ -261,5 +290,81 @@ func CrawlSource(sourceID uint) error {
 	}
 
 	database.DB.Model(&source).Update("Status", "idle")
+	return nil
+}
+
+// ProcessVideoSource handles video URL sources
+func ProcessVideoSource(source models.Source, gallery models.Gallery) error {
+	logger.Infof("Processing video source: %s", source.Location)
+
+	// Extract video URL based on the hosting site
+	var videoURL string
+	var err error
+
+	if strings.Contains(source.Location, "tnaflix.com") {
+		videoURL, err = RipTnaFlix(source.Location)
+		if err != nil {
+			return fmt.Errorf("failed to extract TnaFlix video: %w", err)
+		}
+	} else {
+		// For other video sites, we could add more rippers here
+		return fmt.Errorf("unsupported video site: %s", source.Location)
+	}
+
+	logger.Infof("Extracted video URL: %s", videoURL)
+
+	// Check if video already exists in database
+	var existingImage models.Image
+	if err := database.DB.Where("download_url = ?", videoURL).First(&existingImage).Error; err == nil {
+		logger.Infof("Video already exists in database: %s", videoURL)
+
+		// Associate with this gallery if not already associated
+		var count int64
+		database.DB.Model(&models.Image{}).
+			Joins("JOIN image_galleries ON image_galleries.image_id = images.id").
+			Where("image_galleries.gallery_id = ? AND images.id = ?", gallery.ID, existingImage.ID).
+			Count(&count)
+
+		if count == 0 {
+			if err := database.DB.Model(&existingImage).Association("Galleries").Append(&gallery); err != nil {
+				logger.Warnf("Failed to associate existing video with gallery: %v", err)
+			} else {
+				logger.Infof("Associated existing video with gallery")
+			}
+		}
+		return nil
+	}
+
+	// Download the video
+	result, err := DownloadVideo(videoURL, source.Name, source.Location)
+	if err != nil {
+		return fmt.Errorf("failed to download video: %w", err)
+	}
+
+	logger.Infof("Successfully downloaded video to: %s", result.Path)
+
+	// Calculate relative path for DB
+	relPath, err := filepath.Rel(UploadsDir, result.Path)
+	if err != nil {
+		relPath = filepath.Base(result.Path)
+	}
+
+	// Create image record with Type="video"
+	image := models.Image{
+		GalleryID:      gallery.ID,
+		SourceID:       &source.ID,
+		Filename:       relPath,
+		OriginalURL:    source.Location,
+		DownloadURL:    videoURL,
+		DominantColors: result.DominantColors,
+		Type:           "video",
+		Galleries:      []*models.Gallery{&gallery},
+	}
+
+	if err := database.DB.Create(&image).Error; err != nil {
+		return fmt.Errorf("failed to create video record: %w", err)
+	}
+
+	logger.Infof("Created video record in database (ID: %d)", image.ID)
 	return nil
 }

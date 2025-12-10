@@ -149,7 +149,7 @@ func GetPeople(c *gin.Context) {
 func GetPerson(c *gin.Context) {
 	id := c.Param("id")
 	var person models.Person
-	if err := database.DB.First(&person, id).Error; err != nil {
+	if err := database.DB.Preload("Identifiers").First(&person, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Person not found"})
 		return
 	}

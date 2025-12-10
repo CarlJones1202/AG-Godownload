@@ -1,0 +1,197 @@
+/* Auto-Tag Styles */
+.auto-tag-btn {
+    background: linear-gradient(135deg, rgba(76, 175, 80, 0.15) 0%, rgba(76, 175, 80, 0.08) 100%);
+    color: #4caf50;
+    border: 1px solid rgba(76, 175, 80, 0.3);
+    padding: 0.625rem 1.25rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    transition: all 0.2s ease;
+}
+
+.auto-tag-btn:hover {
+    background: linear-gradient(135deg, rgba(76, 175, 80, 0.25) 0%, rgba(76, 175, 80, 0.15) 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.2);
+}
+
+.auto-tag-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Auto-Tag Modal */
+.auto-tag-modal .modal-content {
+    max-width: 800px;
+}
+
+.suggestions-list {
+    max-height: 400px;
+    overflow-y: auto;
+    margin: 1.5rem 0;
+}
+
+.suggestion-item {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    margin-bottom: 0.75rem;
+    transition: all 0.2s ease;
+}
+
+@media (prefers-color-scheme: dark) {
+    .suggestion-item {
+        border-color: rgba(255, 255, 255, 0.1);
+    }
+}
+
+.suggestion-item:hover {
+    background: rgba(100, 108, 255, 0.05);
+}
+
+.suggestion-checkbox {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+}
+
+.suggestion-info {
+    flex: 1;
+}
+
+.suggestion-name {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+.suggestion-meta {
+    font-size: 0.85rem;
+    color: #666;
+    display: flex;
+    gap: 1rem;
+}
+
+@media (prefers-color-scheme: dark) {
+    .suggestion-meta {
+        color: #999;
+    }
+}
+
+.suggestion-type {
+    text-transform: capitalize;
+}
+
+.confidence-badge {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.confidence-high {
+    background: rgba(76, 175, 80, 0.2);
+    color: #4caf50;
+}
+
+.confidence-medium {
+    background: rgba(255, 152, 0, 0.2);
+    color: #ff9800;
+}
+
+.confidence-low {
+    background: rgba(244, 67, 54, 0.2);
+    color: #f44336;
+}
+
+.apply-suggestions-btn {
+    width: 100%;
+    padding: 0.75rem;
+    background: #646cff;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    margin-top: 1rem;
+}
+
+.apply-suggestions-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Exclusions Section */
+.exclusions-section {
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+    .exclusions-section {
+        border-color: rgba(255, 255, 255, 0.1);
+    }
+}
+
+.exclusions-section h3 {
+    margin: 0 0 1rem 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #646cff;
+}
+
+.exclusions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.exclusion-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    background: rgba(244, 67, 54, 0.05);
+    border: 1px solid rgba(244, 67, 54, 0.2);
+    border-radius: 8px;
+}
+
+.exclusion-name {
+    font-size: 0.9rem;
+}
+
+.remove-exclusion-btn {
+    background: none;
+    border: none;
+    color: #f44336;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.remove-exclusion-btn:hover {
+    background: rgba(244, 67, 54, 0.1);
+}
+
+/* Exclude Person Button (for Gallery/Video views) */
+.exclude-person-btn {
+    background: rgba(244, 67, 54, 0.1);
+    color: #f44336;
+    border: 1px solid rgba(244, 67, 54, 0.3);
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    transition: all 0.2s;
+}
+
+.exclude-person-btn:hover {
+    background: rgba(244, 67, 54, 0.2);
+}

@@ -1,10 +1,15 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import './GalleryList.css'
+import './PersonTagging.css'
+import './GalleryList_recrawl.css'
 import ImageGrid from './ImageGrid'
 
 function GalleryList({ galleries, onRefresh, meta, onPageChange }) {
     const [selectedGallery, setSelectedGallery] = useState(null)
+    const [showPersonModal, setShowPersonModal] = useState(false)
+    const [people, setPeople] = useState([])
+    const [searchQuery, setSearchQuery] = useState('')
     const navigate = useNavigate()
     const params = useParams()
     const location = useLocation()
@@ -69,6 +74,102 @@ function GalleryList({ galleries, onRefresh, meta, onPageChange }) {
         navigate(`/galleries/${gallery.id}`)
     }
 
+    // Fetch people list for tagging
+    const fetchPeople = async () => {
+        try {
+            const response = await fetch('/api/people?limit=1000')
+            const data = await response.json()
+            setPeople(data.data || [])
+        } catch (error) {
+            console.error('Failed to fetch people:', error)
+        }
+    }
+
+    const handleTagPerson = async (personId) => {
+        if (!selectedGallery) return
+        try {
+            const response = await fetch(`/api/people/${personId}/galleries/${selectedGallery.id}`, {
+                method: 'POST'
+            })
+            if (response.ok) {
+                // Refresh gallery to get updated people list
+                fetchGalleryDetails(selectedGallery.id)
+                setShowPersonModal(false)
+                setSearchQuery('')
+            } else {
+                alert('Failed to tag person')
+            }
+        } catch (error) {
+            console.error('Error tagging person:', error)
+            alert('Error tagging person')
+        }
+    }
+
+    const handleUntagPerson = async (personId) => {
+        if (!selectedGallery) return
+        try {
+            const response = await fetch(`/api/people/${personId}/galleries/${selectedGallery.id}`, {
+                method: 'DELETE'
+            })
+            if (response.ok) {
+                // Refresh gallery to get updated people list
+                fetchGalleryDetails(selectedGallery.id)
+            } else {
+                alert('Failed to untag person')
+            }
+        } catch (error) {
+            console.error('Error untagging person:', error)
+            alert('Error untagging person')
+        }
+    }
+
+    const handleExcludePerson = async (personId) => {
+        if (!selectedGallery) return
+
+        if (!confirm('Mark this gallery as NOT featuring this person? This will prevent auto-tagging.')) {
+            return
+        }
+
+        try {
+            const response = await fetch(`/api/people/${personId}/exclude-gallery/${selectedGallery.id}`, {
+                method: 'POST'
+            })
+
+            if (response.ok) {
+                fetchGalleryDetails(selectedGallery.id)
+                alert('Gallery excluded from this person')
+            } else {
+                alert('Failed to exclude gallery')
+            }
+        } catch (error) {
+            console.error('Error excluding gallery:', error)
+            alert('Error excluding gallery')
+        }
+    }
+
+    const handleRecrawlSource = async () => {
+        if (!selectedGallery || !selectedGallery.source) return
+
+        if (!confirm(`Re-crawl source "${selectedGallery.source.name}"? This will fetch new content from the source.`)) {
+            return
+        }
+
+        try {
+            const response = await fetch(`/api/sources/${selectedGallery.source.id}/crawl`, {
+                method: 'POST'
+            })
+
+            if (response.ok) {
+                alert('Source crawl started! New content will appear shortly.')
+            } else {
+                alert('Failed to start crawl')
+            }
+        } catch (error) {
+            console.error('Error starting crawl:', error)
+            alert('Error starting crawl')
+        }
+    }
+
     if (selectedGallery) {
         return (
             <div>
@@ -80,14 +181,84 @@ function GalleryList({ galleries, onRefresh, meta, onPageChange }) {
                 </button>
                 <div className="gallery-header">
                     <h2>{selectedGallery.name}</h2>
-                    <button
-                        className="delete-gallery-btn"
-                        onClick={(e) => handleDeleteGallery(selectedGallery.id, e)}
-                    >
-                        🗑️ Delete Gallery
-                    </button>
+                    <div className="gallery-actions">
+                        <button
+                            onClick={() => {
+                                fetchPeople()
+                                setShowPersonModal(true)
+                            }}
+                            className="tag-person-btn"
+                        >
+                            👤+ Tag Person
+                        </button>
+                        <button
+                            className="delete-gallery-btn"
+                            onClick={(e) => handleDeleteGallery(selectedGallery.id, e)}
+                        >
+                            🗑️ Delete Gallery
+                        </button>
+                        {selectedGallery.source && (
+                            <button
+                                className="recrawl-source-btn"
+                                onClick={handleRecrawlSource}
+                                title="Re-crawl this source for new content"
+                            >
+                                🔄 Re-crawl Source
+                            </button>
+                        )}
+                    </div>
                 </div>
+                {/* Tagged People Display */}
+                {selectedGallery.people && selectedGallery.people.length > 0 && (
+                    <div className="gallery-tagged-people">
+                        <h3>Tagged People:</h3>
+                        <div className="tagged-people-list">
+                            {selectedGallery.people.map(person => (
+                                <div key={person.id} className="tagged-person-chip">
+                                    <span onClick={() => navigate(`/people/${person.id}`)} style={{ cursor: 'pointer' }}>
+                                        {person.name}
+                                    </span>
+                                    <button onClick={() => handleUntagPerson(person.id)} title="Remove tag">✕</button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
                 <ImageGrid gallery={selectedGallery} onRefresh={handleRefreshGallery} />
+
+                {/* Person Tagging Modal */}
+                {showPersonModal && (
+                    <div className="person-modal-overlay" onClick={() => setShowPersonModal(false)}>
+                        <div className="person-modal" onClick={e => e.stopPropagation()}>
+                            <h3>Tag Person</h3>
+                            <input
+                                type="text"
+                                placeholder="Search people..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="person-search"
+                            />
+                            <div className="tagging-person-list">
+                                {people
+                                    .filter(p =>
+                                        p.name.toLowerCase().includes(searchQuery.toLowerCase()) &&
+                                        !(selectedGallery.people || []).find(tp => tp.id === p.id)
+                                    )
+                                    .map(person => (
+                                        <div
+                                            key={person.id}
+                                            className="person-item"
+                                            onClick={() => handleTagPerson(person.id)}
+                                        >
+                                            {person.name}
+                                        </div>
+                                    ))
+                                }
+                            </div>
+                            <button onClick={() => setShowPersonModal(false)} className="close-modal">Close</button>
+                        </div>
+                    </div>
+                )}
             </div>
         )
     }

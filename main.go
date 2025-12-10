@@ -64,8 +64,26 @@ func main() {
 	r.PUT("/people/:id", handlers.UpdatePerson)
 	r.DELETE("/people/:id", handlers.DeletePerson)
 	r.POST("/people/:id/link-galleries", handlers.LinkPersonToGalleries)
+	r.POST("/people/:id/galleries/:galleryId", handlers.LinkGalleryToPerson)
 	r.DELETE("/people/:id/galleries/:galleryId", handlers.UnlinkGalleryFromPerson)
+	r.POST("/people/:id/images/:imageId", handlers.LinkImageToPerson)
+	r.DELETE("/people/:id/images/:imageId", handlers.UnlinkImageFromPerson)
 
+	// New identifier system routes
+	r.GET("/identifiers/sources", handlers.ListIdentifierSources)
+	r.GET("/identifiers/:source/search", handlers.SearchIdentifier)
+	r.POST("/people/:id/identifiers", handlers.LinkIdentifier)
+	r.DELETE("/people/:id/identifiers/:identifierId", handlers.UnlinkIdentifier)
+
+	// Auto-tag routes
+	r.POST("/people/:id/auto-tag", handlers.AutoTagPerson)
+	r.POST("/people/:id/auto-tag/apply", handlers.ApplyAutoTagSuggestions)
+	r.POST("/people/:id/exclude-gallery/:galleryId", handlers.ExcludeGalleryFromPerson)
+	r.POST("/people/:id/exclude-video/:imageId", handlers.ExcludeVideoFromPerson)
+	r.GET("/people/:id/exclusions", handlers.GetPersonExclusions)
+	r.DELETE("/people/:id/exclusions/:exclusionId", handlers.RemoveExclusion)
+
+	// Old StashDB routes (kept for backward compatibility)
 	r.GET("/stashdb/search", handlers.SearchStashDB)
 	r.POST("/people/:id/stashdb/link", handlers.LinkStashDB)
 

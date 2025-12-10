@@ -22,7 +22,14 @@ func Connect(dbPath string) {
 }
 
 func Migrate() {
-	err := DB.AutoMigrate(&models.Source{}, &models.Gallery{}, &models.Image{}, &models.Person{})
+	err := DB.AutoMigrate(
+		&models.Source{},
+		&models.Gallery{},
+		&models.Image{},
+		&models.Person{},
+		&models.PersonIdentifier{},
+		&models.PersonExclusion{},
+	)
 	if err != nil {
 		logger.Fatal("Failed to migrate database:", err)
 	}

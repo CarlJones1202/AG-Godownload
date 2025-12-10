@@ -63,8 +63,9 @@ func GetGalleries(c *gin.Context) {
 		database.DB.Model(&models.Image{}).Where("gallery_id = ?", galleries[i].ID).Count(&count)
 
 		// Load first image for thumbnail
-		var firstImage models.Image
-		if err := database.DB.Where("gallery_id = ?", galleries[i].ID).Order("created_at ASC").First(&firstImage).Error; err == nil {
+		var images []models.Image
+		if err := database.DB.Where("gallery_id = ?", galleries[i].ID).Order("created_at ASC").Limit(1).Find(&images).Error; err == nil && len(images) > 0 {
+			firstImage := images[0]
 			// Populate path
 			sourceName := "uncategorized"
 			if galleries[i].Source != nil {
@@ -99,7 +100,7 @@ func GetGalleries(c *gin.Context) {
 func GetGallery(c *gin.Context) {
 	id := c.Param("id")
 	var gallery models.Gallery
-	if err := database.DB.Preload("Source").Preload("Images.Galleries").First(&gallery, id).Error; err != nil {
+	if err := database.DB.Preload("Source").Preload("Images.Galleries").Preload("People").First(&gallery, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Gallery not found"})
 		return
 	}

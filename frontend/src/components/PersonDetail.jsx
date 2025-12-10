@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import './PersonDetail.css'
+import './PersonDetail_identifiers.css'
+import './AutoTag.css'
 import GalleryList from './GalleryList'
+import AutoTagModal from './AutoTagModal'
 
 function PersonDetail() {
     const { id } = useParams()
@@ -77,48 +80,91 @@ function PersonDetail() {
         }
     }
 
-    const [stashSearch, setStashSearch] = useState('')
-    const [stashResults, setStashResults] = useState([])
-    const [showStashModal, setShowStashModal] = useState(false)
-    const [searchingStash, setSearchingStash] = useState(false)
+    const [identifierSearch, setIdentifierSearch] = useState('')
+    const [identifierResults, setIdentifierResults] = useState([])
+    const [showIdentifierModal, setShowIdentifierModal] = useState(false)
+    const [searchingIdentifier, setSearchingIdentifier] = useState(false)
+    const [availableSources, setAvailableSources] = useState([])
+    const [selectedSource, setSelectedSource] = useState('stashdb')
 
-    const handleSearchStash = async () => {
-        if (!stashSearch.trim()) return
-        setSearchingStash(true)
+    // Auto-tag state
+    const [showAutoTagModal, setShowAutoTagModal] = useState(false)
+    const [autoTagSuggestions, setAutoTagSuggestions] = useState([])
+    const [autoTagging, setAutoTagging] = useState(false)
+    const [selectedSuggestions, setSelectedSuggestions] = useState(new Set())
+    const [exclusions, setExclusions] = useState([])
+
+    // Fetch available identifier sources
+    useEffect(() => {
+        fetch('/api/identifiers/sources')
+            .then(res => res.json())
+            .then(data => {
+                if (data.sources) {
+                    setAvailableSources(data.sources)
+                }
+            })
+            .catch(err => console.error('Failed to fetch identifier sources:', err))
+    }, [])
+
+    const handleSearchIdentifier = async () => {
+        if (!identifierSearch.trim()) return
+        setSearchingIdentifier(true)
         try {
-            const response = await fetch(`/api/stashdb/search?name=${encodeURIComponent(stashSearch)}`)
+            const response = await fetch(`/api/identifiers/${selectedSource}/search?name=${encodeURIComponent(identifierSearch)}`)
             const result = await response.json()
             if (result.data) {
-                setStashResults(result.data)
+                setIdentifierResults(result.data)
             }
         } catch (error) {
-            console.error('Failed to search StashDB:', error)
-            alert('Failed to search StashDB')
+            console.error(`Failed to search ${selectedSource}:`, error)
+            alert(`Failed to search ${selectedSource}`)
         } finally {
-            setSearchingStash(false)
+            setSearchingIdentifier(false)
         }
     }
 
-    const handleLinkStash = async (stashId) => {
+    const handleLinkIdentifier = async (externalId) => {
         try {
-            const response = await fetch(`/api/people/${id}/stashdb/link`, {
+            const response = await fetch(`/api/people/${id}/identifiers`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ stash_id: stashId })
+                body: JSON.stringify({
+                    source: selectedSource,
+                    external_id: externalId
+                })
             })
 
             if (response.ok) {
-                setShowStashModal(false)
-                setStashResults([])
-                setStashSearch('')
+                setShowIdentifierModal(false)
+                setIdentifierResults([])
+                setIdentifierSearch('')
                 fetchPerson()
-                alert('Successfully linked to StashDB!')
+                alert(`Successfully linked to ${selectedSource}!`)
             } else {
-                alert('Failed to link to StashDB')
+                alert(`Failed to link to ${selectedSource}`)
             }
         } catch (error) {
-            console.error('Failed to link StashDB:', error)
-            alert('Failed to link StashDB')
+            console.error(`Failed to link ${selectedSource}:`, error)
+            alert(`Failed to link ${selectedSource}`)
+        }
+    }
+
+    const handleUnlinkIdentifier = async (identifierId) => {
+        if (!confirm('Are you sure you want to remove this identifier?')) return
+
+        try {
+            const response = await fetch(`/api/people/${id}/identifiers/${identifierId}`, {
+                method: 'DELETE'
+            })
+
+            if (response.ok) {
+                fetchPerson()
+            } else {
+                alert('Failed to remove identifier')
+            }
+        } catch (error) {
+            console.error('Error removing identifier:', error)
+            alert('Error removing identifier')
         }
     }
 
@@ -144,6 +190,88 @@ function PersonDetail() {
             alert('Error unlinking gallery')
         }
     }
+
+    // Auto-tag handlers
+    const handleAutoTag = async () => {
+        setAutoTagging(true)
+        setShowAutoTagModal(true)
+        try {
+            const response = await fetch(`/api/people/${id}/auto-tag?minConfidence=0.6`)
+            const data = await response.json()
+            setAutoTagSuggestions(data.suggestions || [])
+        } catch (error) {
+            console.error('Auto-tag error:', error)
+            alert('Failed to get auto-tag suggestions')
+        } finally {
+            setAutoTagging(false)
+        }
+    }
+
+    const handleToggleSuggestion = (index) => {
+        const newSelected = new Set(selectedSuggestions)
+        if (newSelected.has(index)) {
+            newSelected.delete(index)
+        } else {
+            newSelected.add(index)
+        }
+        setSelectedSuggestions(newSelected)
+    }
+
+    const handleApplySuggestions = async () => {
+        const suggestions = Array.from(selectedSuggestions).map(index => autoTagSuggestions[index])
+
+        try {
+            const response = await fetch(`/api/people/${id}/auto-tag/apply`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ suggestions })
+            })
+
+            if (response.ok) {
+                const result = await response.json()
+                setShowAutoTagModal(false)
+                setSelectedSuggestions(new Set())
+                fetchPerson()
+                alert(`Tagged ${result.galleries_tagged} galleries and ${result.videos_tagged} videos!`)
+            } else {
+                alert('Failed to apply tags')
+            }
+        } catch (error) {
+            console.error('Apply suggestions error:', error)
+            alert('Error applying tags')
+        }
+    }
+
+    const fetchExclusions = async () => {
+        try {
+            const response = await fetch(`/api/people/${id}/exclusions`)
+            const data = await response.json()
+            setExclusions(data.exclusions || [])
+        } catch (error) {
+            console.error('Fetch exclusions error:', error)
+        }
+    }
+
+    const handleRemoveExclusion = async (exclusionId) => {
+        try {
+            const response = await fetch(`/api/people/${id}/exclusions/${exclusionId}`, {
+                method: 'DELETE'
+            })
+
+            if (response.ok) {
+                fetchExclusions()
+            }
+        } catch (error) {
+            console.error('Remove exclusion error:', error)
+        }
+    }
+
+    // Fetch exclusions when person loads
+    useEffect(() => {
+        if (person) {
+            fetchExclusions()
+        }
+    }, [person])
 
     if (loading) {
         return <div className="loading">Loading...</div>
@@ -209,14 +337,38 @@ function PersonDetail() {
                                 <div className="person-actions">
                                     <button onClick={() => setIsEditing(true)} className="edit-btn">✏️ Edit</button>
                                     <button onClick={() => {
-                                        setStashSearch(person.name)
-                                        setShowStashModal(true)
-                                    }} className="stash-btn">🔗 Link StashDB</button>
+                                        setIdentifierSearch(person.name)
+                                        setShowIdentifierModal(true)
+                                    }} className="stash-btn">🔗 Identify Person</button>
+                                    <button
+                                        onClick={handleAutoTag}
+                                        className="auto-tag-btn"
+                                        disabled={!person.identifiers || person.identifiers.length === 0}
+                                        title={!person.identifiers || person.identifiers.length === 0 ? "Link identifiers first to enable auto-tagging" : "Auto-tag based on name and aliases"}
+                                    >
+                                        🏷️ Auto-Tag
+                                    </button>
                                 </div>
                             </div>
-                            {person.stash_id && (
+                            {/* Display identifiers */}
+                            {person.identifiers && person.identifiers.length > 0 && (
+                                <div className="identifiers-section">
+                                    <h3>Identifiers:</h3>
+                                    <div className="identifiers-list">
+                                        {person.identifiers.map(identifier => (
+                                            <div key={identifier.id} className={`identifier-badge ${identifier.source}`}>
+                                                <span className="identifier-source">{identifier.source}</span>
+                                                <span className="identifier-id">{identifier.external_id}</span>
+                                                <button onClick={() => handleUnlinkIdentifier(identifier.id)} className="remove-identifier" title="Unlink identifier">✕</button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            {/* Backward compatibility: Show StashID badge if exists */}
+                            {person.stash_id && (!person.identifiers || !person.identifiers.find(i => i.source === 'stashdb')) && (
                                 <div className="stash-badge">
-                                    <span className="stash-icon">✓</span> Linked to StashDB
+                                    <span className="stash-icon">✓</span> Linked to StashDB (legacy)
                                 </div>
                             )}
 
@@ -307,59 +459,65 @@ function PersonDetail() {
                 </div>
             </div>
 
-            {showStashModal && (
-                <div className="modal-overlay" onClick={() => setShowStashModal(false)}>
+            {showIdentifierModal && (
+                <div className="modal-overlay" onClick={() => setShowIdentifierModal(false)}>
                     <div className="modal-content" onClick={e => e.stopPropagation()}>
-                        <h2>Link to StashDB</h2>
+                        <h2>Identify Person</h2>
+
+                        {/* Source selector */}
+                        <div className="source-selector">
+                            <label>Source:</label>
+                            <select value={selectedSource} onChange={(e) => setSelectedSource(e.target.value)}>
+                                {availableSources.map(source => (
+                                    <option key={source} value={source}>{source.toUpperCase()}</option>
+                                ))}
+                            </select>
+                        </div>
+
                         <div className="search-box">
                             <input
                                 type="text"
-                                value={stashSearch}
-                                onChange={(e) => setStashSearch(e.target.value)}
+                                value={identifierSearch}
+                                onChange={(e) => setIdentifierSearch(e.target.value)}
                                 placeholder="Search performer name..."
-                                onKeyDown={(e) => e.key === 'Enter' && handleSearchStash()}
+                                onKeyDown={(e) => e.key === 'Enter' && handleSearchIdentifier()}
                             />
-                            <button onClick={handleSearchStash} disabled={searchingStash}>
-                                {searchingStash ? 'Searching...' : 'Search'}
+                            <button onClick={handleSearchIdentifier} disabled={searchingIdentifier}>
+                                {searchingIdentifier ? 'Searching...' : 'Search'}
                             </button>
                         </div>
 
                         <div className="search-results">
-                            {stashResults.map(performer => (
-                                <div key={performer.id} className="search-result-item">
+                            {identifierResults.map(result => (
+                                <div key={result.external_id} className="search-result-item">
                                     <div className="performer-image">
-                                        {performer.images && performer.images.length > 0 ? (
-                                            <img src={performer.images[0].url} alt={performer.name} />
+                                        {result.preview_data?.image_url ? (
+                                            <img src={result.preview_data.image_url} alt={result.name} />
                                         ) : (
                                             <div className="no-image">No Image</div>
                                         )}
                                     </div>
                                     <div className="performer-info">
                                         <div className="performer-header">
-                                            <strong>{performer.name}</strong>
-                                            {performer.disambiguation && (
-                                                <span className="disambiguation">({performer.disambiguation})</span>
+                                            <strong>{result.name}</strong>
+                                            {result.disambiguation && (
+                                                <span className="disambiguation">({result.disambiguation})</span>
                                             )}
                                         </div>
                                         <div className="performer-details">
-                                            {performer.birthdate && performer.birthdate.date && <span>Born: {performer.birthdate.date}</span>}
-                                            {performer.country && <span>Country: {performer.country}</span>}
+                                            {result.preview_data?.birthdate && <span>Born: {result.preview_data.birthdate}</span>}
+                                            {result.preview_data?.country && <span>Country: {result.preview_data.country}</span>}
                                         </div>
-                                        {performer.aliases && performer.aliases.length > 0 && (
-                                            <div className="performer-aliases">
-                                                Aliases: {performer.aliases.join(', ')}
-                                            </div>
-                                        )}
                                     </div>
-                                    <button onClick={() => handleLinkStash(performer.id)} className="link-btn">Link</button>
+                                    <button onClick={() => handleLinkIdentifier(result.external_id)} className="link-btn">Link</button>
                                 </div>
                             ))}
-                            {stashResults.length === 0 && !searchingStash && (
+                            {identifierResults.length === 0 && !searchingIdentifier && (
                                 <p className="no-results">No results found</p>
                             )}
                         </div>
 
-                        <button className="close-modal-btn" onClick={() => setShowStashModal(false)}>Close</button>
+                        <button className="close-modal-btn" onClick={() => setShowIdentifierModal(false)}>Close</button>
                     </div>
                 </div>
             )}
@@ -449,6 +607,42 @@ function PersonDetail() {
                     </div>
                 )}
             </div>
+
+            {/* Auto-Tag Modal */}
+            <AutoTagModal
+                show={showAutoTagModal}
+                onClose={() => setShowAutoTagModal(false)}
+                suggestions={autoTagSuggestions}
+                loading={autoTagging}
+                selectedSuggestions={selectedSuggestions}
+                onToggleSuggestion={handleToggleSuggestion}
+                onApply={handleApplySuggestions}
+            />
+
+            {/* Exclusions Section */}
+            {exclusions.length > 0 && (
+                <div className="exclusions-section">
+                    <h2>Excluded Content</h2>
+                    <p className="exclusion-help">These galleries and videos have been explicitly marked as NOT featuring this person.</p>
+                    <div className="exclusions-list">
+                        {exclusions.map(exclusion => (
+                            <div key={exclusion.id} className="exclusion-item">
+                                <div className="exclusion-info">
+                                    <span className="exclusion-name">{exclusion.gallery ? exclusion.gallery.name : 'Unknown Gallery'}</span>
+                                    <span className="exclusion-reason">ID: {exclusion.gallery_id}</span>
+                                </div>
+                                <button
+                                    onClick={() => handleRemoveExclusion(exclusion.id)}
+                                    className="remove-exclusion-btn"
+                                    title="Remove exclusion (allow tagging again)"
+                                >
+                                    Restore
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

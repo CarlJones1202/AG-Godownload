@@ -652,3 +652,206 @@
         color: #aaa;
     }
 }
+
+/* Identifier Badges */
+.identifiers-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 2rem;
+}
+
+.identifier-badge {
+    display: inline-flex;
+    align-items: center;
+    background: white;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 6px;
+    overflow: hidden;
+    font-size: 0.85rem;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.identifier-source {
+    background: #f0f0f0;
+    padding: 0.4rem 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    color: #555;
+    border-right: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.identifier-id {
+    padding: 0.4rem 0.75rem;
+    font-family: monospace;
+    color: #333;
+}
+
+.remove-identifier {
+    background: none;
+    border: none;
+    border-left: 1px solid rgba(0, 0, 0, 0.05);
+    color: #999;
+    cursor: pointer;
+    padding: 0 0.6rem;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    transition: all 0.2s;
+}
+
+.remove-identifier:hover {
+    background: #fff0f0;
+    color: #f44336;
+}
+
+/* Source-specific colors */
+.identifier-badge.stashdb .identifier-source {
+    background: #ffeef5;
+    color: #d81b60;
+}
+
+.identifier-badge.babepedia .identifier-source {
+    background: #e3f2fd;
+    color: #1976d2;
+}
+
+.identifier-badge.freeones .identifier-source {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.identifier-badge.iafd .identifier-source {
+    background: #fff3e0;
+    color: #ef6c00;
+}
+
+@media (prefers-color-scheme: dark) {
+    .identifier-badge {
+        background: #2a2a2a;
+        border-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .identifier-source {
+        background: #333;
+        color: #aaa;
+        border-color: rgba(255, 255, 255, 0.05);
+    }
+
+    .identifier-id {
+        color: #ddd;
+    }
+
+    .remove-identifier {
+        border-color: rgba(255, 255, 255, 0.05);
+    }
+
+    .remove-identifier:hover {
+        background: rgba(244, 67, 54, 0.1);
+    }
+
+    /* Dark mode source colors */
+    .identifier-badge.stashdb .identifier-source {
+        background: rgba(216, 27, 96, 0.2);
+        color: #f48fb1;
+    }
+
+    .identifier-badge.babepedia .identifier-source {
+        background: rgba(25, 118, 210, 0.2);
+        color: #90caf9;
+    }
+
+    .identifier-badge.freeones .identifier-source {
+        background: rgba(46, 125, 50, 0.2);
+        color: #a5d6a7;
+    }
+
+    .identifier-badge.iafd .identifier-source {
+        background: rgba(239, 108, 0, 0.2);
+        color: #ffcc80;
+    }
+}
+
+/* Exclusions Section */
+.exclusions-section {
+    margin-top: 3rem;
+    padding-top: 2rem;
+    border-top: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.exclusions-section h2 {
+    font-size: 1.25rem;
+    margin-bottom: 1rem;
+    color: #666;
+}
+
+.exclusions-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1rem;
+}
+
+.exclusion-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #f5f5f5;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.exclusion-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.exclusion-name {
+    font-weight: 500;
+    font-size: 0.95rem;
+}
+
+.exclusion-reason {
+    font-size: 0.8rem;
+    color: #888;
+}
+
+.remove-exclusion-btn {
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.remove-exclusion-btn:hover {
+    background: rgba(0, 0, 0, 0.05);
+    color: #333;
+}
+
+@media (prefers-color-scheme: dark) {
+    .exclusions-section {
+        border-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .exclusions-section h2 {
+        color: #999;
+    }
+
+    .exclusion-item {
+        background: #1a1a1a;
+        border-color: rgba(255, 255, 255, 0.05);
+    }
+
+    .exclusion-reason {
+        color: #666;
+    }
+
+    .remove-exclusion-btn:hover {
+        background: rgba(255, 255, 255, 0.05);
+        color: #ddd;
+    }
+}

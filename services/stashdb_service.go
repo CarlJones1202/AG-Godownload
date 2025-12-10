@@ -99,6 +99,141 @@ func NewStashDBService() *StashDBService {
 	}
 }
 
+// GetName implements IdentifierProvider interface
+func (s *StashDBService) GetName() string {
+	return "stashdb"
+}
+
+// Search implements IdentifierProvider interface
+func (s *StashDBService) Search(name string) ([]IdentifierResult, error) {
+	performers, err := s.SearchPerformers(name)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]IdentifierResult, len(performers))
+	for i, p := range performers {
+		previewData := map[string]interface{}{
+			"gender":    p.Gender,
+			"country":   p.Country,
+			"birthdate": p.Birthdate.Date,
+		}
+		if len(p.Images) > 0 {
+			previewData["image_url"] = p.Images[0].URL
+		}
+
+		results[i] = IdentifierResult{
+			ExternalID:     p.ID,
+			Name:           p.Name,
+			Disambiguation: p.Disambiguation,
+			PreviewData:    previewData,
+		}
+	}
+	return results, nil
+}
+
+// GetDetails implements IdentifierProvider interface
+func (s *StashDBService) GetDetails(externalID string) (*PersonData, error) {
+	performer, err := s.GetPerformer(externalID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Extract photo URLs
+	photos := make([]string, len(performer.Images))
+	for i, img := range performer.Images {
+		photos[i] = img.URL
+	}
+
+	// Format tattoos
+	tattoos := ""
+	if len(performer.Tattoos) > 0 {
+		tattooStrs := make([]string, len(performer.Tattoos))
+		for i, t := range performer.Tattoos {
+			tattooStrs[i] = fmt.Sprintf("%s (%s)", t.Description, t.Location)
+		}
+		tattoos = fmt.Sprintf("%v", tattooStrs)
+	}
+
+	// Format piercings
+	piercings := ""
+	if len(performer.Piercings) > 0 {
+		piercingStrs := make([]string, len(performer.Piercings))
+		for i, p := range performer.Piercings {
+			piercingStrs[i] = fmt.Sprintf("%s (%s)", p.Description, p.Location)
+		}
+		piercings = fmt.Sprintf("%v", piercingStrs)
+	}
+
+	// Extract social media
+	twitter := ""
+	instagram := ""
+	for _, u := range performer.URLs {
+		urlLower := fmt.Sprintf("%v", u.URL)
+		if twitter == "" && (contains(urlLower, "twitter.com") || contains(urlLower, "x.com")) {
+			twitter = extractUsername(u.URL)
+		}
+		if instagram == "" && contains(urlLower, "instagram.com") {
+			instagram = extractUsername(u.URL)
+		}
+	}
+
+	return &PersonData{
+		Name:      performer.Name,
+		Aliases:   performer.Aliases,
+		Birthdate: performer.Birthdate.Date,
+		Country:   performer.Country,
+		Ethnicity: performer.Ethnicity,
+		EyeColor:  performer.EyeColor,
+		HairColor: performer.HairColor,
+		Height:    fmt.Sprintf("%d", performer.Height),
+		Measurements: fmt.Sprintf("Band: %d, Cup: %s, Waist: %d, Hip: %d",
+			performer.Measurements.BandSize, performer.Measurements.CupSize,
+			performer.Measurements.Waist, performer.Measurements.Hip),
+		Tattoos:   tattoos,
+		Piercings: piercings,
+		Twitter:   twitter,
+		Instagram: instagram,
+		Photos:    photos,
+		RawData: map[string]interface{}{
+			"gender": performer.Gender,
+		},
+	}, nil
+}
+
+// Helper functions
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) &&
+		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
+			findInString(s, substr)))
+}
+
+func findInString(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+func extractUsername(url string) string {
+	parts := []rune(url)
+	var result []rune
+	slashCount := 0
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i] == '/' {
+			slashCount++
+			if slashCount > 1 {
+				break
+			}
+		} else if slashCount == 1 {
+			result = append([]rune{parts[i]}, result...)
+		}
+	}
+	return string(result)
+}
+
 func (s *StashDBService) SearchPerformers(name string) ([]StashPerformer, error) {
 	query := `
 		query SearchPerformers($name: String!) {

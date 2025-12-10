@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import './VideoPlayer.css'
+import './PersonTagging.css'
 
 function VideoPlayer({ video, onClose, onNext, onPrev }) {
     const videoRef = useRef(null)
@@ -13,6 +14,10 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
     const [previewPosition, setPreviewPosition] = useState({ x: 0, y: 0 })
     const [vttData, setVttData] = useState([])
     const [spriteImage, setSpriteImage] = useState(null)
+    const [showPersonModal, setShowPersonModal] = useState(false)
+    const [people, setPeople] = useState([])
+    const [taggedPeople, setTaggedPeople] = useState(video.people || [])
+    const [searchQuery, setSearchQuery] = useState('')
 
     // Load VTT file and sprite image
     useEffect(() => {
@@ -32,6 +37,60 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
             })
             .catch(err => console.error('Failed to load VTT:', err))
     }, [video.trickplay_vtt, video.trickplay_sprite])
+
+    // Update tagged people when video changes
+    useEffect(() => {
+        setTaggedPeople(video.people || [])
+    }, [video.id, video.people])
+
+    // Fetch people list for tagging
+    const fetchPeople = async () => {
+        try {
+            const response = await fetch('/api/people?limit=1000')
+            const data = await response.json()
+            setPeople(data.data || [])
+        } catch (error) {
+            console.error('Failed to fetch people:', error)
+        }
+    }
+
+    const handleTagPerson = async (personId) => {
+        try {
+            const response = await fetch(`/api/people/${personId}/images/${video.id}`, {
+                method: 'POST'
+            })
+            if (response.ok) {
+                // Refresh tagged people
+                const person = people.find(p => p.id === personId)
+                if (person && !taggedPeople.find(p => p.id === personId)) {
+                    setTaggedPeople([...taggedPeople, person])
+                }
+                setShowPersonModal(false)
+                setSearchQuery('')
+            } else {
+                alert('Failed to tag person')
+            }
+        } catch (error) {
+            console.error('Error tagging person:', error)
+            alert('Error tagging person')
+        }
+    }
+
+    const handleUntagPerson = async (personId) => {
+        try {
+            const response = await fetch(`/api/people/${personId}/images/${video.id}`, {
+                method: 'DELETE'
+            })
+            if (response.ok) {
+                setTaggedPeople(taggedPeople.filter(p => p.id !== personId))
+            } else {
+                alert('Failed to untag person')
+            }
+        } catch (error) {
+            console.error('Error untagging person:', error)
+            alert('Error untagging person')
+        }
+    }
 
     // Load saved progress when video loads
     useEffect(() => {
@@ -216,6 +275,18 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
                     onPause={() => setIsPlaying(false)}
                 />
 
+                {/* Tagged People Display */}
+                {taggedPeople.length > 0 && (
+                    <div className="video-tagged-people">
+                        {taggedPeople.map(person => (
+                            <div key={person.id} className="tagged-person-chip">
+                                <span>{person.name}</span>
+                                <button onClick={() => handleUntagPerson(person.id)} title="Remove tag">✕</button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
                 <div className="video-controls">
                     <button onClick={togglePlay} className="play-btn">
                         {isPlaying ? '⏸' : '▶'}
@@ -278,7 +349,51 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
 
                     <button onClick={onPrev} className="nav-btn">⏮</button>
                     <button onClick={onNext} className="nav-btn">⏭</button>
+                    <button
+                        onClick={() => {
+                            fetchPeople()
+                            setShowPersonModal(true)
+                        }}
+                        className="tag-person-btn"
+                        title="Tag Person"
+                    >
+                        👤+
+                    </button>
                 </div>
+
+                {/* Person Tagging Modal */}
+                {showPersonModal && (
+                    <div className="person-modal-overlay" onClick={() => setShowPersonModal(false)}>
+                        <div className="person-modal" onClick={e => e.stopPropagation()}>
+                            <h3>Tag Person</h3>
+                            <input
+                                type="text"
+                                placeholder="Search people..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="person-search"
+                            />
+                            <div className="person-list">
+                                {people
+                                    .filter(p =>
+                                        p.name.toLowerCase().includes(searchQuery.toLowerCase()) &&
+                                        !taggedPeople.find(tp => tp.id === p.id)
+                                    )
+                                    .map(person => (
+                                        <div
+                                            key={person.id}
+                                            className="person-item"
+                                            onClick={() => handleTagPerson(person.id)}
+                                        >
+                                            {person.name}
+                                        </div>
+                                    ))
+                                }
+                            </div>
+                            <button onClick={() => setShowPersonModal(false)} className="close-modal">Close</button>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     )
