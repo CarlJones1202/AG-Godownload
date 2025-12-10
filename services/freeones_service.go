@@ -23,6 +23,29 @@ func NewFreeOnesService() *FreeOnesService {
 	}
 }
 
+// makeRequest creates a request with proper browser headers to avoid bot detection
+func (s *FreeOnesService) makeRequest(url string) (*http.Response, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Add browser headers to avoid bot detection
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	req.Header.Set("Connection", "keep-alive")
+	req.Header.Set("Upgrade-Insecure-Requests", "1")
+	req.Header.Set("Sec-Fetch-Dest", "document")
+	req.Header.Set("Sec-Fetch-Mode", "navigate")
+	req.Header.Set("Sec-Fetch-Site", "none")
+	req.Header.Set("Sec-Fetch-User", "?1")
+	req.Header.Set("Cache-Control", "max-age=0")
+
+	return s.Client.Do(req)
+}
+
 // GetName implements IdentifierProvider interface
 func (s *FreeOnesService) GetName() string {
 	return "freeones"
@@ -32,7 +55,7 @@ func (s *FreeOnesService) GetName() string {
 func (s *FreeOnesService) Search(name string) ([]IdentifierResult, error) {
 	searchURL := fmt.Sprintf("%s/search/?q=%s&t=1", s.BaseURL, url.QueryEscape(name))
 
-	resp, err := s.Client.Get(searchURL)
+	resp, err := s.makeRequest(searchURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search: %w", err)
 	}
@@ -57,7 +80,7 @@ func (s *FreeOnesService) Search(name string) ([]IdentifierResult, error) {
 func (s *FreeOnesService) GetDetails(externalID string) (*PersonData, error) {
 	profileURL := fmt.Sprintf("%s/%s/profile", s.BaseURL, externalID)
 
-	resp, err := s.Client.Get(profileURL)
+	resp, err := s.makeRequest(profileURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch profile: %w", err)
 	}

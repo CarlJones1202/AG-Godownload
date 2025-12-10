@@ -305,159 +305,184 @@ function PersonDetail() {
                 <button onClick={() => navigate('/people')} className="back-btn">
                     ← Back to People
                 </button>
-                <div className="person-info-header">
-                    {isEditing ? (
-                        <div className="edit-form">
-                            <div className="form-group">
-                                <label>Name</label>
-                                <input
-                                    type="text"
-                                    value={editForm.name}
-                                    onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label>Aliases (comma-separated)</label>
-                                <input
-                                    type="text"
-                                    value={editForm.aliases}
-                                    onChange={(e) => setEditForm({ ...editForm, aliases: e.target.value })}
-                                    placeholder="alias1, alias2, alias3"
-                                />
-                            </div>
-                            <div className="edit-actions">
-                                <button onClick={handleSaveEdit} className="save-btn">Save</button>
-                                <button onClick={() => setIsEditing(false)} className="cancel-btn">Cancel</button>
-                            </div>
+
+                {/* Clean Title Header */}
+                <div className="person-title-header">
+                    <h1>{person.name}</h1>
+                    {parseAliases(person.aliases).length > 0 && (
+                        <div className="aliases-inline">
+                            {parseAliases(person.aliases).map((alias, i) => (
+                                <span key={i} className="alias-tag">{alias}</span>
+                            ))}
                         </div>
-                    ) : (
-                        <>
-                            <div className="person-title">
-                                <h1>{person.name}</h1>
-                                <div className="person-actions">
-                                    <button onClick={() => setIsEditing(true)} className="edit-btn">✏️ Edit</button>
-                                    <button onClick={() => {
-                                        setIdentifierSearch(person.name)
-                                        setShowIdentifierModal(true)
-                                    }} className="stash-btn">🔗 Identify Person</button>
-                                    <button
-                                        onClick={handleAutoTag}
-                                        className="auto-tag-btn"
-                                        disabled={!person.identifiers || person.identifiers.length === 0}
-                                        title={!person.identifiers || person.identifiers.length === 0 ? "Link identifiers first to enable auto-tagging" : "Auto-tag based on name and aliases"}
-                                    >
-                                        🏷️ Auto-Tag
-                                    </button>
-                                </div>
-                            </div>
-                            {/* Display identifiers */}
-                            {person.identifiers && person.identifiers.length > 0 && (
-                                <div className="identifiers-section">
-                                    <h3>Identifiers:</h3>
-                                    <div className="identifiers-list">
-                                        {person.identifiers.map(identifier => (
-                                            <div key={identifier.id} className={`identifier-badge ${identifier.source}`}>
-                                                <span className="identifier-source">{identifier.source}</span>
-                                                <span className="identifier-id">{identifier.external_id}</span>
-                                                <button onClick={() => handleUnlinkIdentifier(identifier.id)} className="remove-identifier" title="Unlink identifier">✕</button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                            {/* Backward compatibility: Show StashID badge if exists */}
-                            {person.stash_id && (!person.identifiers || !person.identifiers.find(i => i.source === 'stashdb')) && (
-                                <div className="stash-badge">
-                                    <span className="stash-icon">✓</span> Linked to StashDB (legacy)
-                                </div>
-                            )}
-
-                            {/* Photo Carousel */}
-                            {person.photos && (() => {
-                                const photos = JSON.parse(person.photos);
-                                if (photos.length === 0) return null;
-
-                                return (
-                                    <div className="person-photos-section">
-                                        <div className="person-photos-carousel">
-                                            <img
-                                                src={photos[currentPhotoIndex]}
-                                                alt={`${person.name} ${currentPhotoIndex + 1}`}
-                                            />
-                                            {photos.length > 1 && (
-                                                <>
-                                                    <button
-                                                        className="carousel-btn prev"
-                                                        onClick={() => setCurrentPhotoIndex((currentPhotoIndex - 1 + photos.length) % photos.length)}
-                                                    >
-                                                        ‹
-                                                    </button>
-                                                    <button
-                                                        className="carousel-btn next"
-                                                        onClick={() => setCurrentPhotoIndex((currentPhotoIndex + 1) % photos.length)}
-                                                    >
-                                                        ›
-                                                    </button>
-                                                    <div className="carousel-indicators">
-                                                        {photos.map((_, index) => (
-                                                            <button
-                                                                key={index}
-                                                                className={`indicator ${index === currentPhotoIndex ? 'active' : ''}`}
-                                                                onClick={() => setCurrentPhotoIndex(index)}
-                                                            />
-                                                        ))}
-                                                    </div>
-                                                </>
-                                            )}
-                                        </div>
-                                    </div>
-                                );
-                            })()}
-
-                            {/* Extended Info */}
-                            {(person.birthdate || person.country || person.ethnicity || person.height || person.measurements || person.hair_color || person.eye_color) && (
-                                <div className="person-extended-info">
-                                    <div className="info-grid">
-                                        {person.birthdate && <div className="info-item"><strong>Born:</strong> {person.birthdate}</div>}
-                                        {person.country && <div className="info-item"><strong>Country:</strong> {person.country}</div>}
-                                        {person.ethnicity && <div className="info-item"><strong>Ethnicity:</strong> {person.ethnicity}</div>}
-                                        {person.height && <div className="info-item"><strong>Height:</strong> {person.height}cm</div>}
-                                        {person.hair_color && <div className="info-item"><strong>Hair:</strong> {person.hair_color}</div>}
-                                        {person.eye_color && <div className="info-item"><strong>Eyes:</strong> {person.eye_color}</div>}
-                                        {person.measurements && <div className="info-item"><strong>Measurements:</strong> {person.measurements}</div>}
-                                    </div>
-
-                                    {(person.tattoos || person.piercings) && (
-                                        <div className="body-mods-section">
-                                            <h3>Body Modifications</h3>
-                                            {person.tattoos && <div className="info-item"><strong>Tattoos:</strong> {person.tattoos}</div>}
-                                            {person.piercings && <div className="info-item"><strong>Piercings:</strong> {person.piercings}</div>}
-                                        </div>
-                                    )}
-
-                                    {(person.twitter || person.instagram) && (
-                                        <div className="social-section">
-                                            <h3>Social Media</h3>
-                                            <div className="social-links">
-                                                {person.twitter && <a href={`https://twitter.com/${person.twitter}`} target="_blank" rel="noopener noreferrer">🐦 Twitter</a>}
-                                                {person.instagram && <a href={`https://instagram.com/${person.instagram}`} target="_blank" rel="noopener noreferrer">📷 Instagram</a>}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {parseAliases(person.aliases).length > 0 && (
-                                <div className="aliases">
-                                    {parseAliases(person.aliases).map((alias, i) => (
-                                        <span key={i} className="alias-tag">{alias}</span>
-                                    ))}
-                                </div>
-                            )}
-                        </>
                     )}
                 </div>
+
+                {/* Identifiers below title */}
+                {person.identifiers && person.identifiers.length > 0 && (
+                    <div className="identifiers-section">
+                        <div className="identifiers-list">
+                            {person.identifiers.map(identifier => (
+                                <div key={identifier.id} className={`identifier-badge ${identifier.source}`}>
+                                    <span className="identifier-source">{identifier.source}</span>
+                                    <span className="identifier-id">{identifier.external_id}</span>
+                                    <button onClick={() => handleUnlinkIdentifier(identifier.id)} className="remove-identifier" title="Unlink identifier">✕</button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Floating Action Button */}
+                <button
+                    className="fab-button"
+                    onClick={() => setShowAutoTagModal(!showAutoTagModal)}
+                    title="Person Actions"
+                >
+                    ⋮
+                </button>
+
+                {/* Slide-out Sidebar */}
+                <div className={`admin-sidebar ${showAutoTagModal ? 'open' : ''}`}>
+                    <div className="sidebar-header">
+                        <h3>Actions</h3>
+                        <button className="close-sidebar" onClick={() => setShowAutoTagModal(false)}>✕</button>
+                    </div>
+                    <div className="sidebar-content">
+                        {isEditing ? (
+                            <div className="edit-form">
+                                <div className="form-group">
+                                    <label>Name</label>
+                                    <input
+                                        type="text"
+                                        value={editForm.name}
+                                        onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label>Aliases (comma-separated)</label>
+                                    <input
+                                        type="text"
+                                        value={editForm.aliases}
+                                        onChange={(e) => setEditForm({ ...editForm, aliases: e.target.value })}
+                                        placeholder="alias1, alias2, alias3"
+                                    />
+                                </div>
+                                <div className="edit-actions">
+                                    <button onClick={handleSaveEdit} className="save-btn">Save</button>
+                                    <button onClick={() => setIsEditing(false)} className="cancel-btn">Cancel</button>
+                                </div>
+                            </div>
+                        ) : (
+                            <>
+                                <button onClick={() => setIsEditing(true)} className="sidebar-action-btn">
+                                    <div className="btn-text">
+                                        <strong>Edit Person</strong>
+                                        <small>Update name and aliases</small>
+                                    </div>
+                                </button>
+                                <button onClick={() => {
+                                    setIdentifierSearch(person.name)
+                                    setShowIdentifierModal(true)
+                                }} className="sidebar-action-btn">
+                                    <div className="btn-text">
+                                        <strong>Identify Person</strong>
+                                        <small>Link to StashDB, Babepedia, etc.</small>
+                                    </div>
+                                </button>
+                                <button
+                                    onClick={handleAutoTag}
+                                    className="sidebar-action-btn"
+                                    disabled={!person.identifiers || person.identifiers.length === 0}
+                                >
+                                    <div className="btn-text">
+                                        <strong>Auto-Tag</strong>
+                                        <small>{!person.identifiers || person.identifiers.length === 0 ? "Link identifiers first" : "Auto-tag galleries and videos"}</small>
+                                    </div>
+                                </button>
+                            </>
+                        )}
+                    </div>
+                </div>
+
+                {/* Overlay */}
+                {showAutoTagModal && <div className="sidebar-overlay" onClick={() => setShowAutoTagModal(false)} />}
             </div>
+
+            {/* Photo Carousel */}
+            {person.photos && (() => {
+                const photos = JSON.parse(person.photos);
+                if (photos.length === 0) return null;
+
+                return (
+                    <div className="person-photos-section">
+                        <div className="person-photos-carousel">
+                            <img
+                                src={photos[currentPhotoIndex]}
+                                alt={`${person.name} ${currentPhotoIndex + 1}`}
+                            />
+                            {photos.length > 1 && (
+                                <>
+                                    <button
+                                        className="carousel-btn prev"
+                                        onClick={() => setCurrentPhotoIndex((currentPhotoIndex - 1 + photos.length) % photos.length)}
+                                    >
+                                        ‹
+                                    </button>
+                                    <button
+                                        className="carousel-btn next"
+                                        onClick={() => setCurrentPhotoIndex((currentPhotoIndex + 1) % photos.length)}
+                                    >
+                                        ›
+                                    </button>
+                                    <div className="carousel-indicators">
+                                        {photos.map((_, index) => (
+                                            <button
+                                                key={index}
+                                                className={`indicator ${index === currentPhotoIndex ? 'active' : ''}`}
+                                                onClick={() => setCurrentPhotoIndex(index)}
+                                            />
+                                        ))}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                );
+            })()}
+
+            {/* Extended Info */}
+            {(person.birthdate || person.country || person.ethnicity || person.height || person.measurements || person.hair_color || person.eye_color) && (
+                <div className="person-extended-info">
+                    <div className="info-grid">
+                        {person.birthdate && <div className="info-item"><strong>Born:</strong> {person.birthdate}</div>}
+                        {person.country && <div className="info-item"><strong>Country:</strong> {person.country}</div>}
+                        {person.ethnicity && <div className="info-item"><strong>Ethnicity:</strong> {person.ethnicity}</div>}
+                        {person.height && <div className="info-item"><strong>Height:</strong> {person.height}cm</div>}
+                        {person.hair_color && <div className="info-item"><strong>Hair:</strong> {person.hair_color}</div>}
+                        {person.eye_color && <div className="info-item"><strong>Eyes:</strong> {person.eye_color}</div>}
+                        {person.measurements && <div className="info-item"><strong>Measurements:</strong> {person.measurements}</div>}
+                    </div>
+
+                    {(person.tattoos || person.piercings) && (
+                        <div className="body-mods-section">
+                            <h3>Body Modifications</h3>
+                            {person.tattoos && <div className="info-item"><strong>Tattoos:</strong> {person.tattoos}</div>}
+                            {person.piercings && <div className="info-item"><strong>Piercings:</strong> {person.piercings}</div>}
+                        </div>
+                    )}
+
+                    {(person.twitter || person.instagram) && (
+                        <div className="social-section">
+                            <h3>Social Media</h3>
+                            <div className="social-links">
+                                {person.twitter && <a href={`https://twitter.com/${person.twitter}`} target="_blank" rel="noopener noreferrer">🐦 Twitter</a>}
+                                {person.instagram && <a href={`https://instagram.com/${person.instagram}`} target="_blank" rel="noopener noreferrer">📷 Instagram</a>}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
 
             {showIdentifierModal && (
                 <div className="modal-overlay" onClick={() => setShowIdentifierModal(false)}>
@@ -520,50 +545,53 @@ function PersonDetail() {
                         <button className="close-modal-btn" onClick={() => setShowIdentifierModal(false)}>Close</button>
                     </div>
                 </div>
-            )}
+            )
+            }
 
             {/* Videos Section */}
-            {videoGalleries.length > 0 && (
-                <div className="person-galleries">
-                    <h2>Videos ({videoGalleries.length})</h2>
-                    <div className="galleries-grid">
-                        {videoGalleries.map((gallery) => (
-                            <div key={gallery.id} className="gallery-card">
-                                <div className="gallery-content" onClick={() => navigate(`/galleries/${gallery.id}`)}>
-                                    <div className="gallery-thumbnail video-thumbnail">
-                                        {gallery.images && gallery.images.length > 0 ? (
-                                            <div className="video-thumb-container">
-                                                <img
-                                                    src={`/api/${gallery.images[0].thumbnail_path}`}
-                                                    alt={gallery.name}
-                                                    loading="lazy"
-                                                    onError={(e) => {
-                                                        e.target.onerror = null;
-                                                        e.target.src = "https://via.placeholder.com/200x200?text=No+Thumb"
-                                                    }}
-                                                />
-                                                <div className="play-icon-overlay">▶</div>
-                                            </div>
-                                        ) : (
-                                            <div className="no-image">No Video</div>
-                                        )}
+            {
+                videoGalleries.length > 0 && (
+                    <div className="person-galleries">
+                        <h2>Videos ({videoGalleries.length})</h2>
+                        <div className="galleries-grid">
+                            {videoGalleries.map((gallery) => (
+                                <div key={gallery.id} className="gallery-card">
+                                    <div className="gallery-content" onClick={() => navigate(`/galleries/${gallery.id}`)}>
+                                        <div className="gallery-thumbnail video-thumbnail">
+                                            {gallery.images && gallery.images.length > 0 ? (
+                                                <div className="video-thumb-container">
+                                                    <img
+                                                        src={`/api/${gallery.images[0].thumbnail_path}`}
+                                                        alt={gallery.name}
+                                                        loading="lazy"
+                                                        onError={(e) => {
+                                                            e.target.onerror = null;
+                                                            e.target.src = "https://via.placeholder.com/200x200?text=No+Thumb"
+                                                        }}
+                                                    />
+                                                    <div className="play-icon-overlay">▶</div>
+                                                </div>
+                                            ) : (
+                                                <div className="no-image">No Video</div>
+                                            )}
+                                        </div>
+                                        <div className="gallery-info">
+                                            <h3>{gallery.name}</h3>
+                                        </div>
                                     </div>
-                                    <div className="gallery-info">
-                                        <h3>{gallery.name}</h3>
-                                    </div>
+                                    <button
+                                        onClick={(e) => handleUnlinkGallery(gallery.id, e)}
+                                        className="unlink-btn"
+                                        title="Unlink video"
+                                    >
+                                        ✕
+                                    </button>
                                 </div>
-                                <button
-                                    onClick={(e) => handleUnlinkGallery(gallery.id, e)}
-                                    className="unlink-btn"
-                                    title="Unlink video"
-                                >
-                                    ✕
-                                </button>
-                            </div>
-                        ))}
+                            ))}
+                        </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             <div className="person-galleries">
                 <h2>Galleries ({photoGalleries.length})</h2>
@@ -620,30 +648,32 @@ function PersonDetail() {
             />
 
             {/* Exclusions Section */}
-            {exclusions.length > 0 && (
-                <div className="exclusions-section">
-                    <h2>Excluded Content</h2>
-                    <p className="exclusion-help">These galleries and videos have been explicitly marked as NOT featuring this person.</p>
-                    <div className="exclusions-list">
-                        {exclusions.map(exclusion => (
-                            <div key={exclusion.id} className="exclusion-item">
-                                <div className="exclusion-info">
-                                    <span className="exclusion-name">{exclusion.gallery ? exclusion.gallery.name : 'Unknown Gallery'}</span>
-                                    <span className="exclusion-reason">ID: {exclusion.gallery_id}</span>
+            {
+                exclusions.length > 0 && (
+                    <div className="exclusions-section">
+                        <h2>Excluded Content</h2>
+                        <p className="exclusion-help">These galleries and videos have been explicitly marked as NOT featuring this person.</p>
+                        <div className="exclusions-list">
+                            {exclusions.map(exclusion => (
+                                <div key={exclusion.id} className="exclusion-item">
+                                    <div className="exclusion-info">
+                                        <span className="exclusion-name">{exclusion.gallery ? exclusion.gallery.name : 'Unknown Gallery'}</span>
+                                        <span className="exclusion-reason">ID: {exclusion.gallery_id}</span>
+                                    </div>
+                                    <button
+                                        onClick={() => handleRemoveExclusion(exclusion.id)}
+                                        className="remove-exclusion-btn"
+                                        title="Remove exclusion (allow tagging again)"
+                                    >
+                                        Restore
+                                    </button>
                                 </div>
-                                <button
-                                    onClick={() => handleRemoveExclusion(exclusion.id)}
-                                    className="remove-exclusion-btn"
-                                    title="Remove exclusion (allow tagging again)"
-                                >
-                                    Restore
-                                </button>
-                            </div>
-                        ))}
+                            ))}
+                        </div>
                     </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+        </div >
     )
 }
 

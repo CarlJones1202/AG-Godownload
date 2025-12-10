@@ -94,7 +94,7 @@ function PersonList({ people, onRefresh, meta, onPageChange }) {
             <div className="person-header">
                 <h2>People</h2>
                 <button onClick={() => setShowForm(!showForm)}>
-                    {showForm ? '✕ Cancel' : '+ Add Person'}
+                    {showForm ? 'Cancel' : 'Add Person'}
                 </button>
             </div>
 
@@ -144,42 +144,48 @@ function PersonList({ people, onRefresh, meta, onPageChange }) {
                                         loading="lazy"
                                     />
                                 ) : (
-                                    <div className="no-image">👤</div>
+                                    <div className="no-image">—</div>
                                 )}
                             </div>
                             <div className="person-info">
                                 <h3>{person.name}</h3>
                                 {(person.country || person.birthdate) && (
                                     <div className="person-meta">
-                                        {person.country && <span className="meta-tag">🗺️ {person.country}</span>}
-                                        {person.birthdate && <span className="meta-tag">🎂 {person.birthdate}</span>}
+                                        {person.country && <span className="meta-item">{person.country}</span>}
+                                        {person.birthdate && <span className="meta-item">{person.birthdate}</span>}
                                     </div>
                                 )}
                                 {parseAliases(person.aliases).length > 0 && (
                                     <div className="aliases">
-                                        {parseAliases(person.aliases).map((alias, i) => (
+                                        {parseAliases(person.aliases).slice(0, 3).map((alias, i) => (
                                             <span key={i} className="alias-tag">{alias}</span>
                                         ))}
+                                        {parseAliases(person.aliases).length > 3 && (
+                                            <span className="alias-tag more">+{parseAliases(person.aliases).length - 3}</span>
+                                        )}
                                     </div>
                                 )}
                                 <p className="gallery-count">
                                     {person.gallery_count || 0} {person.gallery_count === 1 ? 'gallery' : 'galleries'}
+                                    {person.video_count > 0 && (
+                                        <> · {person.video_count} {person.video_count === 1 ? 'video' : 'videos'}</>
+                                    )}
                                 </p>
                             </div>
-                            <div className="person-actions">
+                            <div className="person-actions" onClick={(e) => e.stopPropagation()}>
                                 <button
                                     onClick={() => handleLinkGalleries(person.id)}
                                     className="link-btn"
-                                    title="Link to galleries"
+                                    title="Auto-link galleries by name"
                                 >
-                                    🔗 Link
+                                    Link Galleries
                                 </button>
                                 <button
                                     onClick={(e) => handleDeletePerson(person.id, e)}
                                     className="delete-btn"
                                     title="Delete person"
                                 >
-                                    🗑️
+                                    Delete
                                 </button>
                             </div>
                         </div>

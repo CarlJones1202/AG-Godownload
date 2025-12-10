@@ -73,17 +73,29 @@ func GetPeople(c *gin.Context) {
 	type PersonResponse struct {
 		models.Person
 		GalleryCount  int    `json:"gallery_count"`
+		VideoCount    int    `json:"video_count"`
 		ThumbnailPath string `json:"thumbnail_path"`
 	}
 
 	personResponses := make([]PersonResponse, len(people))
 	for i := range people {
 		// Get gallery count
-		var count int64
+		var galleryCount int64
 		database.DB.Model(&models.Gallery{}).
 			Joins("JOIN person_galleries ON person_galleries.gallery_id = galleries.id").
 			Where("person_galleries.person_id = ?", people[i].ID).
-			Count(&count)
+			Count(&galleryCount)
+
+		// Get video count (videos can be linked via galleries OR directly via person_images)
+		var videoCount int64
+		database.DB.Model(&models.Image{}).
+			Distinct("images.id").
+			Joins("LEFT JOIN galleries ON galleries.id = images.gallery_id").
+			Joins("LEFT JOIN person_galleries ON person_galleries.gallery_id = galleries.id").
+			Joins("LEFT JOIN person_images ON person_images.image_id = images.id").
+			Where("(person_galleries.person_id = ? OR person_images.person_id = ?) AND images.type = ?",
+				people[i].ID, people[i].ID, "video").
+			Count(&videoCount)
 
 		// Get first image for thumbnail
 		var thumbnailPath string
@@ -128,7 +140,8 @@ func GetPeople(c *gin.Context) {
 
 		personResponses[i] = PersonResponse{
 			Person:        people[i],
-			GalleryCount:  int(count),
+			GalleryCount:  int(galleryCount),
+			VideoCount:    int(videoCount),
 			ThumbnailPath: thumbnailPath,
 		}
 	}

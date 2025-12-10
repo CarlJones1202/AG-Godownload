@@ -17,9 +17,199 @@
     color: var(--color-text-primary);
 }
 
+/* Clean Gallery Title Header */
+.gallery-title-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-xl);
+}
+
+.gallery-title-header h2 {
+    margin: 0;
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--color-text-primary);
+}
+
+.source-badge {
+    display: inline-block;
+    padding: 0.375rem 0.875rem;
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Floating Action Button - Minimal */
+.fab-button {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--color-bg-elevated);
+    color: var(--color-text-primary);
+    border: 1px solid var(--color-border-primary);
+    font-size: 1.25rem;
+    cursor: pointer;
+    box-shadow: var(--shadow-md);
+    transition: all var(--transition-fast);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.fab-button:hover {
+    background: var(--color-bg-tertiary);
+    border-color: var(--color-border-secondary);
+    box-shadow: var(--shadow-lg);
+}
+
+/* Slide-out Sidebar - Clean */
+.admin-sidebar {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 320px;
+    height: 100vh;
+    background: var(--color-bg-elevated);
+    border-left: 1px solid var(--color-border-primary);
+    box-shadow: var(--shadow-lg);
+    transform: translateX(100%);
+    transition: transform var(--transition-fast);
+    z-index: 1001;
+    display: flex;
+    flex-direction: column;
+}
+
+.admin-sidebar.open {
+    transform: translateX(0);
+}
+
+.sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-lg);
+    border-bottom: 1px solid var(--color-border-primary);
+}
+
+.sidebar-header h3 {
+    margin: 0;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.close-sidebar {
+    background: none;
+    border: none;
+    font-size: 1.25rem;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    padding: 0.25rem;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-fast);
+}
+
+.close-sidebar:hover {
+    background: var(--overlay-hover);
+    color: var(--color-text-primary);
+}
+
+.sidebar-content {
+    flex: 1;
+    padding: var(--spacing-lg);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    overflow-y: auto;
+}
+
+.sidebar-action-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md);
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    text-align: left;
+}
+
+.sidebar-action-btn:hover {
+    background: var(--color-bg-tertiary);
+    border-color: var(--color-border-primary);
+}
+
+.sidebar-action-btn.danger:hover {
+    background: rgba(239, 68, 68, 0.08);
+    border-color: var(--color-accent-danger);
+}
+
+.sidebar-action-btn .btn-icon {
+    font-size: 1.25rem;
+    flex-shrink: 0;
+    color: var(--color-text-secondary);
+}
+
+.sidebar-action-btn .btn-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+}
+
+.sidebar-action-btn .btn-text strong {
+    color: var(--color-text-primary);
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.sidebar-action-btn .btn-text small {
+    color: var(--color-text-tertiary);
+    font-size: 0.75rem;
+}
+
+.sidebar-action-btn.danger .btn-text strong {
+    color: var(--color-accent-danger);
+}
+
+.sidebar-action-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Sidebar Overlay */
+.sidebar-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(2px);
+    z-index: 1000;
+}
+
 .gallery-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: var(--spacing-md);
 }
 
@@ -28,21 +218,20 @@
     border-radius: var(--radius-lg);
     overflow: hidden;
     cursor: pointer;
-    transition: all var(--transition-base);
-    border: 1px solid var(--color-border-primary);
+    transition: all var(--transition-fast);
+    border: 1px solid var(--color-border-subtle);
     position: relative;
 }
 
 .gallery-card:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-lg);
-    border-color: var(--color-border-secondary);
+    border-color: var(--color-border-primary);
+    box-shadow: var(--shadow-sm);
 }
 
 .gallery-thumbnail {
     width: 100%;
-    height: 160px;
-    background: linear-gradient(135deg, var(--color-bg-tertiary) 0%, var(--color-bg-primary) 100%);
+    height: 180px;
+    background: linear-gradient(135deg, var(--color-bg-tertiary) 0%, var(--color-bg-secondary) 100%);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -53,35 +242,41 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform var(--transition-slow);
+    transition: transform var(--transition-base);
 }
 
 .gallery-card:hover .gallery-thumbnail img {
-    transform: scale(1.05);
+    transform: scale(1.02);
 }
 
 .no-image {
-    font-size: 2.5rem;
-    opacity: 0.15;
     color: var(--color-text-tertiary);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
 }
 
 .gallery-info {
-    padding: 0.875rem;
+    padding: var(--spacing-md);
 }
 
 .gallery-info h3 {
     margin: 0 0 0.25rem 0;
-    font-size: 0.9375rem;
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    font-size: 0.875rem;
+    font-weight: 500;
     color: var(--color-text-primary);
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 }
 
 .gallery-info p {
     margin: 0;
-    color: var(--color-text-secondary);
-    font-size: 0.8125rem;
+    font-size: 0.75rem;
+    color: var(--color-text-tertiary);
 }
 
 .empty-state {

@@ -10,6 +10,7 @@ function GalleryList({ galleries, onRefresh, meta, onPageChange }) {
     const [showPersonModal, setShowPersonModal] = useState(false)
     const [people, setPeople] = useState([])
     const [searchQuery, setSearchQuery] = useState('')
+    const [sidebarOpen, setSidebarOpen] = useState(false)
     const navigate = useNavigate()
     const params = useParams()
     const location = useLocation()
@@ -171,6 +172,7 @@ function GalleryList({ galleries, onRefresh, meta, onPageChange }) {
     }
 
     if (selectedGallery) {
+
         return (
             <div>
                 <button
@@ -179,35 +181,68 @@ function GalleryList({ galleries, onRefresh, meta, onPageChange }) {
                 >
                     ← Back to Galleries
                 </button>
-                <div className="gallery-header">
+
+                {/* Clean Title Header */}
+                <div className="gallery-title-header">
                     <h2>{selectedGallery.name}</h2>
-                    <div className="gallery-actions">
+                    {selectedGallery.source && (
+                        <span className="source-badge">{selectedGallery.source.name}</span>
+                    )}
+                </div>
+
+                {/* Floating Action Button */}
+                <button
+                    className="fab-button"
+                    onClick={() => setSidebarOpen(!sidebarOpen)}
+                    title="Gallery Actions"
+                >
+                    ⋮
+                </button>
+
+                {/* Slide-out Sidebar */}
+                <div className={`admin-sidebar ${sidebarOpen ? 'open' : ''}`}>
+                    <div className="sidebar-header">
+                        <h3>Actions</h3>
+                        <button className="close-sidebar" onClick={() => setSidebarOpen(false)}>✕</button>
+                    </div>
+                    <div className="sidebar-content">
                         <button
                             onClick={() => {
                                 fetchPeople()
                                 setShowPersonModal(true)
                             }}
-                            className="tag-person-btn"
+                            className="sidebar-action-btn"
                         >
-                            👤+ Tag Person
-                        </button>
-                        <button
-                            className="delete-gallery-btn"
-                            onClick={(e) => handleDeleteGallery(selectedGallery.id, e)}
-                        >
-                            🗑️ Delete Gallery
+                            <div className="btn-text">
+                                <strong>Tag Person</strong>
+                                <small>Link people to this gallery</small>
+                            </div>
                         </button>
                         {selectedGallery.source && (
                             <button
-                                className="recrawl-source-btn"
+                                className="sidebar-action-btn"
                                 onClick={handleRecrawlSource}
-                                title="Re-crawl this source for new content"
                             >
-                                🔄 Re-crawl Source
+                                <div className="btn-text">
+                                    <strong>Re-crawl Source</strong>
+                                    <small>Fetch new content from {selectedGallery.source.name}</small>
+                                </div>
                             </button>
                         )}
+                        <button
+                            className="sidebar-action-btn danger"
+                            onClick={(e) => handleDeleteGallery(selectedGallery.id, e)}
+                        >
+                            <div className="btn-text">
+                                <strong>Delete Gallery</strong>
+                                <small>Remove gallery and optionally images</small>
+                            </div>
+                        </button>
                     </div>
                 </div>
+
+                {/* Overlay */}
+                {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
                 {/* Tagged People Display */}
                 {selectedGallery.people && selectedGallery.people.length > 0 && (
                     <div className="gallery-tagged-people">
@@ -265,10 +300,6 @@ function GalleryList({ galleries, onRefresh, meta, onPageChange }) {
 
     return (
         <div className="gallery-list">
-            <div className="gallery-header">
-                <h2>Your Galleries</h2>
-                <button onClick={onRefresh}>🔄 Refresh</button>
-            </div>
             {galleries.length === 0 ? (
                 <div className="no-galleries">
                     <p>No galleries found. Add a source to start crawling!</p>

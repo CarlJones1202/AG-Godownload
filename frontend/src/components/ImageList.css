@@ -28,26 +28,36 @@
     border-radius: var(--radius-lg);
     overflow: hidden;
     cursor: pointer;
-    transition: all var(--transition-base);
-    border: 1px solid var(--color-border-primary);
+    transition: all var(--transition-fast);
+    border: 1px solid var(--color-border-subtle);
     position: relative;
     aspect-ratio: 1;
 }
 
 .image-card:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-lg);
-    border-color: var(--color-border-secondary);
+    border-color: var(--color-border-primary);
+    box-shadow: var(--shadow-sm);
 }
 
 .image-thumbnail {
     width: 100%;
     height: 100%;
-    background: linear-gradient(135deg, var(--color-bg-tertiary) 0%, var(--color-bg-primary) 100%);
+    background: linear-gradient(135deg, var(--color-bg-tertiary) 0%, var(--color-bg-secondary) 100%);
     display: flex;
     align-items: center;
     justify-content: center;
     overflow: hidden;
+}
+
+.image-thumbnail img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform var(--transition-base);
+}
+
+.image-card:hover .image-thumbnail img {
+    transform: scale(1.02);
 }
 
 .image-thumbnail img {

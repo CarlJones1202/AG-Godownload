@@ -106,7 +106,7 @@ func main() {
 	r.DELETE("/images/:imageId/tags/:tagId", handlers.UnlinkTagFromImage)
 
 	// Image routes
-	r.DELETE("/images/:id", handlers.DeleteImage)
+	r.DELETE("/images/:imageId", handlers.DeleteImage)
 	r.GET("/images", handlers.GetImages)
 	r.GET("/search/color", handlers.SearchByColor)
 
