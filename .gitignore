@@ -1,5 +1,5 @@
 uploads/*
-old_uploads/*
+bin/*
 frontend/node_modules
 **/*.exe
 
@@ -7,4 +7,4 @@ frontend/node_modules
 *.db
 *.db-shm
 *.db-wal
-gallery_api.exe
+
