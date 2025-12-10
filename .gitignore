@@ -1,3 +1,4 @@
 uploads/*
 old_uploads/*
 frontend/node_modules
+**/*.exe
