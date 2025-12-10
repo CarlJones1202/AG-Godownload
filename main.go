@@ -58,6 +58,10 @@ func main() {
 	services.StartCrawlerWorker()
 	logger.Info("Background crawler worker started")
 
+	// Start AI Tag worker
+	// services.StartAITagWorker()
+	logger.Info("Background AI Tag worker started")
+
 	r := gin.Default()
 
 	// Routes

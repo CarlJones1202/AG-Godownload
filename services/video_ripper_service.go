@@ -276,3 +276,96 @@ func DownloadVideo(videoURL string, sourceName string, pageURL string, title str
 		DominantColors: "[]", // Videos don't need color extraction
 	}, nil
 }
+
+// RipPMVHaven extracts the video URL from a PMVHaven page
+func RipPMVHaven(pageURL string) (string, string, error) {
+	logger.Debugf("Starting RipPMVHaven for %s", pageURL)
+
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", pageURL, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("fetching page: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return "", "", fmt.Errorf("page returned status %d", resp.StatusCode)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return "", "", fmt.Errorf("parsing HTML: %w", err)
+	}
+
+	title := strings.TrimSpace(doc.Find("h1").First().Text())
+	title = strings.TrimSuffix(title, " - PMVHaven")
+	if title == "" {
+		title = "Unknown Video"
+	}
+
+	var videoURL string
+
+	// Method 1: Look for regex matches in all script tags
+	// We look for patterns like:
+	// video_url: "..."
+	// contentUrl: "..." (but avoid the page URL itself)
+	// .mp4 inside any string
+	doc.Find("script").Each(func(i int, s *goquery.Selection) {
+		if videoURL != "" {
+			return
+		}
+		text := s.Text()
+
+		// Specific look for fileUrl or similar keys common in Nuxt apps or this specific site
+		// Based on loose analysis, searching for .mp4 is the most robust start
+		// We want to avoid "preview" or "trailer" if possible, but usually main video is the largest file.
+		// Regex to find mp4 URLs
+		// This regex looks for https://... .mp4
+		re := regexp.MustCompile(`https?://[^"'\s<>]+\.mp4`)
+		matches := re.FindAllString(text, -1)
+
+		for _, match := range matches {
+			// Filter out obviously wrong ones if needed (e.g. storage.pmvhaven.com often hosts the videos)
+			if strings.Contains(match, "pmvhaven.com") {
+				videoURL = match
+				logger.Debugf("Found candidate video URL in script: %s", videoURL)
+				return
+			}
+		}
+	})
+
+	// Method 2: Check standard meta tags (fallback)
+	if videoURL == "" {
+		videoURL, _ = doc.Find("meta[property='og:video']").Attr("content")
+		if videoURL == "" {
+			videoURL, _ = doc.Find("meta[property='og:video:url']").Attr("content")
+		}
+		// PMVHaven might use og:video for the page URL, so verify it ends in .mp4
+		if videoURL != "" && !strings.HasSuffix(videoURL, ".mp4") {
+			logger.Debugf("Ignoring non-mp4 og:video: %s", videoURL)
+			videoURL = ""
+		}
+	}
+
+	// Method 3: Check for video source tags
+	if videoURL == "" {
+		doc.Find("video source").Each(func(i int, s *goquery.Selection) {
+			if src, exists := s.Attr("src"); exists && strings.Contains(src, ".mp4") {
+				videoURL = src
+				logger.Debugf("Found video source in HTML5 tag: %s", videoURL)
+			}
+		})
+	}
+
+	if videoURL == "" {
+		return "", "", fmt.Errorf("could not find video URL on %s", pageURL)
+	}
+
+	return videoURL, title, nil
+}

@@ -51,3 +51,35 @@ func StartCrawlerWorker() {
 		}(i)
 	}
 }
+
+var AITagQueue = make(chan uint, 100)
+
+func AddToAITagQueue(imageID uint) {
+	select {
+	case AITagQueue <- imageID:
+		logger.Debugf("Added image %d to AI tag queue", imageID)
+	default:
+		logger.Warn("AI tag queue full, skipping image", imageID)
+	}
+}
+
+func StartAITagWorker() {
+	// Only 1 worker because it's heavy (loading models, etc)
+	// Or maybe the script is fast enough to have 2? Let's stick to 1 to avoid memory spikes.
+	go func() {
+		logger.Debug("AI Tag worker started")
+		for imageID := range AITagQueue {
+			logger.Debugf("AI Tag worker processing image %d", imageID)
+			if err := LabelImage(imageID); err != nil {
+				logger.Errorf("Error AI tagging image %d: %v", imageID, err)
+			}
+		}
+	}()
+
+	// Startup: scan for untagged images
+	go func() {
+		if err := ScanUntaggedImages(); err != nil {
+			logger.Errorf("Failed to scan untagged images: %v", err)
+		}
+	}()
+}

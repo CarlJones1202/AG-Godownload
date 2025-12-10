@@ -338,6 +338,11 @@ func ProcessVideoSource(source models.Source, gallery models.Gallery) error {
 		if err != nil {
 			return fmt.Errorf("failed to extract Pornhub video: %w", err)
 		}
+	} else if strings.Contains(source.Location, "pmvhaven.com") {
+		videoURL, videoTitle, err = RipPMVHaven(source.Location)
+		if err != nil {
+			return fmt.Errorf("failed to extract PMVHaven video: %w", err)
+		}
 	} else {
 		// For other video sites, we could add more rippers here
 		return fmt.Errorf("unsupported video site: %s", source.Location)
