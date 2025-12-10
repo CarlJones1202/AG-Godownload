@@ -37,7 +37,6 @@ IMPORTANT:
 
 
 [Minor Tasks]
-- If a video has progress played on it, show the progress in the UI of the All videos page
 - Favoriting images
     - Favorite/unfavorite images from any pages
     - 'f' key favorites/unfavorites the currently selected image

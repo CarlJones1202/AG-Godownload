@@ -309,44 +309,51 @@ function PersonDetail() {
                 {/* Left Sidebar: Photo & Social */}
                 <div className="person-sidebar">
                     {person.photos && (() => {
-                        const photos = JSON.parse(person.photos);
-                        if (photos.length === 0) return <div className="no-photo-placeholder">{person.name[0]}</div>;
+                        try {
+                            const photos = JSON.parse(person.photos);
+                            if (!photos || !Array.isArray(photos) || photos.length === 0) {
+                                return <div className="no-photo-placeholder">{person.name[0]}</div>;
+                            }
 
-                        return (
-                            <div className="person-photos-section">
-                                <div className="person-photos-carousel">
-                                    <img
-                                        src={photos[currentPhotoIndex]}
-                                        alt={`${person.name} ${currentPhotoIndex + 1}`}
-                                    />
-                                    {photos.length > 1 && (
-                                        <>
-                                            <button
-                                                className="carousel-btn prev"
-                                                onClick={() => setCurrentPhotoIndex((currentPhotoIndex - 1 + photos.length) % photos.length)}
-                                            >
-                                                ‹
-                                            </button>
-                                            <button
-                                                className="carousel-btn next"
-                                                onClick={() => setCurrentPhotoIndex((currentPhotoIndex + 1) % photos.length)}
-                                            >
-                                                ›
-                                            </button>
-                                            <div className="carousel-indicators">
-                                                {photos.map((_, index) => (
-                                                    <button
-                                                        key={index}
-                                                        className={`indicator ${index === currentPhotoIndex ? 'active' : ''}`}
-                                                        onClick={() => setCurrentPhotoIndex(index)}
-                                                    />
-                                                ))}
-                                            </div>
-                                        </>
-                                    )}
+                            return (
+                                <div className="person-photos-section">
+                                    <div className="person-photos-carousel">
+                                        <img
+                                            src={photos[currentPhotoIndex]}
+                                            alt={`${person.name} ${currentPhotoIndex + 1}`}
+                                        />
+                                        {photos.length > 1 && (
+                                            <>
+                                                <button
+                                                    className="carousel-btn prev"
+                                                    onClick={() => setCurrentPhotoIndex((currentPhotoIndex - 1 + photos.length) % photos.length)}
+                                                >
+                                                    ‹
+                                                </button>
+                                                <button
+                                                    className="carousel-btn next"
+                                                    onClick={() => setCurrentPhotoIndex((currentPhotoIndex + 1) % photos.length)}
+                                                >
+                                                    ›
+                                                </button>
+                                                <div className="carousel-indicators">
+                                                    {photos.map((_, index) => (
+                                                        <button
+                                                            key={index}
+                                                            className={`indicator ${index === currentPhotoIndex ? 'active' : ''}`}
+                                                            onClick={() => setCurrentPhotoIndex(index)}
+                                                        />
+                                                    ))}
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
                                 </div>
-                            </div>
-                        );
+                            );
+                        } catch (e) {
+                            console.error('Failed to parse photos:', e);
+                            return <div className="no-photo-placeholder">{person.name[0]}</div>;
+                        }
                     })()}
 
                     {(person.twitter || person.instagram) && (
@@ -523,7 +530,7 @@ function PersonDetail() {
                                 </div>
                                 <div className="gallery-info">
                                     <h3>{gallery.name}</h3>
-                                    <p className="image-count">{gallery.images ? gallery.images.length : 0} images</p>
+                                    <p className="image-count">{gallery.image_count} images</p>
                                 </div>
                                 <button
                                     onClick={(e) => handleUnlinkGallery(gallery.id, e)}

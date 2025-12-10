@@ -132,3 +132,20 @@
     letter-spacing: 0.5px;
     font-size: 0.65rem;
 }
+
+/* Video Progress Bar */
+.video-progress-container {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.2);
+    z-index: 15;
+}
+
+.video-progress-fill {
+    height: 100%;
+    background: var(--color-accent-primary, #3b82f6);
+    transition: width 0.3s ease;
+}

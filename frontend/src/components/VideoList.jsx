@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import VideoPlayer from './VideoPlayer'
 // Use ImageList CSS for now as it's a grid
 import './ImageList.css'
@@ -7,6 +7,28 @@ import './VideoList.css'
 function VideoList({ videos, onRefresh, meta, onPageChange }) {
     const [lightboxVideo, setLightboxVideo] = useState(null)
     const [lightboxIndex, setLightboxIndex] = useState(0)
+    const [progressMap, setProgressMap] = useState({})
+
+    useEffect(() => {
+        const newProgressMap = {}
+        videos.forEach(video => {
+            try {
+                const saved = localStorage.getItem(`video_progress_${video.id}`)
+                if (saved) {
+                    const parsed = JSON.parse(saved)
+                    if (parsed.currentTime > 0 && parsed.duration > 0) {
+                        const percent = (parsed.currentTime / parsed.duration) * 100
+                        if (percent > 0) {
+                            newProgressMap[video.id] = percent
+                        }
+                    }
+                }
+            } catch (e) {
+                // Ignore parse errors
+            }
+        })
+        setProgressMap(newProgressMap)
+    }, [videos])
 
     const handleDeleteVideo = async (videoId, e) => {
         e.stopPropagation()
@@ -99,6 +121,15 @@ function VideoList({ videos, onRefresh, meta, onPageChange }) {
                                                 video.height >= 720 ? '720p' : `${video.height}p`}
                                     </div>
                                 )}
+                                {/* Progress Bar */}
+                                {progressMap[video.id] > 0 && (
+                                    <div className="video-progress-container">
+                                        <div
+                                            className="video-progress-fill"
+                                            style={{ width: `${progressMap[video.id]}%` }}
+                                        />
+                                    </div>
+                                )}
                             </div>
 
                             <div className="video-info">
@@ -117,35 +148,40 @@ function VideoList({ videos, onRefresh, meta, onPageChange }) {
                         </div>
                     ))}
                 </div>
-            )}
+            )
+            }
 
-            {meta && meta.total_pages > 1 && (
-                <div className="pagination">
-                    <button
-                        disabled={meta.current_page === 1}
-                        onClick={() => onPageChange(meta.current_page - 1)}
-                    >
-                        Previous
-                    </button>
-                    <span>Page {meta.current_page} of {meta.total_pages}</span>
-                    <button
-                        disabled={meta.current_page === meta.total_pages}
-                        onClick={() => onPageChange(meta.current_page + 1)}
-                    >
-                        Next
-                    </button>
-                </div>
-            )}
+            {
+                meta && meta.total_pages > 1 && (
+                    <div className="pagination">
+                        <button
+                            disabled={meta.current_page === 1}
+                            onClick={() => onPageChange(meta.current_page - 1)}
+                        >
+                            Previous
+                        </button>
+                        <span>Page {meta.current_page} of {meta.total_pages}</span>
+                        <button
+                            disabled={meta.current_page === meta.total_pages}
+                            onClick={() => onPageChange(meta.current_page + 1)}
+                        >
+                            Next
+                        </button>
+                    </div>
+                )
+            }
 
-            {lightboxVideo && (
-                <VideoPlayer
-                    video={lightboxVideo}
-                    onClose={closeLightbox}
-                    onNext={nextVideo}
-                    onPrev={prevVideo}
-                />
-            )}
-        </div>
+            {
+                lightboxVideo && (
+                    <VideoPlayer
+                        video={lightboxVideo}
+                        onClose={closeLightbox}
+                        onNext={nextVideo}
+                        onPrev={prevVideo}
+                    />
+                )
+            }
+        </div >
     )
 }
 

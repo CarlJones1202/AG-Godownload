@@ -261,75 +261,109 @@ func (s *BabepediaService) parseProfileData(htmlContent string, performerID stri
 		data.Instagram = match[1]
 	}
 
-	// Extract profile images using goquery - be very selective
-	// Look for images in specific gallery/profile contexts
+	// Extract profile images using goquery
+	// Babepedia typically has images in the content area with specific patterns
+	seen := make(map[string]bool)
+	imageCount := 0
 	doc.Find("img").Each(func(i int, sel *goquery.Selection) {
-		if src, exists := sel.Attr("src"); exists {
-			// Skip if URL contains common UI element indicators
-			srcLower := strings.ToLower(src)
-			if strings.Contains(srcLower, "icon") ||
-				strings.Contains(srcLower, "logo") ||
-				strings.Contains(srcLower, "avatar") ||
-				strings.Contains(srcLower, "button") ||
-				strings.Contains(srcLower, "sprite") ||
-				strings.Contains(srcLower, "/static/") ||
-				strings.Contains(srcLower, "/assets/") ||
-				strings.Contains(srcLower, "social") ||
-				strings.Contains(srcLower, "badge") {
+		imageCount++
+		src, exists := sel.Attr("src")
+		if !exists || src == "" {
+			fmt.Printf("DEBUG: Image %d - no src attribute\n", i)
+			return
+		}
+
+		fmt.Printf("DEBUG: Image %d - src: %s\n", i, src)
+
+		// Skip common UI elements by URL pattern
+		srcLower := strings.ToLower(src)
+		if strings.Contains(srcLower, "icon") ||
+			strings.Contains(srcLower, "logo") ||
+			strings.Contains(srcLower, "button") ||
+			strings.Contains(srcLower, "sprite") ||
+			strings.Contains(srcLower, "banner") ||
+			strings.Contains(srcLower, "ad") ||
+			strings.HasSuffix(srcLower, ".gif") {
+			fmt.Printf("DEBUG: Image %d - skipped (UI element)\n", i)
+			return
+		}
+
+		// Skip very small images (likely icons)
+		if width, exists := sel.Attr("width"); exists {
+			if w, err := strconv.Atoi(width); err == nil && w < 100 {
+				fmt.Printf("DEBUG: Image %d - skipped (width %d < 100)\n", i, w)
 				return
-			}
-
-			// Check if image has reasonable dimensions (skip tiny icons)
-			if width, exists := sel.Attr("width"); exists {
-				if w, err := strconv.Atoi(width); err == nil && w < 100 {
-					return
-				}
-			}
-			if height, exists := sel.Attr("height"); exists {
-				if h, err := strconv.Atoi(height); err == nil && h < 100 {
-					return
-				}
-			}
-
-			// Check parent context - look for gallery or profile image containers
-			parent := sel.Parent()
-			parentClass, _ := parent.Attr("class")
-			parentId, _ := parent.Attr("id")
-
-			// Skip if in navigation, header, footer, or sidebar
-			if strings.Contains(parentClass, "nav") ||
-				strings.Contains(parentClass, "header") ||
-				strings.Contains(parentClass, "footer") ||
-				strings.Contains(parentClass, "sidebar") ||
-				strings.Contains(parentId, "nav") ||
-				strings.Contains(parentId, "header") {
-				return
-			}
-
-			// Only include if it looks like a content image (has reasonable path structure)
-			if strings.Contains(src, "/babe/") ||
-				strings.Contains(src, "/photo/") ||
-				strings.Contains(src, "/image/") ||
-				strings.Contains(src, "/gallery/") ||
-				(strings.HasPrefix(src, "http") && strings.Contains(src, ".jpg") || strings.Contains(src, ".jpeg") || strings.Contains(src, ".png")) {
-
-				// Make sure it's a full URL
-				fullURL := src
-				if strings.HasPrefix(src, "http") {
-					fullURL = src
-				} else if strings.HasPrefix(src, "/") {
-					fullURL = s.BaseURL + src
-				} else {
-					return // Skip relative URLs without leading slash
-				}
-
-				data.Photos = append(data.Photos, fullURL)
-				if len(data.Photos) >= 10 {
-					return
-				}
 			}
 		}
+		if height, exists := sel.Attr("height"); exists {
+			if h, err := strconv.Atoi(height); err == nil && h < 100 {
+				fmt.Printf("DEBUG: Image %d - skipped (height %d < 100)\n", i, h)
+				return
+			}
+		}
+
+		// Check parent context - skip navigation/header/footer
+		parent := sel.Parent()
+		parentClass := strings.ToLower(parent.AttrOr("class", ""))
+		parentId := strings.ToLower(parent.AttrOr("id", ""))
+
+		if strings.Contains(parentClass, "nav") ||
+			strings.Contains(parentClass, "header") ||
+			strings.Contains(parentClass, "footer") ||
+			strings.Contains(parentClass, "sidebar") ||
+			strings.Contains(parentClass, "menu") ||
+			strings.Contains(parentId, "nav") ||
+			strings.Contains(parentId, "header") ||
+			strings.Contains(parentId, "footer") ||
+			strings.Contains(parentId, "menu") {
+			fmt.Printf("DEBUG: Image %d - skipped (parent context: class=%s, id=%s)\n", i, parentClass, parentId)
+			return
+		}
+
+		// Look for Babepedia-specific image patterns
+		// Accept images that are:
+		// 1. In /babe/, /photo/, /image/, /gallery/ paths
+		// 2. Have image extensions and are from external CDNs
+		// 3. Are in the main content area (not in static/assets folders)
+		isContentImage := strings.Contains(src, "/babe/") ||
+			strings.Contains(src, "/photo/") ||
+			strings.Contains(src, "/image/") ||
+			strings.Contains(src, "/gallery/") ||
+			strings.Contains(src, "/pictures/") ||
+			strings.Contains(src, "/content/") ||
+			(strings.HasPrefix(src, "http") && !strings.Contains(src, "/static/") && !strings.Contains(src, "/assets/") &&
+				(strings.HasSuffix(srcLower, ".jpg") || strings.HasSuffix(srcLower, ".jpeg") || strings.HasSuffix(srcLower, ".png") || strings.HasSuffix(srcLower, ".webp")))
+
+		if !isContentImage {
+			fmt.Printf("DEBUG: Image %d - skipped (not content image)\n", i)
+			return
+		}
+
+		// Make sure it's a full URL
+		fullURL := src
+		if strings.HasPrefix(src, "http") {
+			fullURL = src
+		} else if strings.HasPrefix(src, "/") {
+			fullURL = s.BaseURL + src
+		} else if strings.HasPrefix(src, "//") {
+			fullURL = "https:" + src
+		} else {
+			fmt.Printf("DEBUG: Image %d - skipped (relative URL without leading slash)\n", i)
+			return // Skip other relative URLs
+		}
+
+		// Avoid duplicates
+		if seen[fullURL] {
+			fmt.Printf("DEBUG: Image %d - skipped (duplicate)\n", i)
+			return
+		}
+		seen[fullURL] = true
+
+		fmt.Printf("DEBUG: Image %d - ACCEPTED: %s\n", i, fullURL)
+		data.Photos = append(data.Photos, fullURL)
 	})
+
+	fmt.Printf("DEBUG: Total images found: %d, Accepted: %d\n", imageCount, len(data.Photos))
 
 	data.RawData["source"] = "babepedia"
 	data.RawData["profile_url"] = fmt.Sprintf("%s/babe/%s", s.BaseURL, performerID)
@@ -348,46 +382,62 @@ func extractFieldFromText(text, label string) string {
 	// Get text after the label
 	after := text[idx+len(label):]
 
-	// Trim leading whitespace and colons
-	after = strings.TrimLeft(after, " :\t")
+	// Trim leading whitespace, colons, and newlines
+	after = strings.TrimLeft(after, " :\t\n\r")
 
-	// Find the end - look for double newline, or certain keywords that indicate next field
-	endIdx := -1
-
-	// Try to find end by looking for patterns that indicate a new field or section
+	// List of field labels that indicate the start of a new field
+	// These are ordered roughly as they appear on the page
 	nextFieldPatterns := []string{
 		"Born:",
 		"Birthplace:",
-		"Ethnicity:",
 		"Nationality:",
+		"Ethnicity:",
 		"Profession:",
+		"Professions:",
+		"Sexuality:",
+		"Body", // Section header
 		"Hair color:",
 		"Eye color:",
 		"Height:",
 		"Weight:",
+		"Body type:",
 		"Measurements:",
-		"Tattoos:",
-		"Piercings:",
 		"Bra/cup size:",
 		"Boobs:",
 		"Pubic hair:",
-		"Performances:",
-		"\n\n",
+		"Tattoos:",
+		"Piercings:",
+		"Performances", // Section header
+		"Solo:",
+		"Boy/girl:",
+		"Interracial:",
+		"Extra", // Section header
+		"Instagram",
+		"Twitter",
 	}
 
+	// Find the nearest next field label
+	endIdx := -1
 	for _, pattern := range nextFieldPatterns {
-		if pos := strings.Index(after, pattern); pos != -1 {
+		if pos := strings.Index(after, pattern); pos != -1 && pos > 0 {
 			if endIdx == -1 || pos < endIdx {
 				endIdx = pos
 			}
 		}
 	}
 
-	// If no pattern found, look for single newline but allow for some length
+	// If no next field found, look for double newline (paragraph break)
 	if endIdx == -1 {
-		endIdx = strings.IndexAny(after, "\n\r")
-		// If line is very short (likely just the value), take it.
-		// If it's long, we might have missed a field, but better to cut short than take too much.
+		if nlIdx := strings.Index(after, "\n\n"); nlIdx != -1 {
+			endIdx = nlIdx
+		}
+	}
+
+	// If still no boundary, look for single newline
+	if endIdx == -1 {
+		if nlIdx := strings.IndexAny(after, "\n\r"); nlIdx != -1 {
+			endIdx = nlIdx
+		}
 	}
 
 	// If still nothing, limit to reasonable length
@@ -398,11 +448,22 @@ func extractFieldFromText(text, label string) string {
 		}
 	}
 
-	value := strings.TrimSpace(after[:endIdx])
+	// Extract the value
+	value := after[:endIdx]
 
-	// Clean up common artifacts
+	// Normalize whitespace: replace all sequences of whitespace (spaces, tabs, newlines) with a single space
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, " ")
+
+	// Trim leading/trailing whitespace
+	value = strings.TrimSpace(value)
+
+	// Remove common suffixes
+	value = strings.TrimSuffix(value, "show conversions")
 	value = strings.TrimPrefix(value, ":")
 	value = strings.TrimSpace(value)
+
+	// Clean up any remaining artifacts like multiple spaces or trailing punctuation
+	value = strings.TrimRight(value, " :\t")
 
 	return value
 }

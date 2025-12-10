@@ -22,13 +22,21 @@ func GetPersonStats(c *gin.Context) {
 	galleryCount := database.DB.Model(&person).Association("Galleries").Count()
 
 	// Count images
-	imageCount := database.DB.Model(&person).Association("Images").Count()
-
-	// Count videos (images with type='video')
-	var videoCount int64
+	// Count images: Sum of images in galleries linked to this person
+	// We want to count ALL images in galleries that this person is in, not just images directly tagged with this person
+	var imageCount int64
 	database.DB.Model(&models.Image{}).
-		Joins("JOIN person_images ON person_images.image_id = images.id").
-		Where("person_images.person_id = ? AND images.type = ?", personID, "video").
+		Joins("JOIN person_galleries ON person_galleries.gallery_id = images.gallery_id").
+		Where("person_galleries.person_id = ? AND images.type != ?", personID, "video").
+		Count(&imageCount)
+
+	// Count video galleries: Count distinct galleries that contain videos and are linked to this person
+	var videoCount int64
+	database.DB.Model(&models.Gallery{}).
+		Joins("JOIN person_galleries ON person_galleries.gallery_id = galleries.id").
+		Joins("JOIN images ON images.gallery_id = galleries.id").
+		Where("person_galleries.person_id = ? AND images.type = ?", personID, "video").
+		Distinct("galleries.id").
 		Count(&videoCount)
 
 	// Get most common tags (if images have tags)
