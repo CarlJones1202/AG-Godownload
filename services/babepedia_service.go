@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -261,76 +260,60 @@ func (s *BabepediaService) parseProfileData(htmlContent string, performerID stri
 		data.Instagram = match[1]
 	}
 
-	// Extract profile images using goquery
-	// Start with a permissive approach and filter out obvious non-content images
+	// Extract profile images using specific selector confirmed by user
+	// Target: Elements with class 'thumbnail' inside element with id 'content'
+	// Selector: #content .thumbnail
 	seen := make(map[string]bool)
 	imageCount := 0
-	doc.Find("img").Each(func(i int, sel *goquery.Selection) {
+
+	doc.Find("#content .thumbnail").Each(func(i int, sel *goquery.Selection) {
+		// User specifically requested to look for img elements, not anchors.
+		// Check if the current element is an img, or search for an img child.
+		var src string
+		if sel.Is("img") {
+			src, _ = sel.Attr("src")
+		} else {
+			src = sel.Find("img").First().AttrOr("src", "")
+		}
+
+		if src == "" {
+			return
+		}
+
 		imageCount++
-		src, exists := sel.Attr("src")
-		if !exists || src == "" {
-			fmt.Printf("DEBUG: Image %d - no src attribute\n", i)
-			return
-		}
 
-		fmt.Printf("DEBUG: Image %d - src: %s\n", i, src)
-
-		// Skip only obvious UI elements
-		srcLower := strings.ToLower(src)
-		if strings.Contains(srcLower, "logo") ||
-			strings.Contains(srcLower, "icon") ||
-			strings.Contains(srcLower, "sprite") ||
-			strings.HasSuffix(srcLower, ".gif") {
-			fmt.Printf("DEBUG: Image %d - skipped (UI element: logo/icon/sprite/gif)\n", i)
-			return
-		}
-
-		// Skip very small images (likely icons/buttons)
-		if width, exists := sel.Attr("width"); exists {
-			if w, err := strconv.Atoi(width); err == nil && w < 50 {
-				fmt.Printf("DEBUG: Image %d - skipped (width %d < 50)\n", i, w)
-				return
-			}
-		}
-		if height, exists := sel.Attr("height"); exists {
-			if h, err := strconv.Atoi(height); err == nil && h < 50 {
-				fmt.Printf("DEBUG: Image %d - skipped (height %d < 50)\n", i, h)
-				return
-			}
-		}
-
-		// Accept any image that looks like a real photo
-		// Skip only if it's clearly in static/assets folders
-		if strings.Contains(src, "/static/") || strings.Contains(src, "/assets/") {
-			fmt.Printf("DEBUG: Image %d - skipped (in /static/ or /assets/)\n", i)
-			return
+		// User noted: "some of these have the _thumbs suffix, some don't."
+		// Logic: If it has _thumbs, strip it to likely get the full resolution version.
+		// If it doesn't have it, assume it is already the target or full res.
+		fullResSrc := src
+		if strings.Contains(src, "_thumbs") {
+			fullResSrc = strings.Replace(src, "_thumbs", "", 1)
 		}
 
 		// Make sure it's a full URL
-		fullURL := src
-		if strings.HasPrefix(src, "http") {
-			fullURL = src
-		} else if strings.HasPrefix(src, "/") {
-			fullURL = s.BaseURL + src
-		} else if strings.HasPrefix(src, "//") {
-			fullURL = "https:" + src
+		fullURL := fullResSrc
+		if strings.HasPrefix(fullResSrc, "http") {
+			fullURL = fullResSrc
+		} else if strings.HasPrefix(fullResSrc, "/") {
+			fullURL = s.BaseURL + fullResSrc
+		} else if strings.HasPrefix(fullResSrc, "//") {
+			fullURL = "https:" + fullResSrc
 		} else {
-			fmt.Printf("DEBUG: Image %d - skipped (relative URL without leading slash)\n", i)
-			return
+			// Relative path without leading slash? Assume relative to base
+			fullURL = s.BaseURL + "/" + fullResSrc
 		}
 
 		// Avoid duplicates
 		if seen[fullURL] {
-			fmt.Printf("DEBUG: Image %d - skipped (duplicate)\n", i)
 			return
 		}
 		seen[fullURL] = true
 
-		fmt.Printf("DEBUG: Image %d - ACCEPTED: %s\n", i, fullURL)
+		fmt.Printf("DEBUG: Found Image: %s (Source: %s)\n", fullURL, src)
 		data.Photos = append(data.Photos, fullURL)
 	})
 
-	fmt.Printf("DEBUG: Total images found: %d, Accepted: %d\n", imageCount, len(data.Photos))
+	fmt.Printf("DEBUG: Total images found in #content .thumbnail: %d, Unique: %d\n", imageCount, len(data.Photos))
 
 	data.RawData["source"] = "babepedia"
 	data.RawData["profile_url"] = fmt.Sprintf("%s/babe/%s", s.BaseURL, performerID)
