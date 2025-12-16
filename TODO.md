@@ -16,6 +16,7 @@ IMPORTANT:
     - Gather gallery information (publish date, number of images, rating, description, etc)
     - Save metadata to database
     - Update gallery page with metadata
+    - **NOTE:** Scrapers for MetArt/Playboy are currently blocked by Age Verification due to server region (Louisiana). Requires proxy/VPN or alternative data source (TheNude/IAFD). POC failed 2024-12-16.
 - AI auto extract name from source URL
     - Train on all existing source names
     - When a user goes to add a source, auto extract the name from the URL and suggest it to the user (allow them to type their own or modify it as needed)
