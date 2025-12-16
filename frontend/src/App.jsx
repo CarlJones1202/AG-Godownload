@@ -42,7 +42,8 @@ function App() {
         if (location.pathname === '/' || location.pathname === '/galleries' || location.pathname.startsWith('/galleries/')) {
             fetchGalleries(pageFromUrl)
         } else if (location.pathname === '/sources') {
-            fetchSources(pageFromUrl)
+            const searchQ = searchParams.get('q') || ''
+            fetchSources(pageFromUrl, searchQ)
         } else if (location.pathname === '/images') {
             fetchImages(pageFromUrl)
         } else if (location.pathname === '/videos') {
@@ -80,7 +81,7 @@ function App() {
         }
         try {
             const query = search ? `&q=${encodeURIComponent(search)}` : ''
-            const response = await fetch(`/api/sources?page=${page}&limit=50${query}`)
+            const response = await fetch(`/api/sources?page=${page}&limit=12${query}`)
             const result = await response.json()
             if (result.data) {
                 setSources(result.data)
@@ -165,8 +166,10 @@ function App() {
     }
 
     const handleSourcePageChange = (page) => {
-        setSearchParams({ page: page.toString() })
-        fetchSources(page)
+        setSearchParams(prev => {
+            prev.set('page', page.toString())
+            return prev
+        })
     }
 
     const handleImagePageChange = (page) => {
@@ -301,6 +304,7 @@ function App() {
                                 meta={sourceMeta}
                                 onPageChange={handleSourcePageChange}
                                 onSearch={(query) => fetchSources(1, query)}
+                                searchQuery={searchParams.get('q') || ''}
                             />
                         } />
                         <Route path="/people" element={

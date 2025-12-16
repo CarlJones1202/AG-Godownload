@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import './SourceManager.css'
 
-function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, onSearch }) {
+function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, onSearch, searchQuery }) {
     const [showForm, setShowForm] = useState(false)
     const [formData, setFormData] = useState({
         name: '',
@@ -9,7 +9,13 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
         location: ''
     })
     const [submitting, setSubmitting] = useState(false)
-    const [searchTerm, setSearchTerm] = useState('')
+    const [searchTerm, setSearchTerm] = useState(searchQuery || '')
+
+
+    // Sync local state if prop changes (e.g. user navigates back/forward)
+    useEffect(() => {
+        setSearchTerm(searchQuery || '')
+    }, [searchQuery])
 
     const handleSubmit = async (e) => {
         e.preventDefault()
@@ -79,11 +85,17 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
     }
 
     useEffect(() => {
+        const normalizedSearchQuery = searchQuery || ''
+        // Only trigger search if the term has actually changed from what the URL/prop says
+        if (searchTerm === normalizedSearchQuery) {
+            return
+        }
+
         const delayDebounceFn = setTimeout(() => {
             onSearch(searchTerm)
         }, 500)
         return () => clearTimeout(delayDebounceFn)
-    }, [searchTerm])
+    }, [searchTerm, searchQuery])
 
     // Simple Icons
     const RefreshIcon = () => (
