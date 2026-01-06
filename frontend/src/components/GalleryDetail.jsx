@@ -148,13 +148,13 @@ function GalleryDetail() {
         }
     }
 
-    const handleScrapeMetadata = async (sourceURL, provider) => {
+    const handleScrapeMetadata = async (sourceURL, provider, sourceID) => {
         setScrapingMetadata(true)
         try {
             const response = await fetch(`/api/galleries/${id}/scrape-metadata`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ source_url: sourceURL, provider })
+                body: JSON.stringify({ source_url: sourceURL, provider, source_id: sourceID })
             })
             if (!response.ok) throw new Error('Scrape failed')
             const data = await response.json()
@@ -218,10 +218,43 @@ function GalleryDetail() {
                 <div className="gallery-main-info">
                     <div className="title-row">
                         <h1>{gallery.name}</h1>
-                        {gallery.source && (
-                            <span className="source-badge">
-                                {gallery.source.name}
-                            </span>
+                        <div className="gallery-badges">
+                            {gallery.source && (
+                                <span className="source-badge">
+                                    {gallery.source.name}
+                                </span>
+                            )}
+                            {gallery.provider && (
+                                <span className="provider-badge-display">
+                                    {gallery.provider}
+                                </span>
+                            )}
+                            {gallery.rating > 0 && (
+                                <span className="rating-badge">
+                                    ★ {gallery.rating.toFixed(1)}
+                                </span>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="gallery-metadata-section">
+                        {gallery.release_date && (
+                            <div className="meta-row">
+                                <span className="meta-label">Released:</span>
+                                <span className="meta-value">
+                                    {new Date(gallery.release_date).toLocaleDateString(undefined, {
+                                        year: 'numeric',
+                                        month: 'long',
+                                        day: 'numeric'
+                                    })}
+                                </span>
+                            </div>
+                        )}
+
+                        {gallery.description && (
+                            <div className="gallery-description">
+                                {gallery.description}
+                            </div>
                         )}
                     </div>
 
@@ -322,7 +355,7 @@ function GalleryDetail() {
                                             {result.release_date && <p className="release-date">{result.release_date}</p>}
                                         </div>
                                         <button
-                                            onClick={() => handleScrapeMetadata(result.url, result.provider)}
+                                            onClick={() => handleScrapeMetadata(result.url, result.provider, result.source_id)}
                                             disabled={scrapingMetadata}
                                             className="action-btn primary"
                                         >

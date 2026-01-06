@@ -42,6 +42,7 @@ func SearchGalleryMetadata(c *gin.Context) {
 type ScrapeGalleryMetadataRequest struct {
 	SourceURL string `json:"source_url" binding:"required"`
 	Provider  string `json:"provider" binding:"required"`
+	SourceID  string `json:"source_id"` // Optional, used for API-based sources like MetArt
 }
 
 // ScrapeGalleryMetadata scrapes metadata from a confirmed gallery URL
@@ -60,8 +61,8 @@ func ScrapeGalleryMetadata(c *gin.Context) {
 		return
 	}
 
-	// Scrape metadata from the confirmed URL
-	metadata, err := services.ScrapeGalleryMetadata(req.SourceURL, req.Provider)
+	// Scrape metadata from the confirmed URL/ID
+	metadata, err := services.ScrapeGalleryMetadata(req.SourceURL, req.Provider, req.SourceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

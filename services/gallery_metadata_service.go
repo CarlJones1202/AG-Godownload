@@ -20,6 +20,7 @@ type GallerySearchResult struct {
 	URL         string `json:"url"`
 	Thumbnail   string `json:"thumbnail"`
 	ReleaseDate string `json:"release_date"`
+	SourceID    string `json:"source_id"` // UUID for MetArt or similar ID
 }
 
 // GalleryMetadata represents scraped metadata from a gallery
@@ -65,12 +66,12 @@ func SearchGalleryMatches(galleryName string, people []string) ([]GallerySearchR
 }
 
 // ScrapeGalleryMetadata scrapes full metadata from a confirmed gallery URL
-func ScrapeGalleryMetadata(sourceURL string, provider string) (*GalleryMetadata, error) {
-	logger.Infof("Scraping metadata from %s (%s)", sourceURL, provider)
+func ScrapeGalleryMetadata(sourceURL string, provider string, sourceID string) (*GalleryMetadata, error) {
+	logger.Infof("Scraping metadata from %s (%s) ID: %s", sourceURL, provider, sourceID)
 
 	switch strings.ToLower(provider) {
 	case "metart":
-		return scrapeMetArtGallery(sourceURL)
+		return scrapeMetArtGallery(sourceURL, sourceID)
 	case "playboy":
 		return scrapePlayboyGallery(sourceURL)
 	default:
@@ -221,52 +222,88 @@ func searchPlayboy(query string) ([]GallerySearchResult, error) {
 	return results, nil
 }
 
-// scrapeMetArtGallery scrapes full metadata from a MetArt gallery page
-func scrapeMetArtGallery(url string) (*GalleryMetadata, error) {
-	client := GetHTTPClient(url)
-	resp, err := client.Get(url)
+// scrapeMetArtGallery scrapes full metadata from a MetArt gallery page/API
+func scrapeMetArtGallery(urlStr, uuid string) (*GalleryMetadata, error) {
+	// The user identified that the correct API endpoint uses name and date parameter
+	// Format: https://www.metart.com/api/gallery?name=PRESENTING_LIBBY&date=20181020
+	// We can extract these from the source URL:
+	// https://www.metart.com/model/libby/gallery/20181020/PRESENTING_LIBBY
+
+	// Parse the URL to extract date and name
+	u, err := url.Parse(urlStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch MetArt gallery: %w", err)
+		return nil, fmt.Errorf("invalid source URL: %w", err)
+	}
+
+	pathParts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(pathParts) < 2 {
+		return nil, fmt.Errorf("invalid MetArt URL format, cannot extract date/name")
+	}
+
+	// Assuming standard format .../gallery/{date}/{name}
+	// We look for 'gallery' segment and take the next two
+	var galleryDate, galleryName string
+	for i, part := range pathParts {
+		if part == "gallery" && i+2 < len(pathParts) {
+			galleryDate = pathParts[i+1]
+			galleryName = pathParts[i+2]
+			break
+		}
+	}
+
+	// Fallback: take last two if "gallery" keyword not found (e.g. different structure)
+	if galleryDate == "" && len(pathParts) >= 2 {
+		galleryDate = pathParts[len(pathParts)-2]
+		galleryName = pathParts[len(pathParts)-1]
+	}
+
+	apiURL := fmt.Sprintf("https://www.metart.com/api/gallery?name=%s&date=%s", galleryName, galleryDate)
+	logger.Infof("[MetArt] Fetching detail API: %s", apiURL)
+
+	client := GetHTTPClient(apiURL)
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch MetArt gallery API: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("MetArt gallery returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("MetArt gallery API returned status %d", resp.StatusCode)
 	}
 
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse MetArt gallery: %w", err)
+		return nil, fmt.Errorf("failed to read MetArt response: %w", err)
+	}
+
+	// Parse JSON
+	var galleryDetail struct {
+		Name          string  `json:"name"`
+		Description   string  `json:"description"`
+		RatingAverage float64 `json:"ratingAverage"`
+		PublishedAt   string  `json:"publishedAt"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &galleryDetail); err != nil {
+		logger.Errorf("[MetArt] Failed to parse detail JSON: %v", err)
+		return nil, fmt.Errorf("failed to parse detail JSON")
 	}
 
 	metadata := &GalleryMetadata{
-		Provider:  "MetArt",
-		SourceURL: url,
+		Provider:    "MetArt",
+		SourceURL:   urlStr,
+		Description: galleryDetail.Description,
+		Rating:      galleryDetail.RatingAverage,
 	}
 
-	// Extract description - placeholder selectors
-	description := strings.TrimSpace(doc.Find(".description, .synopsis, .gallery-description, p.description").First().Text())
-	metadata.Description = description
-
-	// Extract rating - placeholder
-	ratingText := strings.TrimSpace(doc.Find(".rating, .score, [itemprop='ratingValue']").First().Text())
-	if ratingText != "" {
-		fmt.Sscanf(ratingText, "%f", &metadata.Rating)
-	}
-
-	// Extract release date - placeholder
-	dateText := strings.TrimSpace(doc.Find(".date, time, .release-date, [itemprop='datePublished']").First().Text())
-	if dateText != "" {
-		// Try common date formats
-		for _, layout := range []string{"2006-01-02", "January 2, 2006", "Jan 2, 2006", "02/01/2006"} {
-			if parsed, err := time.Parse(layout, dateText); err == nil {
-				metadata.ReleaseDate = parsed
-				break
-			}
+	// Parse date
+	if galleryDetail.PublishedAt != "" {
+		if parsed, err := time.Parse("2006-01-02T15:04:05.000Z", galleryDetail.PublishedAt); err == nil {
+			metadata.ReleaseDate = parsed
 		}
 	}
 
-	logger.Infof("Scraped MetArt gallery: %s", metadata.Description[:min(50, len(metadata.Description))])
+	logger.Infof("Scraped MetArt gallery: %s (Rating: %.2f)", metadata.Description[:min(50, len(metadata.Description))], metadata.Rating)
 	return metadata, nil
 }
 
