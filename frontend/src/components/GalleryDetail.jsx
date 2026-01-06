@@ -21,6 +21,7 @@ function GalleryDetail() {
     const [metadataResults, setMetadataResults] = useState([])
     const [metadataLoading, setMetadataLoading] = useState(false)
     const [scrapingMetadata, setScrapingMetadata] = useState(false)
+    const [manualUrl, setManualUrl] = useState('')
 
     // Name Editing State
     const [isEditingName, setIsEditingName] = useState(false)
@@ -201,6 +202,20 @@ function GalleryDetail() {
     const startEditing = () => {
         setEditedName(gallery.name)
         setIsEditingName(true)
+    }
+
+    const handleManualScrape = () => {
+        if (!manualUrl.trim()) return
+
+        let provider = 'MetArt' // Default
+        const lowerUrl = manualUrl.toLowerCase()
+        if (lowerUrl.includes('playboy.com')) {
+            provider = 'Playboy'
+        } else if (lowerUrl.includes('metart.com')) {
+            provider = 'MetArt'
+        }
+
+        handleScrapeMetadata(manualUrl, provider, null)
     }
 
     if (loading) return <div className="loading">Loading...</div>
@@ -402,7 +417,32 @@ function GalleryDetail() {
             {showMetadataModal && (
                 <div className="modal-overlay" onClick={() => !scrapingMetadata && setShowMetadataModal(false)}>
                     <div className="modal-content metadata-modal" onClick={e => e.stopPropagation()}>
-                        <h2>Select Gallery to Scrape</h2>
+                        <h2>Fetch Metadata</h2>
+
+                        <div className="manual-link-section">
+                            <p className="modal-subtitle">Paste a gallery URL directly or select from search results below.</p>
+                            <div className="manual-link-input-group">
+                                <input
+                                    type="text"
+                                    placeholder="https://www.metart.com/..."
+                                    value={manualUrl}
+                                    onChange={(e) => setManualUrl(e.target.value)}
+                                    className="manual-url-input"
+                                />
+                                <button
+                                    onClick={handleManualScrape}
+                                    disabled={!manualUrl || scrapingMetadata}
+                                    className="action-btn primary"
+                                >
+                                    Use URL
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="search-results-divider">
+                            <span>OR Select Result</span>
+                        </div>
+
                         {metadataLoading ? (
                             <div className="loading">Searching...</div>
                         ) : metadataResults.length === 0 ? (

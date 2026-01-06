@@ -5,6 +5,7 @@ import './PersonDetail_identifiers.css'
 import './AutoTag.css'
 import PersonStats from './PersonStats'
 import AutoTagModal from './AutoTagModal'
+import GalleryCard from './GalleryCard'
 
 function PersonDetail() {
     const { id } = useParams()
@@ -471,36 +472,20 @@ function PersonDetail() {
                     <h2>Videos <span className="count-badge">{videoGalleries.length}</span></h2>
                     <div className="galleries-grid">
                         {videoGalleries.map((gallery) => (
-                            <div key={gallery.id} className="gallery-card" onClick={() => navigate(`/galleries/${gallery.id}`)}>
-                                <div className="gallery-thumbnail video-thumbnail">
-                                    {gallery.images && gallery.images.length > 0 ? (
-                                        <div className="video-thumb-container">
-                                            <img
-                                                src={`/api/${gallery.images[0].thumbnail_path}`}
-                                                alt={gallery.name}
-                                                loading="lazy"
-                                                onError={(e) => {
-                                                    e.target.onerror = null;
-                                                    e.target.src = "https://via.placeholder.com/200x200?text=No+Thumb"
-                                                }}
-                                            />
-                                            <div className="play-icon-overlay">▶</div>
-                                        </div>
-                                    ) : (
-                                        <div className="no-image">No Video</div>
-                                    )}
-                                </div>
-                                <div className="gallery-info">
-                                    <h3>{gallery.name}</h3>
-                                </div>
-                                <button
-                                    onClick={(e) => handleUnlinkGallery(gallery.id, e)}
-                                    className="unlink-btn"
-                                    title="Unlink video"
-                                >
-                                    ✕
-                                </button>
-                            </div>
+                            <GalleryCard
+                                key={gallery.id}
+                                gallery={gallery}
+                                onClick={() => navigate(`/galleries/${gallery.id}`)}
+                                actionNode={
+                                    <button
+                                        onClick={(e) => handleUnlinkGallery(gallery.id, e)}
+                                        className="unlink-btn"
+                                        title="Unlink video"
+                                    >
+                                        ✕
+                                    </button>
+                                }
+                            />
                         ))}
                     </div>
                 </div>
@@ -516,30 +501,20 @@ function PersonDetail() {
                 ) : (
                     <div className="galleries-grid">
                         {photoGalleries.map((gallery) => (
-                            <div key={gallery.id} className="gallery-card" onClick={() => navigate(`/galleries/${gallery.id}`)}>
-                                <div className="gallery-thumbnail">
-                                    {gallery.images && gallery.images.length > 0 ? (
-                                        <img
-                                            src={`/api/${gallery.images[0].thumbnail_path}`}
-                                            alt={gallery.name}
-                                            loading="lazy"
-                                        />
-                                    ) : (
-                                        <div className="no-image">No Image</div>
-                                    )}
-                                </div>
-                                <div className="gallery-info">
-                                    <h3>{gallery.name}</h3>
-                                    <p className="image-count">{gallery.image_count} images</p>
-                                </div>
-                                <button
-                                    onClick={(e) => handleUnlinkGallery(gallery.id, e)}
-                                    className="unlink-btn"
-                                    title="Unlink gallery"
-                                >
-                                    ✕
-                                </button>
-                            </div>
+                            <GalleryCard
+                                key={gallery.id}
+                                gallery={gallery}
+                                onClick={() => navigate(`/galleries/${gallery.id}`)}
+                                actionNode={
+                                    <button
+                                        onClick={(e) => handleUnlinkGallery(gallery.id, e)}
+                                        className="unlink-btn"
+                                        title="Unlink gallery"
+                                    >
+                                        ✕
+                                    </button>
+                                }
+                            />
                         ))}
                     </div>
                 )}

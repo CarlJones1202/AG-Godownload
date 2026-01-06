@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import './GalleryList.css'
 import './PersonTagging.css'
 import './GalleryList_recrawl.css'
+import GalleryCard from './GalleryCard'
 
 function GalleryList({ galleries, onRefresh, meta, onPageChange }) {
     const navigate = useNavigate()
@@ -47,37 +48,20 @@ function GalleryList({ galleries, onRefresh, meta, onPageChange }) {
             ) : (
                 <div className="gallery-grid">
                     {galleries.map((gallery) => (
-                        <div
+                        <GalleryCard
                             key={gallery.id}
-                            className="gallery-card"
+                            gallery={gallery}
                             onClick={() => handleSelectGallery(gallery)}
-                        >
-                            <div className="gallery-thumbnail">
-                                {gallery.images && gallery.images.length > 0 ? (
-                                    <img
-                                        src={`/api/${gallery.images[0].thumbnail_path}`}
-                                        alt={gallery.name}
-                                        loading="lazy"
-                                    />
-                                ) : (
-                                    <div className="no-image">No Images</div>
-                                )}
-                            </div>
-                            <div className="gallery-info">
-                                {gallery.provider && (
-                                    <div className="gallery-provider">{gallery.provider}</div>
-                                )}
-                                <h3>{gallery.name}</h3>
-                                <p>{gallery.image_count || 0} images</p>
-                            </div>
-                            <button
-                                className="delete-gallery-card-btn"
-                                onClick={(e) => handleDeleteGallery(gallery.id, e)}
-                                title="Delete Gallery"
-                            >
-                                🗑️
-                            </button>
-                        </div>
+                            actionNode={
+                                <button
+                                    className="delete-gallery-card-btn"
+                                    onClick={(e) => handleDeleteGallery(gallery.id, e)}
+                                    title="Delete Gallery"
+                                >
+                                    🗑️
+                                </button>
+                            }
+                        />
                     ))}
                 </div>
             )}
