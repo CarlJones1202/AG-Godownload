@@ -4,10 +4,12 @@ go 1.25.4
 
 require (
 	github.com/PuerkitoBio/goquery v1.11.0
+	github.com/botanica-consulting/wiredialer v0.0.0-20230710124424-ca42731e9a5c
 	github.com/disintegration/imaging v1.6.2
 	github.com/gin-gonic/gin v1.11.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/gocolly/colly/v2 v2.2.0
+	golang.org/x/net v0.48.0
 	gorm.io/gorm v1.31.1
 )
 
@@ -33,6 +35,7 @@ require (
 	github.com/goccy/go-yaml v1.18.0 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
+	github.com/google/btree v1.1.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
@@ -56,11 +59,14 @@ require (
 	golang.org/x/arch v0.23.0 // indirect
 	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/image v0.33.0 // indirect
-	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/sys v0.39.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
+	golang.org/x/time v0.12.0 // indirect
+	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
+	golang.zx2c4.com/wireguard v0.0.0-20250521234502-f333402bd9cb // indirect
 	google.golang.org/appengine v1.6.8 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
+	gvisor.dev/gvisor v0.0.0-20250503011706-39ed1f5ac29c // indirect
 	modernc.org/libc v1.22.5 // indirect
 	modernc.org/mathutil v1.5.0 // indirect
 	modernc.org/memory v1.5.0 // indirect

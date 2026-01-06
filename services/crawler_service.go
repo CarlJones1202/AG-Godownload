@@ -5,7 +5,6 @@ import (
 	"gallery_api/database"
 	"gallery_api/logger"
 	"gallery_api/models"
-	"net/http"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -59,8 +58,9 @@ func CrawlSource(sourceID uint) error {
 		return nil
 	}
 
-	// Fetch the URL
-	resp, err := http.Get(source.Location)
+	// Fetch the URL using WireGuard if needed
+	client := GetHTTPClient(source.Location)
+	resp, err := client.Get(source.Location)
 	if err != nil {
 		database.DB.Model(&source).Update("Status", "error")
 		return err

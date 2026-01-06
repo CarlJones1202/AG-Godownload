@@ -1,0 +1,70 @@
+/* Metadata Modal Specific Styles */
+.metadata-modal {
+    max-width: 700px;
+}
+
+.metadata-results {
+    max-height: 500px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin: 1rem 0;
+}
+
+.metadata-result-card {
+    display: flex;
+    gap: 1rem;
+    padding: 1rem;
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    align-items: center;
+    transition: all 0.2s;
+}
+
+.metadata-result-card:hover {
+    border-color: var(--color-border-primary);
+    background: var(--color-bg-tertiary);
+}
+
+.result-thumbnail {
+    width: 120px;
+    height: 80px;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+}
+
+.result-info {
+    flex: 1;
+}
+
+.provider-badge {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    background: var(--color-accent-primary);
+    color: white;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+}
+
+.result-info h3 {
+    margin: 0.5rem 0 0.25rem 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+.release-date {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--color-text-secondary);
+}
+
+.metadata-result-card button {
+    flex-shrink: 0;
+}

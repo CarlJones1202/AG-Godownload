@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import './GalleryDetail.css'
+import './GalleryMetadata.css'
 import ImageGrid from './ImageGrid'
 
 function GalleryDetail() {
@@ -14,6 +15,12 @@ function GalleryDetail() {
     const [showPersonModal, setShowPersonModal] = useState(false)
     const [people, setPeople] = useState([])
     const [personSearchQuery, setPersonSearchQuery] = useState('')
+
+    // Metadata Scraping State
+    const [showMetadataModal, setShowMetadataModal] = useState(false)
+    const [metadataResults, setMetadataResults] = useState([])
+    const [metadataLoading, setMetadataLoading] = useState(false)
+    const [scrapingMetadata, setScrapingMetadata] = useState(false)
 
     const fetchGallery = useCallback(async () => {
         setLoading(true)
@@ -124,6 +131,44 @@ function GalleryDetail() {
         }
     }
 
+    const handleSearchMetadata = async () => {
+        setMetadataLoading(true)
+        setShowMetadataModal(true)
+        try {
+            const response = await fetch(`/api/galleries/${id}/search-metadata`)
+            if (!response.ok) throw new Error('Search failed')
+            const data = await response.json()
+            setMetadataResults(data.results || [])
+        } catch (error) {
+            console.error('Error searching metadata:', error)
+            alert('Failed to search for gallery metadata')
+            setShowMetadataModal(false)
+        } finally {
+            setMetadataLoading(false)
+        }
+    }
+
+    const handleScrapeMetadata = async (sourceURL, provider) => {
+        setScrapingMetadata(true)
+        try {
+            const response = await fetch(`/api/galleries/${id}/scrape-metadata`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source_url: sourceURL, provider })
+            })
+            if (!response.ok) throw new Error('Scrape failed')
+            const data = await response.json()
+            alert('Gallery metadata updated successfully!')
+            setShowMetadataModal(false)
+            fetchGallery()
+        } catch (error) {
+            console.error('Error scraping metadata:', error)
+            alert('Failed to scrape gallery metadata')
+        } finally {
+            setScrapingMetadata(false)
+        }
+    }
+
     if (loading) return <div className="loading">Loading...</div>
     if (error) return <div className="error">Error: {error}</div>
     if (!gallery) return <div className="error">Gallery not found</div>
@@ -155,6 +200,9 @@ function GalleryDetail() {
                     </div>
 
                     <div className="gallery-actions">
+                        <button onClick={handleSearchMetadata} className="action-btn primary full-width">
+                            🔍 Fetch Metadata
+                        </button>
                         {gallery.source && (
                             <button onClick={handleRecrawlSource} className="action-btn secondary full-width">
                                 ↻ Re-crawl Source
@@ -248,6 +296,49 @@ function GalleryDetail() {
                             }
                         </div>
                         <button onClick={() => setShowPersonModal(false)} className="close-modal-btn">Close</button>
+                    </div>
+                </div>
+            )}
+
+            {/* Metadata Search Modal */}
+            {showMetadataModal && (
+                <div className="modal-overlay" onClick={() => !scrapingMetadata && setShowMetadataModal(false)}>
+                    <div className="modal-content metadata-modal" onClick={e => e.stopPropagation()}>
+                        <h2>Select Gallery to Scrape</h2>
+                        {metadataLoading ? (
+                            <div className="loading">Searching...</div>
+                        ) : metadataResults.length === 0 ? (
+                            <p>No matching galleries found</p>
+                        ) : (
+                            <div className="metadata-results">
+                                {metadataResults.map((result, index) => (
+                                    <div key={index} className="metadata-result-card">
+                                        {result.thumbnail && (
+                                            <img src={result.thumbnail} alt={result.title} className="result-thumbnail" />
+                                        )}
+                                        <div className="result-info">
+                                            <span className="provider-badge">{result.provider}</span>
+                                            <h3>{result.title}</h3>
+                                            {result.release_date && <p className="release-date">{result.release_date}</p>}
+                                        </div>
+                                        <button
+                                            onClick={() => handleScrapeMetadata(result.url, result.provider)}
+                                            disabled={scrapingMetadata}
+                                            className="action-btn primary"
+                                        >
+                                            {scrapingMetadata ? 'Scraping...' : 'Select'}
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        <button
+                            onClick={() => setShowMetadataModal(false)}
+                            disabled={scrapingMetadata}
+                            className="close-modal-btn"
+                        >
+                            Close
+                        </button>
                     </div>
                 </div>
             )}

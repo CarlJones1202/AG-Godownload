@@ -27,6 +27,12 @@ func main() {
 
 	// Run startup verification
 	go func() {
+		// Test WireGuard connection first
+		logger.Info("Testing WireGuard tunnel...")
+		if err := services.TestWireGuardConnection(); err != nil {
+			logger.Warnf("WireGuard test failed: %v", err)
+		}
+
 		logger.Info("Starting background verification of downloaded images...")
 		if err := services.VerifyDownloadedImages(); err != nil {
 			logger.Error("Background verification failed:", err)
@@ -75,6 +81,8 @@ func main() {
 	r.GET("/galleries/:id", handlers.GetGallery)
 	r.POST("/galleries/:id/images", handlers.AddImageToGallery)
 	r.DELETE("/galleries/:id", handlers.DeleteGallery)
+	r.GET("/galleries/:id/search-metadata", handlers.SearchGalleryMetadata)
+	r.POST("/galleries/:id/scrape-metadata", handlers.ScrapeGalleryMetadata)
 
 	r.POST("/people", handlers.CreatePerson)
 	r.GET("/people", handlers.GetPeople)

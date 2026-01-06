@@ -12,16 +12,30 @@ import (
 	"github.com/gocolly/colly/v2"
 )
 
-func newCollector() *colly.Collector {
+func newCollector(targetURL string) *colly.Collector {
 	c := colly.NewCollector()
 	c.SetRequestTimeout(60 * time.Second)
 	c.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0"
+
+	// Use WireGuard for blocked domains
+	if ShouldUseWireGuard(targetURL) {
+		dialer, err := GetWireGuardDialer()
+		if err == nil {
+			logger.Debugf("Using WireGuard tunnel for Colly request to: %s", targetURL)
+			c.WithTransport(&http.Transport{
+				DialContext: dialer.DialContext,
+			})
+		} else {
+			logger.Warnf("WireGuard not available, using direct connection: %v", err)
+		}
+	}
+
 	return c
 }
 
 func RipImageBam(src string) (string, error) {
 	logger.Debugf("Starting RipImageBam for %s", src)
-	c := newCollector()
+	c := newCollector(src)
 	cookieJar, _ := cookiejar.New(nil)
 	cookies := []*http.Cookie{
 		{Name: "nsfw_inter", Value: "1", Path: "/", Domain: "imagebam.com"},
@@ -49,7 +63,7 @@ func RipImageBam(src string) (string, error) {
 
 func RipImageBox(src string) (string, error) {
 	logger.Debugf("Starting RipImageBox for %s", src)
-	c := newCollector()
+	c := newCollector(src)
 	c.OnResponse(func(r *colly.Response) {
 		logger.Debugf("RipImageBox response for %s: Status %d", r.Request.URL.String(), r.StatusCode)
 	})
@@ -101,7 +115,7 @@ func RipImx(src string) (string, error) {
 	// 2. That page MIGHT have a "Continue to your image..." button (POST form)
 	// 3. The final page contains an <img> tag with the actual image URL
 
-	c := newCollector()
+	c := newCollector(src)
 	c.AllowURLRevisit = true
 
 	var imageURL string
@@ -149,7 +163,7 @@ func RipImx(src string) (string, error) {
 		logger.Debug("Submitting continue form...")
 
 		// Create a new collector for the POST request to avoid state issues
-		c2 := newCollector()
+		c2 := newCollector(src)
 		c2.AllowURLRevisit = true
 
 		// Important: Cookies must be preserved from the first request
@@ -204,7 +218,7 @@ func RipImx(src string) (string, error) {
 
 func RipTurboImg(src string) (string, error) {
 	logger.Debugf("Starting RipTurboImg for %s", src)
-	c := newCollector()
+	c := newCollector(src)
 	c.OnResponse(func(r *colly.Response) {
 		logger.Debugf("RipTurboImg response for %s: Status %d", r.Request.URL.String(), r.StatusCode)
 	})
@@ -235,7 +249,7 @@ func RipImagetwist(src string) (string, error) {
 	// 2. That page MIGHT have a "Continue to your image..." button (POST form)
 	// 3. The final page contains an <img> tag with the actual image URL
 
-	c := newCollector()
+	c := newCollector(src)
 	c.AllowURLRevisit = true
 
 	var imageURL string
@@ -307,7 +321,7 @@ func RipImagetwist(src string) (string, error) {
 	if needsContinue && imageURL == "" {
 		logger.Debug("Submitting Imagetwist continue form...")
 
-		c2 := newCollector()
+		c2 := newCollector(src)
 		c2.AllowURLRevisit = true
 		c2.SetCookies(src, c.Cookies(src))
 
