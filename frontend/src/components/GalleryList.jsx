@@ -64,6 +64,9 @@ function GalleryList({ galleries, onRefresh, meta, onPageChange }) {
                                 )}
                             </div>
                             <div className="gallery-info">
+                                {gallery.provider && (
+                                    <div className="gallery-provider">{gallery.provider}</div>
+                                )}
                                 <h3>{gallery.name}</h3>
                                 <p>{gallery.image_count || 0} images</p>
                             </div>

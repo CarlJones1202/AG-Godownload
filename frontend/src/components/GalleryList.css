@@ -279,6 +279,16 @@
     color: var(--color-text-tertiary);
 }
 
+.gallery-provider {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--color-accent-primary);
+    margin-bottom: 0.35rem;
+    letter-spacing: 0.05em;
+    opacity: 0.9;
+}
+
 .empty-state {
     text-align: center;
     padding: var(--spacing-xl);
