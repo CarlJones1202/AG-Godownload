@@ -201,3 +201,30 @@ func DeleteGallery(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Gallery deleted successfully"})
 }
+
+// UpdateGallery updates a gallery's details
+func UpdateGallery(c *gin.Context) {
+	id := c.Param("id")
+	var gallery models.Gallery
+	if err := database.DB.First(&gallery, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Gallery not found"})
+		return
+	}
+
+	var input struct {
+		Name string `json:"name"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	gallery.Name = input.Name
+	if err := database.DB.Save(&gallery).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update gallery"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gallery)
+}

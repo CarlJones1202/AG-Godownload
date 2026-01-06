@@ -77,6 +77,7 @@ func main() {
 	r.GET("/galleries/:id", handlers.GetGallery)
 	r.POST("/galleries/:id/images", handlers.AddImageToGallery)
 	r.DELETE("/galleries/:id", handlers.DeleteGallery)
+	r.PUT("/galleries/:id", handlers.UpdateGallery)
 	r.GET("/galleries/:id/search-metadata", handlers.SearchGalleryMetadata)
 	r.POST("/galleries/:id/scrape-metadata", handlers.ScrapeGalleryMetadata)
 

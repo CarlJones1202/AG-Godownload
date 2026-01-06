@@ -22,6 +22,10 @@ function GalleryDetail() {
     const [metadataLoading, setMetadataLoading] = useState(false)
     const [scrapingMetadata, setScrapingMetadata] = useState(false)
 
+    // Name Editing State
+    const [isEditingName, setIsEditingName] = useState(false)
+    const [editedName, setEditedName] = useState('')
+
     const fetchGallery = useCallback(async () => {
         setLoading(true)
         try {
@@ -169,6 +173,36 @@ function GalleryDetail() {
         }
     }
 
+    const handleUpdateName = async () => {
+        if (!editedName.trim() || editedName === gallery.name) {
+            setIsEditingName(false)
+            return
+        }
+
+        try {
+            const response = await fetch(`/api/galleries/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: editedName })
+            })
+
+            if (response.ok) {
+                setGallery(prev => ({ ...prev, name: editedName }))
+                setIsEditingName(false)
+            } else {
+                alert('Failed to update gallery name')
+            }
+        } catch (error) {
+            console.error('Error updating gallery name:', error)
+            alert('Error updating gallery name')
+        }
+    }
+
+    const startEditing = () => {
+        setEditedName(gallery.name)
+        setIsEditingName(true)
+    }
+
     if (loading) return <div className="loading">Loading...</div>
     if (error) return <div className="error">Error: {error}</div>
     if (!gallery) return <div className="error">Gallery not found</div>
@@ -226,8 +260,32 @@ function GalleryDetail() {
                             )}
                         </div>
 
+
                         {/* Main Title */}
-                        <h1 className="premium-title">{gallery.name}</h1>
+                        <div className="title-section">
+                            {isEditingName ? (
+                                <div className="edit-name-container">
+                                    <input
+                                        type="text"
+                                        value={editedName}
+                                        onChange={(e) => setEditedName(e.target.value)}
+                                        className="edit-name-input"
+                                        autoFocus
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') handleUpdateName()
+                                            if (e.key === 'Escape') setIsEditingName(false)
+                                        }}
+                                    />
+                                    <button onClick={handleUpdateName} className="save-btn" title="Save">✓</button>
+                                    <button onClick={() => setIsEditingName(false)} className="cancel-btn" title="Cancel">✕</button>
+                                </div>
+                            ) : (
+                                <div className="title-row">
+                                    <h1 className="premium-title">{gallery.name}</h1>
+                                    <button onClick={startEditing} className="edit-title-btn" title="Edit Name">✎</button>
+                                </div>
+                            )}
+                        </div>
 
                         {/* Metadata Strip: Date, Rating, Count */}
                         <div className="meta-strip">
