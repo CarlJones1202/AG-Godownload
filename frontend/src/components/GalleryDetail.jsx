@@ -216,43 +216,50 @@ function GalleryDetail() {
 
                 {/* Right Column: Main Info */}
                 <div className="gallery-main-info">
-                    <div className="title-row">
-                        <h1>{gallery.name}</h1>
-                        <div className="gallery-badges">
-                            {gallery.source && (
-                                <span className="source-badge">
-                                    {gallery.source.name}
-                                </span>
-                            )}
+                    <div className="premium-header">
+                        {/* Eyebrow: Provider Only */}
+                        <div className="header-eyebrow">
                             {gallery.provider && (
-                                <span className="provider-badge-display">
+                                <span className="eyebrow-badge provider">
                                     {gallery.provider}
                                 </span>
                             )}
-                            {gallery.rating > 0 && (
-                                <span className="rating-badge">
-                                    ★ {gallery.rating.toFixed(1)}
-                                </span>
-                            )}
                         </div>
-                    </div>
 
-                    <div className="gallery-metadata-section">
-                        {gallery.release_date && (
-                            <div className="meta-row">
-                                <span className="meta-label">Released:</span>
-                                <span className="meta-value">
-                                    {new Date(gallery.release_date).toLocaleDateString(undefined, {
-                                        year: 'numeric',
-                                        month: 'long',
-                                        day: 'numeric'
-                                    })}
-                                </span>
+                        {/* Main Title */}
+                        <h1 className="premium-title">{gallery.name}</h1>
+
+                        {/* Metadata Strip: Date, Rating, Count */}
+                        <div className="meta-strip">
+                            {gallery.rating > 0 && (
+                                <div className="meta-item rating">
+                                    <span className="star-icon">★</span>
+                                    <span className="rating-value">{gallery.rating.toFixed(1)}</span>
+                                </div>
+                            )}
+
+                            {gallery.release_date && (
+                                <>
+                                    <div className="meta-divider">•</div>
+                                    <div className="meta-item date">
+                                        {new Date(gallery.release_date).toLocaleDateString(undefined, {
+                                            year: 'numeric',
+                                            month: 'long',
+                                            day: 'numeric'
+                                        })}
+                                    </div>
+                                </>
+                            )}
+
+                            <div className="meta-divider">•</div>
+                            <div className="meta-item count">
+                                {gallery.images ? gallery.images.length : 0} Images
                             </div>
-                        )}
+                        </div>
 
+                        {/* Description */}
                         {gallery.description && (
-                            <div className="gallery-description">
+                            <div className="premium-description">
                                 {gallery.description}
                             </div>
                         )}
