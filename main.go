@@ -27,11 +27,7 @@ func main() {
 
 	// Run startup verification
 	go func() {
-		// Test WireGuard connection first
-		logger.Info("Testing WireGuard tunnel...")
-		if err := services.TestWireGuardConnection(); err != nil {
-			logger.Warnf("WireGuard test failed: %v", err)
-		}
+		// WireGuard test removed as it is now redundant with API integration
 
 		logger.Info("Starting background verification of downloaded images...")
 		if err := services.VerifyDownloadedImages(); err != nil {

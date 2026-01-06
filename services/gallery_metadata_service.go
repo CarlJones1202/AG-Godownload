@@ -1,10 +1,11 @@
 package services
 
 import (
-	"bytes"
+	"encoding/json"
 	"fmt"
 	"gallery_api/logger"
 	"io"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -34,8 +35,9 @@ type GalleryMetadata struct {
 func SearchGalleryMatches(galleryName string, people []string) ([]GallerySearchResult, error) {
 	var results []GallerySearchResult
 
-	// Build search query from gallery name and people
-	searchQuery := buildSearchQuery(galleryName, people)
+	// Build search query - User requested ONLY gallery name for all sources
+	// Adding people/models often breaks the specific search algorithms of these sites
+	searchQuery := galleryName
 	logger.Infof("Searching for gallery matches with query: %s", searchQuery)
 
 	// Search MetArt
@@ -87,97 +89,79 @@ func buildSearchQuery(galleryName string, people []string) string {
 	return strings.Join(parts, " ")
 }
 
-// searchMetArt searches MetArt for matching galleries
+// searchMetArt searches MetArt for matching galleries using their internal API
 func searchMetArt(query string) ([]GallerySearchResult, error) {
-	searchURL := fmt.Sprintf("https://www.metart.com/search/%s", strings.ReplaceAll(query, " ", "+"))
+	// Use the internal API endpoint discovered via reverse engineering
+	// The site is an SPA, so HTML scraping returns empty shells.
+	// API: https://www.metart.com/api/search-results?searchPhrase={QUERY}&page=1&pageSize=30&sortBy=latest-gallery
 
-	logger.Infof("[MetArt] Searching with URL: %s", searchURL)
+	apiURL := fmt.Sprintf("https://www.metart.com/api/search-results?searchPhrase=%s&page=1&pageSize=30&sortBy=latest-gallery", url.QueryEscape(query))
+	logger.Infof("[MetArt] Searching API: %s", apiURL)
 
-	client := GetHTTPClient(searchURL)
-	resp, err := client.Get(searchURL)
+	client := GetHTTPClient(apiURL)
+	resp, err := client.Get(apiURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to search MetArt: %w", err)
+		return nil, fmt.Errorf("failed to search MetArt API: %w", err)
 	}
 	defer resp.Body.Close()
 
-	logger.Infof("[MetArt] Response status: %d", resp.StatusCode)
-
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("MetArt search returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("MetArt API returned status %d", resp.StatusCode)
 	}
 
-	// Read the entire response body
+	// Parse JSON Response based on the schema reverse-engineered
+	var apiResp struct {
+		Items []struct {
+			Item struct {
+				Name        string `json:"name"`
+				Path        string `json:"path"`
+				PublishedAt string `json:"publishedAt"`
+				Thumbnail   string `json:"thumbnailCoverPath"`
+				Models      []struct {
+					Name string `json:"name"`
+				} `json:"models"`
+			} `json:"item"`
+		} `json:"items"`
+	}
+
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read MetArt response: %w", err)
+		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	// Check for explicit block messages in the TITLE or specific error divs
-	// Note: We used to check for "ageVerificationBlockedVPNStates" but that is present in the
-	// config JSON of every page, so it caused false positives.
-	if strings.Contains(strings.ToLower(string(bodyBytes)), "<title>access denied</title>") ||
-		strings.Contains(strings.ToLower(string(bodyBytes)), "please verify your age") {
-		logger.Errorf("[MetArt] Block detected based on page content.")
-		return nil, fmt.Errorf("MetArt blocked access (content check)")
-	}
-
-	// Save HTML to file for debugging
-	debugFile := "debug_metart_search.html"
-	if err := os.WriteFile(debugFile, bodyBytes, 0644); err != nil {
-		logger.Warnf("[MetArt] Failed to write debug file: %v", err)
-	} else {
-		logger.Infof("[MetArt] Saved response to %s (%d bytes)", debugFile, len(bodyBytes))
-	}
-
-	// Parse HTML from bytes
-	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse MetArt search results: %w", err)
+	if err := json.Unmarshal(bodyBytes, &apiResp); err != nil {
+		logger.Errorf("[MetArt] Failed to parse JSON: %v", err)
+		// Save for debugging
+		os.WriteFile("debug_metart_api_error.json", bodyBytes, 0644)
+		return nil, fmt.Errorf("failed to parse API JSON")
 	}
 
 	var results []GallerySearchResult
+	for _, entry := range apiResp.Items {
+		item := entry.Item
 
-	// Log what we're looking for
-	logger.Debugf("[MetArt] Looking for selectors: .gallery-item, .search-result-item, article")
+		// Construct full URLs
+		galleryURL := "https://www.metart.com" + item.Path
 
-	// Parse search results - this is a placeholder selector that will need refinement
-	doc.Find(".gallery-item, .search-result-item, article").Each(func(i int, s *goquery.Selection) {
-		if i >= 10 { // Limit to top 10 results
-			return
+		// For thumbnails, using the relative path on main domain
+		thumbURL := "https://www.metart.com" + item.Thumbnail
+
+		// Parse date (2018-10-20T07:00:00.000Z)
+		dateStr := item.PublishedAt
+		if len(dateStr) > 10 {
+			dateStr = dateStr[:10]
 		}
 
-		logger.Debugf("[MetArt] Processing result %d", i+1)
+		results = append(results, GallerySearchResult{
+			Provider:    "MetArt",
+			Title:       item.Name,
+			URL:         galleryURL,
+			Thumbnail:   thumbURL,
+			ReleaseDate: dateStr,
+		})
+	}
 
-		title := strings.TrimSpace(s.Find("h2, h3, .title, .gallery-title").First().Text())
-		url, _ := s.Find("a").First().Attr("href")
-		thumbnail, _ := s.Find("img").First().Attr("src")
-		releaseDate := strings.TrimSpace(s.Find(".date, time, .release-date").First().Text())
-
-		logger.Debugf("[MetArt] Result %d: title=%q, url=%q, thumb=%q", i+1, title, url, thumbnail)
-
-		// Make URL absolute if relative
-		if url != "" && !strings.HasPrefix(url, "http") {
-			url = "https://www.metart.com" + url
-		}
-
-		// Make thumbnail URL absolute if relative
-		if thumbnail != "" && !strings.HasPrefix(thumbnail, "http") {
-			thumbnail = "https://www.metart.com" + thumbnail
-		}
-
-		if title != "" && url != "" {
-			results = append(results, GallerySearchResult{
-				Provider:    "MetArt",
-				Title:       title,
-				URL:         url,
-				Thumbnail:   thumbnail,
-				ReleaseDate: releaseDate,
-			})
-			logger.Infof("[MetArt] Added result: %s", title)
-		}
-	})
-
-	logger.Debugf("Found %d MetArt results", len(results))
+	logger.Infof("[MetArt] Found %d results via API", len(results))
 	return results, nil
 }
 
