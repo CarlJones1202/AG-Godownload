@@ -371,9 +371,25 @@ func GenerateTrickplayData(srcPath string) error {
 	}
 	defer os.RemoveAll(tempDir) // Clean up temp files
 
-	// Step 1: Extract thumbnails every 5 seconds at 160x90 resolution
+	// Step 0: Get duration to calculate interval
+	meta, err := GetVideoMetadata(srcPath)
+	if err != nil {
+		logger.Warnf("Failed to get metadata for trickplay generation: %v. Defaulting to 5s interval.", err)
+		meta = &VideoMetadata{Duration: 0}
+	}
+
+	// Target ~100 images, but at least 5 seconds apart
+	interval := 5.0
+	if meta.Duration > 0 {
+		calculated := meta.Duration / 100.0
+		interval = math.Max(5.0, calculated)
+	}
+
+	// Step 1: Extract thumbnails based on calculated interval
 	thumbPattern := filepath.Join(tempDir, "thumb_%04d.jpg")
-	extractCmd := exec.Command("ffmpeg", "-i", srcPath, "-vf", "fps=1/5,scale=160:90", thumbPattern)
+	// fps = 1/interval
+	fpsFilter := fmt.Sprintf("fps=1/%.2f,scale=160:90", interval)
+	extractCmd := exec.Command("ffmpeg", "-i", srcPath, "-vf", fpsFilter, thumbPattern)
 
 	if output, err := extractCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to extract thumbnails: %w, output: %s", err, string(output))
@@ -405,7 +421,7 @@ func GenerateTrickplayData(srcPath string) error {
 
 	thumbWidth := 160
 	thumbHeight := 90
-	interval := 5.0 // seconds per thumbnail
+	// interval is already defined above
 
 	for i := 0; i < totalThumbs; i++ {
 		startTime := float64(i) * interval

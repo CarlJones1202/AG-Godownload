@@ -121,6 +121,25 @@ function App() {
         }
     }
 
+    const fetchFavorites = async (page = 1) => {
+        setLoading(true)
+        try {
+            const response = await fetch(`/api/images?favorites=true&page=${page}&limit=100`)
+            const result = await response.json()
+            if (result.data) {
+                setFavorites(result.data)
+                setFavoriteMeta(result.meta)
+                setFavoritePage(page)
+            } else {
+                setFavorites(result || [])
+            }
+        } catch (error) {
+            console.error('Failed to fetch favorites:', error)
+        } finally {
+            setLoading(false)
+        }
+    }
+
     const fetchPeople = async (page = 1) => {
         setLoading(true)
         try {
