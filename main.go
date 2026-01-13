@@ -123,6 +123,7 @@ func main() {
 
 	// Image routes
 	r.DELETE("/images/:imageId", handlers.DeleteImage)
+	r.POST("/images/:imageId/favorite", handlers.ToggleFavorite)
 	r.GET("/images", handlers.GetImages)
 	r.GET("/search/color", handlers.SearchByColor)
 

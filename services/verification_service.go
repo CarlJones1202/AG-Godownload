@@ -29,6 +29,7 @@ func VerifyDownloadedImages() error {
 	if err := database.DB.
 		Model(&models.Image{}).
 		Select("id, filename, download_url").
+		Order("is_favorite DESC").
 		Find(&images).Error; err != nil {
 		return fmt.Errorf("failed to query images: %w", err)
 	}
@@ -61,7 +62,7 @@ func VerifyDownloadedImages() error {
 		go func() {
 			defer wgBatch.Done()
 			var buffer []updateResult
-			const batchSize = 20
+			const batchSize = 30
 			ticker := time.NewTicker(2 * time.Second)
 			defer ticker.Stop()
 

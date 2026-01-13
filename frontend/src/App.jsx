@@ -19,6 +19,7 @@ function App() {
     const [images, setImages] = useState([])
     const [videos, setVideos] = useState([])
     const [people, setPeople] = useState([])
+    const [favorites, setFavorites] = useState([])
     const [loading, setLoading] = useState(true)
     const [colorSearchActive, setColorSearchActive] = useState(false)
     const [searchColor, setSearchColor] = useState(null)
@@ -30,6 +31,8 @@ function App() {
     const [sourceMeta, setSourceMeta] = useState({ total_pages: 1, current_page: 1 })
     const [imagePage, setImagePage] = useState(1)
     const [imageMeta, setImageMeta] = useState({ total_pages: 1, current_page: 1 })
+    const [favoritePage, setFavoritePage] = useState(1)
+    const [favoriteMeta, setFavoriteMeta] = useState({ total_pages: 1, current_page: 1 })
     const [videoPage, setVideoPage] = useState(1)
     const [videoMeta, setVideoMeta] = useState({ total_pages: 1, current_page: 1 })
     const [personPage, setPersonPage] = useState(1)
@@ -48,6 +51,8 @@ function App() {
             fetchImages(pageFromUrl)
         } else if (location.pathname === '/videos') {
             fetchVideos(pageFromUrl)
+        } else if (location.pathname === '/favorites') {
+            fetchFavorites(pageFromUrl)
         } else if (location.pathname === '/people') {
             fetchPeople(pageFromUrl)
         } else {
@@ -182,6 +187,11 @@ function App() {
         fetchVideos(page)
     }
 
+    const handleFavoritePageChange = (page) => {
+        setSearchParams({ page: page.toString() })
+        fetchFavorites(page)
+    }
+
     const handlePersonPageChange = (page) => {
         setSearchParams({ page: page.toString() })
         fetchPeople(page)
@@ -244,6 +254,12 @@ function App() {
                         Videos
                     </NavLink>
                     <NavLink
+                        to="/favorites"
+                        className={({ isActive }) => isActive ? 'active' : ''}
+                    >
+                        Favorites
+                    </NavLink>
+                    <NavLink
                         to="/sources"
                         className={({ isActive }) => isActive ? 'active' : ''}
                     >
@@ -294,6 +310,14 @@ function App() {
                                 onRefresh={() => fetchVideos(videoPage)}
                                 meta={videoMeta}
                                 onPageChange={handleVideoPageChange}
+                            />
+                        } />
+                        <Route path="/favorites" element={
+                            <ImageList
+                                images={favorites}
+                                onRefresh={() => fetchFavorites(favoritePage)}
+                                meta={favoriteMeta}
+                                onPageChange={handleFavoritePageChange}
                             />
                         } />
                         <Route path="/sources" element={

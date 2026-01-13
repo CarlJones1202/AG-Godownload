@@ -121,6 +121,12 @@
     transform: scale(1.05);
 }
 
+.control-btn-icon.favorite.active {
+    color: #ff4081;
+    background: rgba(255, 64, 129, 0.15);
+    border-color: rgba(255, 64, 129, 0.3);
+}
+
 /* Footer Counter */
 .lightbox-footer {
     position: absolute;

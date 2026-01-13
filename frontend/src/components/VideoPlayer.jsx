@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import VRPlayer from './VRPlayer'
 import './VideoPlayer.css'
 
 function VideoPlayer({ video, onClose, onNext, onPrev }) {
@@ -19,6 +20,7 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
     const [showControls, setShowControls] = useState(true)
     const [showMetadata, setShowMetadata] = useState(false) // Sidebar state
     const [isFullscreen, setIsFullscreen] = useState(false)
+    const [vrMode, setVrMode] = useState(null) // null, '180', '360'
 
     // Autohide controls logic
     const controlsTimeoutRef = useRef(null)
@@ -122,6 +124,14 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
         }
     }
 
+    const toggleVrMode = () => {
+        setVrMode(prev => {
+            if (prev === null) return '180'
+            if (prev === '180') return '360'
+            return null
+        })
+    }
+
     // Timeline logic
     const handleTimelineHover = (e) => {
         if (!vttData.length || !spriteImage) return
@@ -205,6 +215,13 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
                     onPause={() => setIsPlaying(false)}
                 />
 
+                {/* VR Player Overlay */}
+                {vrMode && videoRef.current && (
+                    <div className="vr-player-wrapper" onMouseMove={handleMouseMove}>
+                        <VRPlayer videoElement={videoRef.current} mode={vrMode} />
+                    </div>
+                )}
+
                 {/* Top Controls (Close) */}
                 <div className={`video-controls-top ${showControls ? 'visible' : ''}`}>
                     <button className="icon-btn" onClick={onClose} title="Close">
@@ -273,6 +290,11 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
                         </div>
 
                         <div className="controls-right">
+                            <button className="icon-btn" onClick={toggleVrMode} title="Toggle VR Mode (2D / 180 / 360)">
+                                {vrMode === null && <span style={{ fontSize: '14px', fontWeight: 'bold' }}>2D</span>}
+                                {vrMode === '180' && <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#3b82f6' }}>180°</span>}
+                                {vrMode === '360' && <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#10b981' }}>360°</span>}
+                            </button>
                             {!showMetadata && (
                                 <button className="icon-btn" onClick={() => setShowMetadata(true)} title="Info">
                                     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -284,7 +306,7 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
                             )}
                             <button className="icon-btn" onClick={toggleFullscreen} title="Fullscreen">
                                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2-2h3" />
                                 </svg>
                             </button>
                         </div>

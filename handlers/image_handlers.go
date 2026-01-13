@@ -142,6 +142,11 @@ func GetImages(c *gin.Context) {
 		query = query.Where("dominant_colors LIKE ?", "%"+color+"%")
 	}
 
+	// Favorites filter
+	if c.Query("favorites") == "true" {
+		query = query.Where("is_favorite = ?", true)
+	}
+
 	// Sorting
 	sortBy := c.DefaultQuery("sort", "newest")
 	switch sortBy {
@@ -374,4 +379,31 @@ func DeleteImage(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Image deleted successfully"})
+}
+
+// ToggleFavorite toggles the favorite status of an image
+func ToggleFavorite(c *gin.Context) {
+	idStr := c.Param("imageId")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid image ID"})
+		return
+	}
+
+	var image models.Image
+	if err := database.DB.First(&image, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Image not found"})
+		return
+	}
+
+	image.IsFavorite = !image.IsFavorite
+	if err := database.DB.Save(&image).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update image"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":     "Favorite status updated",
+		"is_favorite": image.IsFavorite,
+	})
 }

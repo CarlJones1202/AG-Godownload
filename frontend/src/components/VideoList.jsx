@@ -94,7 +94,7 @@ function VideoList({ videos, onRefresh, meta, onPageChange }) {
                                     loading="lazy"
                                     onError={(e) => {
                                         e.target.onerror = null;
-                                        e.target.src = "https://via.placeholder.com/200x200?text=No+Thumb"
+                                        e.target.src = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjMzMzIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGR5PSIuM2VtIiBmaWxsPSIjNzc3IiBmb250LXNpemU9IjIwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5ObyBUaHVtYjwvdGV4dD48L3N2Zz4="
                                     }}
                                 />
                                 <div className="play-icon-overlay">▶</div>
