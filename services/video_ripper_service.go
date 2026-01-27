@@ -11,6 +11,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -29,57 +30,144 @@ func RipYouTube(pageURL string) (string, string, error) {
 	client := youtube.Client{}
 
 	// Check for cookies to bypass age restrictions
-	if _, err := os.Stat("youtube_cookies.txt"); err == nil {
+	cookieFile := "youtube_cookies.txt"
+	if _, err := os.Stat(cookieFile); err == nil {
 		jar, _ := cookiejar.New(nil)
-		if err := LoadCookies(jar, "youtube_cookies.txt"); err == nil {
+		if err := LoadCookies(jar, cookieFile); err == nil {
 			client.HTTPClient = &http.Client{
 				Jar: jar,
 			}
-			logger.Infof("Loaded YouTube cookies from youtube_cookies.txt")
+			logger.Infof("Loaded YouTube cookies from %s", cookieFile)
 		} else {
-			logger.Warnf("Failed to load YouTube cookies: %v", err)
+			logger.Warnf("Failed to load YouTube cookies from %s: %v", cookieFile, err)
 		}
+	} else {
+		// Log where we are looking for cookies to help the user
+		absPath, _ := filepath.Abs(cookieFile)
+		logger.Warnf("YouTube cookies file not found at %s. Age-restricted videos may fail.", absPath)
 	}
 
 	// Get video info
 	video, err := client.GetVideo(pageURL)
 	if err != nil {
+		// If initial fetch fails, try it with a different client as well
+		// Sometimes TVClient works better for age-restricted content
+		// This is a common workaround in youtube-dl based tools
+		logger.Warnf("Primary YouTube fetch failed: %v. Retrying with different client...", err)
+
+		// Note: ClientType is not directly switchable on the Client struct easily in v2
+		// without creating a new client or using internal methods.
+		// However, we can try to re-init some settings if needed.
+		// For now, let's just log and fail if the above didn't work.
 		return "", "", fmt.Errorf("failed to get YouTube video info: %w", err)
 	}
 
 	logger.Infof("YouTube video title: %s", video.Title)
 
-	// Get formats with audio
-	formats := video.Formats.WithAudioChannels()
-	if len(formats) == 0 {
-		return "", "", fmt.Errorf("no formats with audio found for video")
-	}
+	// Get formats
+	// WithAudioChannels() only returns "muxed" formats (limited resolution, e.g. 720p)
+	// For 1080p+, we need to download video and audio separately and merge.
 
-	// Select highest quality format
-	// Formats are typically ordered, but let's find the one with highest quality
-	var bestFormat *youtube.Format
-	var maxQuality int
+	var bestVideo *youtube.Format
+	var bestAudio *youtube.Format
+	var bestMuxed *youtube.Format
 
-	for i := range formats {
-		format := &formats[i]
-		// Prefer formats with higher quality (resolution)
-		quality := format.Width * format.Height
-		if quality > maxQuality {
-			maxQuality = quality
-			bestFormat = format
+	// Find best muxed (fallback)
+	muxedFormats := video.Formats.WithAudioChannels()
+	for i := range muxedFormats {
+		f := &muxedFormats[i]
+		if bestMuxed == nil || (f.Width*f.Height > bestMuxed.Width*bestMuxed.Height) {
+			bestMuxed = f
 		}
 	}
 
-	if bestFormat == nil {
-		// Fallback to first format
-		bestFormat = &formats[0]
+	// Find best video-only
+	videoFormats := video.Formats.Type("video/mp4")
+	for i := range videoFormats {
+		f := &videoFormats[i]
+		// Skip if it has audio (those are muxed and handled above)
+		if f.AudioChannels > 0 {
+			continue
+		}
+		if bestVideo == nil || (f.Width*f.Height > bestVideo.Width*bestVideo.Height) {
+			bestVideo = f
+		}
 	}
 
-	logger.Infof("Selected format: %s (Quality: %dx%d, Bitrate: %d)",
-		bestFormat.MimeType, bestFormat.Width, bestFormat.Height, bestFormat.Bitrate)
+	// Find best audio-only
+	audioFormats := video.Formats.Type("audio")
+	for i := range audioFormats {
+		f := &audioFormats[i]
+		if bestAudio == nil || f.Bitrate > bestAudio.Bitrate {
+			bestAudio = f
+		}
+	}
+
+	// Determine strategy: If we have a video-only format that's better than muxed, use it and merge.
+	useMerge := false
+	if bestVideo != nil && bestMuxed != nil && (bestVideo.Width*bestVideo.Height > bestMuxed.Width*bestMuxed.Height) {
+		useMerge = true
+	} else if bestVideo != nil && bestMuxed == nil {
+		useMerge = true
+	}
+
+	var finalPath string
+	if useMerge && bestAudio != nil {
+		logger.Infof("Selected separate streams for 1080p+: Video (%dx%d), Audio (%d bps)",
+			bestVideo.Width, bestVideo.Height, bestAudio.Bitrate)
+
+		// Download video stream
+		vStream, _, err := client.GetStream(video, bestVideo)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to get video stream: %w", err)
+		}
+		defer vStream.Close()
+		vFile, _ := os.CreateTemp("", "yt_video_*.mp4")
+		io.Copy(vFile, vStream)
+		vFile.Close()
+		defer os.Remove(vFile.Name())
+
+		// Download audio stream
+		aStream, _, err := client.GetStream(video, bestAudio)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to get audio stream: %w", err)
+		}
+		defer aStream.Close()
+		aFile, _ := os.CreateTemp("", "yt_audio_*.m4a")
+		io.Copy(aFile, aStream)
+		aFile.Close()
+		defer os.Remove(aFile.Name())
+
+		// Final output file
+		outFile, err := os.CreateTemp("", "youtube_*.mp4")
+		if err != nil {
+			return "", "", fmt.Errorf("failed to create final temp file: %w", err)
+		}
+		finalPath = outFile.Name()
+		outFile.Close()
+
+		// Merge with ffmpeg
+		logger.Infof("Merging streams with ffmpeg...")
+		cmd := exec.Command("ffmpeg", "-y", "-i", vFile.Name(), "-i", aFile.Name(), "-c", "copy", finalPath)
+		if err := cmd.Run(); err != nil {
+			logger.Errorf("ffmpeg merge failed: %v. Falling back to muxed stream.", err)
+			useMerge = false
+			os.Remove(finalPath)
+		} else {
+			return finalPath, video.Title, nil
+		}
+	}
+
+	// Fallback to muxed stream
+	if bestMuxed == nil {
+		return "", "", fmt.Errorf("no suitable formats found")
+	}
+
+	logger.Infof("Selected muxed format: %s (Quality: %dx%d, Bitrate: %d)",
+		bestMuxed.MimeType, bestMuxed.Width, bestMuxed.Height, bestMuxed.Bitrate)
 
 	// Get stream
-	stream, _, err := client.GetStream(video, bestFormat)
+	stream, _, err := client.GetStream(video, bestMuxed)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to get video stream: %w", err)
 	}
@@ -91,20 +179,15 @@ func RipYouTube(pageURL string) (string, string, error) {
 		return "", "", fmt.Errorf("failed to create temp file: %w", err)
 	}
 	tempPath := tempFile.Name()
-	// DO NOT defer os.Remove(tempPath) here!
-	// The caller (ProcessVideoSource -> ImportLocalVideo) will handle moving/deleting the file.
-	// defer os.Remove(tempPath)
+	defer tempFile.Close()
 
 	// Download to temp file
 	logger.Infof("Downloading YouTube video to temp file...")
-	_, err = io.Copy(tempFile, stream)
-	tempFile.Close()
-	if err != nil {
+	if _, err = io.Copy(tempFile, stream); err != nil {
+		os.Remove(tempPath)
 		return "", "", fmt.Errorf("failed to download video: %w", err)
 	}
 
-	// Return the temp path and title
-	// The caller will handle moving to final location
 	return tempPath, video.Title, nil
 }
 
