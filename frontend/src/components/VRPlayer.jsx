@@ -50,8 +50,8 @@ function VRPlayer({ videoElement, mode }) {
                 <OrbitControls
                     enableZoom={true}
                     enablePan={false}
-                    rotateSpeed={-0.5} // Invert rotation for "looking around" feel
-                    reverseOrbit={true}
+                    rotateSpeed={0.5} // Fixed inverted rotation
+                    reverseOrbit={false}
                 />
             </Canvas>
         </div>
