@@ -107,6 +107,14 @@ func CrawlSource(sourceID uint) error {
 		postID := strings.TrimPrefix(fragment, "post")
 		logger.Debugf("Crawling specific post ID: %s", postID)
 		selection = doc.Find(fmt.Sprintf("div[id='post_message_%s']", postID))
+	} else if strings.Contains(source.Location, "jkforum.net") {
+		logger.Debug("Crawling jkforum.net")
+		// For newer JKF (Nuxt), we might need to look for article or content divs
+		selection = doc.Find("article, div.article-content, div.post-content, div[id^='post_message_']")
+		if selection.Length() == 0 {
+			logger.Debug("No specific post container found, falling back to body")
+			selection = doc.Find("body")
+		}
 	} else {
 		logger.Debug("Crawling first post only")
 		selection = doc.Find("div[id^='post_message_']").First()
@@ -175,9 +183,14 @@ func CrawlSource(sourceID uint) error {
 				case strings.Contains(src, "acidimg"):
 					logger.Debug("Ripping from AcidImg")
 					imageURL, err = RipAcidImg(imgSrc)
-				case strings.Contains(src, "postimages.org"):
-					logger.Debug("Ripping from PostImages")
-					imageURL, err = RipPostImages(src)
+
+				case strings.Contains(src, "mymypic.net") || strings.Contains(imgSrc, "mymypic.net") ||
+					strings.Contains(src, "mymyatt.net") || strings.Contains(imgSrc, "mymyatt.net"):
+					logger.Debug("Ripping from MyMyPic/MyMyAtt")
+					imageURL, err = RipMyMyPic(src)
+					if imageURL == "" {
+						imageURL, err = RipMyMyPic(imgSrc)
+					}
 				case strings.Contains(src, "pixxxels.cc") || strings.Contains(src, "freeimage.us"):
 					logger.Debugf("Skipping unsupported host: %s", src)
 					return

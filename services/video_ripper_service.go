@@ -1,16 +1,21 @@
 package services
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"gallery_api/logger"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/kkdai/youtube/v2"
@@ -22,6 +27,19 @@ func RipYouTube(pageURL string) (string, string, error) {
 
 	// Create YouTube client
 	client := youtube.Client{}
+
+	// Check for cookies to bypass age restrictions
+	if _, err := os.Stat("youtube_cookies.txt"); err == nil {
+		jar, _ := cookiejar.New(nil)
+		if err := LoadCookies(jar, "youtube_cookies.txt"); err == nil {
+			client.HTTPClient = &http.Client{
+				Jar: jar,
+			}
+			logger.Infof("Loaded YouTube cookies from youtube_cookies.txt")
+		} else {
+			logger.Warnf("Failed to load YouTube cookies: %v", err)
+		}
+	}
 
 	// Get video info
 	video, err := client.GetVideo(pageURL)
@@ -73,7 +91,9 @@ func RipYouTube(pageURL string) (string, string, error) {
 		return "", "", fmt.Errorf("failed to create temp file: %w", err)
 	}
 	tempPath := tempFile.Name()
-	defer os.Remove(tempPath) // Clean up temp file
+	// DO NOT defer os.Remove(tempPath) here!
+	// The caller (ProcessVideoSource -> ImportLocalVideo) will handle moving/deleting the file.
+	// defer os.Remove(tempPath)
 
 	// Download to temp file
 	logger.Infof("Downloading YouTube video to temp file...")
@@ -82,23 +102,6 @@ func RipYouTube(pageURL string) (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("failed to download video: %w", err)
 	}
-
-	// Calculate hash of downloaded file
-	f, err := os.Open(tempPath)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to open temp file for hashing: %w", err)
-	}
-	defer f.Close()
-
-	hash := sha256.New()
-	if _, err := io.Copy(hash, f); err != nil {
-		return "", "", fmt.Errorf("failed to hash video: %w", err)
-	}
-	hashStr := hex.EncodeToString(hash.Sum(nil))
-	f.Close()
-
-	// Determine final filename and path
-	filename := hashStr + ".mp4"
 
 	// Return the temp path and title
 	// The caller will handle moving to final location
@@ -459,4 +462,54 @@ func RipPMVHaven(pageURL string) (string, string, error) {
 	}
 
 	return videoURL, title, nil
+}
+
+// LoadCookies parses a Netscape/curl format cookies file into a CookieJar
+func LoadCookies(jar *cookiejar.Jar, filepath string) error {
+	file, err := os.Open(filepath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "#") || strings.TrimSpace(line) == "" {
+			continue
+		}
+
+		parts := strings.Split(line, "\t")
+		if len(parts) < 7 {
+			continue
+		}
+
+		domain := parts[0]
+		// path := parts[2]
+		rawSecure := parts[3]
+		expiresStr := parts[4]
+		name := parts[5]
+		value := parts[6]
+
+		expires, _ := strconv.ParseInt(expiresStr, 10, 64)
+		secure := strings.ToUpper(rawSecure) == "TRUE"
+
+		// Create the cookie
+		cookie := &http.Cookie{
+			Name:    name,
+			Value:   value,
+			Domain:  domain,
+			Path:    "/",
+			Expires: time.Unix(expires, 0),
+			Secure:  secure,
+		}
+
+		// Set the cookie for both http and https for the domain
+		u, _ := url.Parse("https://" + strings.TrimPrefix(domain, "."))
+		jar.SetCookies(u, []*http.Cookie{cookie})
+		u2, _ := url.Parse("http://" + strings.TrimPrefix(domain, "."))
+		jar.SetCookies(u2, []*http.Cookie{cookie})
+	}
+
+	return scanner.Err()
 }

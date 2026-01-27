@@ -211,6 +211,10 @@ function GalleryDetail() {
         const lowerUrl = manualUrl.toLowerCase()
         if (lowerUrl.includes('playboy.com')) {
             provider = 'Playboy'
+        } else if (lowerUrl.includes('playboyplus.com')) {
+            provider = 'PlayboyPlus'
+        } else if (lowerUrl.includes('vixen.com')) {
+            provider = 'Vixen'
         } else if (lowerUrl.includes('metart.com')) {
             provider = 'MetArt'
         }
@@ -240,7 +244,7 @@ function GalleryDetail() {
                     <div className="gallery-cover">
                         {coverImage ? (
                             <img
-                                src={`/api/${coverImage.thumbnail_path}`}
+                                src={`/api/images/${coverImage.filename}`}
                                 alt={gallery.name}
                             />
                         ) : (

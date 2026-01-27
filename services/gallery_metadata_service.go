@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"gallery_api/logger"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -57,6 +58,22 @@ func SearchGalleryMatches(galleryName string, people []string) ([]GallerySearchR
 		results = append(results, playboyResults...)
 	}
 
+	// Search PlayboyPlus
+	playboyPlusResults, err := searchPlayboyPlus(searchQuery)
+	if err != nil {
+		logger.Warnf("PlayboyPlus search failed: %v", err)
+	} else {
+		results = append(results, playboyPlusResults...)
+	}
+
+	// Search Vixen
+	vixenResults, err := searchVixen(searchQuery)
+	if err != nil {
+		logger.Warnf("Vixen search failed: %v", err)
+	} else {
+		results = append(results, vixenResults...)
+	}
+
 	if len(results) == 0 {
 		return nil, fmt.Errorf("no matching galleries found")
 	}
@@ -74,6 +91,10 @@ func ScrapeGalleryMetadata(sourceURL string, provider string, sourceID string) (
 		return scrapeMetArtGallery(sourceURL, sourceID)
 	case "playboy":
 		return scrapePlayboyGallery(sourceURL)
+	case "playboyplus":
+		return scrapePlayboyPlusGallery(sourceURL)
+	case "vixen":
+		return scrapeVixenGallery(sourceURL)
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", provider)
 	}
@@ -355,9 +376,311 @@ func scrapePlayboyGallery(url string) (*GalleryMetadata, error) {
 	return metadata, nil
 }
 
+// searchVixen searches Vixen Media Group (VMG) for matching videos/galleries
+func searchVixen(query string) ([]GallerySearchResult, error) {
+	// GraphQL query for searching VMG
+	gqlQuery := map[string]interface{}{
+		"query": `
+			query search($term: String) {
+				search(term: $term) {
+					videos {
+						id
+						title
+						slug
+						releaseDate
+						images {
+							poster {
+								url
+							}
+						}
+					}
+				}
+			}
+		`,
+		"variables": map[string]string{
+			"term": query,
+		},
+	}
+
+	bodyBytes, err := json.Marshal(gqlQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal GraphQL query: %w", err)
+	}
+
+	apiURL := "https://www.vixen.com/graphql"
+	client := GetHTTPClient(apiURL)
+	resp, err := client.Post(apiURL, "application/json", strings.NewReader(string(bodyBytes)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to search Vixen API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("Vixen API returned status %d", resp.StatusCode)
+	}
+
+	var apiResp struct {
+		Data struct {
+			Search struct {
+				Videos []struct {
+					ID          string `json:"id"`
+					Title       string `json:"title"`
+					Slug        string `json:"slug"`
+					ReleaseDate string `json:"releaseDate"`
+					Images      struct {
+						Poster []struct {
+							URL string `json:"url"`
+						} `json:"poster"`
+					} `json:"images"`
+				} `json:"videos"`
+			} `json:"search"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, fmt.Errorf("failed to decode Vixen API response: %w", err)
+	}
+
+	var results []GallerySearchResult
+	for _, video := range apiResp.Data.Search.Videos {
+		thumbURL := ""
+		if len(video.Images.Poster) > 0 {
+			thumbURL = video.Images.Poster[0].URL
+		}
+
+		results = append(results, GallerySearchResult{
+			Provider:    "Vixen",
+			Title:       video.Title,
+			URL:         "https://www.vixen.com/videos/" + video.Slug,
+			Thumbnail:   thumbURL,
+			ReleaseDate: video.ReleaseDate,
+			SourceID:    video.ID,
+		})
+	}
+
+	return results, nil
+}
+
+// scrapeVixenGallery scrapes full metadata from a Vixen video page using GraphQL
+func scrapeVixenGallery(urlStr string) (*GalleryMetadata, error) {
+	// Extract slug from URL
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid Vixen URL: %w", err)
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 2 || parts[0] != "videos" {
+		return nil, fmt.Errorf("invalid Vixen video URL format")
+	}
+	slug := parts[len(parts)-1]
+
+	gqlQuery := map[string]interface{}{
+		"query": `
+			query findOneVideo($id: Int, $slug: String) {
+				findOneVideo(input: { id: $id, slug: $slug }) {
+					id
+					title
+					description
+					releaseDate
+					models {
+						name
+					}
+				}
+			}
+		`,
+		"variables": map[string]string{
+			"slug": slug,
+		},
+	}
+
+	bodyBytes, err := json.Marshal(gqlQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal GraphQL query: %w", err)
+	}
+
+	apiURL := "https://www.vixen.com/graphql"
+	client := GetHTTPClient(apiURL)
+	resp, err := client.Post(apiURL, "application/json", strings.NewReader(string(bodyBytes)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to scrape Vixen API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("Vixen API returned status %d", resp.StatusCode)
+	}
+
+	var apiResp struct {
+		Data struct {
+			FindOneVideo struct {
+				ID          string `json:"id"`
+				Title       string `json:"title"`
+				Description string `json:"description"`
+				ReleaseDate string `json:"releaseDate"`
+				Models      []struct {
+					Name string `json:"name"`
+				} `json:"models"`
+			} `json:"findOneVideo"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, fmt.Errorf("failed to decode Vixen API response: %w", err)
+	}
+
+	video := apiResp.Data.FindOneVideo
+	metadata := &GalleryMetadata{
+		Provider:    "Vixen",
+		SourceURL:   urlStr,
+		Description: video.Description,
+	}
+
+	if video.ReleaseDate != "" {
+		// Try ISO 8601 first
+		if parsed, err := time.Parse("2006-01-02T15:04:05.000Z", video.ReleaseDate); err == nil {
+			metadata.ReleaseDate = parsed
+		} else if parsed, err := time.Parse("2006-01-02", video.ReleaseDate[:10]); err == nil {
+			metadata.ReleaseDate = parsed
+		}
+	}
+
+	return metadata, nil
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a
 	}
 	return b
+}
+
+// searchPlayboyPlus searches PlayboyPlus using their Algolia API
+func searchPlayboyPlus(query string) ([]GallerySearchResult, error) {
+	// Algolia API info from their public site
+	appID := "TSMKFA364Q"
+	// Note: This key is short-lived and extracted from window.env on playboyplus.com
+	apiKey := "MWU2MzkyY2ZhNzdhZDA1MzFjNDFjNTRhYjczYTM2MDNlNTQ5Yzc0NGE2MzYzYWVkZTQyYzJiYWNhYzU0ZDhkN3ZhbGlkVW50aWw9MTc2OTU2MTU1NSZyZXN0cmljdEluZGljZXM9YWxsJTJBJmZpbHRlcnM9c2VnbWVudCUzQXBsYXlib3lwbHVz"
+	indexName := "all_photosets"
+
+	apiURL := fmt.Sprintf("https://%s-dsn.algolia.net/1/indexes/%s/query", appID, indexName)
+
+	searchParams := map[string]interface{}{
+		"params": fmt.Sprintf("query=%s&hitsPerPage=20&filters=segment:playboyplus", url.QueryEscape(query)),
+	}
+
+	bodyBytes, err := json.Marshal(searchParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal Algolia query: %w", err)
+	}
+
+	client := GetHTTPClient(apiURL)
+	req, _ := http.NewRequest("POST", apiURL, strings.NewReader(string(bodyBytes)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Algolia-Application-Id", appID)
+	req.Header.Set("X-Algolia-API-Key", apiKey)
+	req.Header.Set("Referer", "https://www.playboyplus.com/")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search PlayboyPlus Algolia: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("PlayboyPlus Algolia returned status %d", resp.StatusCode)
+	}
+
+	var apiResp struct {
+		Hits []struct {
+			ObjectID    string `json:"objectID"`
+			Title       string `json:"title"`
+			URLTitle    string `json:"urlTitle"`
+			ReleaseDate string `json:"release_date"`
+			Thumbnails  struct {
+				Standard string `json:"standard"`
+			} `json:"thumbnails"`
+		} `json:"hits"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, fmt.Errorf("failed to decode PlayboyPlus Algolia response: %w", err)
+	}
+
+	var results []GallerySearchResult
+	for _, hit := range apiResp.Hits {
+		results = append(results, GallerySearchResult{
+			Provider:    "PlayboyPlus",
+			Title:       hit.Title,
+			URL:         fmt.Sprintf("https://www.playboyplus.com/en/update/%s/%s", hit.URLTitle, hit.ObjectID),
+			Thumbnail:   hit.Thumbnails.Standard,
+			ReleaseDate: hit.ReleaseDate,
+			SourceID:    hit.ObjectID,
+		})
+	}
+
+	return results, nil
+}
+
+// scrapePlayboyPlusGallery attempts to scrape metadata for a PlayboyPlus gallery
+func scrapePlayboyPlusGallery(urlStr string) (*GalleryMetadata, error) {
+	// Since direct scraping often redirects to join page for non-logged users,
+	// we use Algolia to find the record by its ObjectID (which is at the end of the URL)
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid PlayboyPlus URL: %w", err)
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("invalid PlayboyPlus URL format")
+	}
+	objectID := parts[len(parts)-1]
+
+	// Query Algolia for this specific object
+	appID := "TSMKFA364Q"
+	apiKey := "MWU2MzkyY2ZhNzdhZDA1MzFjNDFjNTRhYjczYTM2MDNlNTQ5Yzc0NGE2MzYzYWVkZTQyYzJiYWNhYzU0ZDhkN3ZhbGlkVW50aWw9MTc2OTU2MTU1NSZyZXN0cmljdEluZGljZXM9YWxsJTJBJmZpbHRlcnM9c2VnbWVudCUzQXBsYXlib3lwbHVz"
+	indexName := "all_photosets"
+
+	apiURL := fmt.Sprintf("https://%s-dsn.algolia.net/1/indexes/%s/%s", appID, indexName, objectID)
+
+	client := GetHTTPClient(apiURL)
+	req, _ := http.NewRequest("GET", apiURL, nil)
+	req.Header.Set("X-Algolia-Application-Id", appID)
+	req.Header.Set("X-Algolia-API-Key", apiKey)
+	req.Header.Set("Referer", "https://www.playboyplus.com/")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch PlayboyPlus record from Algolia: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("PlayboyPlus Algolia returned status %d for object %s", resp.StatusCode, objectID)
+	}
+
+	var hit struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		ReleaseDate string `json:"release_date"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&hit); err != nil {
+		return nil, fmt.Errorf("failed to decode PlayboyPlus Algolia record: %w", err)
+	}
+
+	metadata := &GalleryMetadata{
+		Provider:    "PlayboyPlus",
+		SourceURL:   urlStr,
+		Description: hit.Description,
+	}
+
+	if hit.ReleaseDate != "" {
+		if parsed, err := time.Parse("2006-01-02", hit.ReleaseDate[:10]); err == nil {
+			metadata.ReleaseDate = parsed
+		}
+	}
+
+	return metadata, nil
 }

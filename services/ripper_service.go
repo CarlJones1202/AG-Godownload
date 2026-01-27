@@ -370,3 +370,11 @@ func RipImagetwist(src string) (string, error) {
 
 	return "", fmt.Errorf("failed to extract Imagetwist image from %s", src)
 }
+func RipMyMyPic(src string) (string, error) {
+	logger.Debugf("RipMyMyPic returning direct URL: %s", src)
+	// Typically mymypic.net links in JKF are either direct or need simple protocol fix
+	if strings.HasPrefix(src, "//") {
+		return "https:" + src, nil
+	}
+	return src, nil
+}
