@@ -26,84 +26,103 @@ import (
 func RipYouTube(pageURL string) (string, string, error) {
 	logger.Infof("Starting RipYouTube for %s", pageURL)
 
-	// Create YouTube client
-	client := youtube.Client{}
-
-	// Check for cookies to bypass age restrictions
+	// Determine if cookies are available
 	cookieFile := "youtube_cookies.txt"
+	hasCookies := false
 	if _, err := os.Stat(cookieFile); err == nil {
-		jar, _ := cookiejar.New(nil)
-		if err := LoadCookies(jar, cookieFile); err == nil {
-			client.HTTPClient = &http.Client{
-				Jar: jar,
-			}
-			logger.Infof("Loaded YouTube cookies from %s", cookieFile)
-		} else {
-			logger.Warnf("Failed to load YouTube cookies from %s: %v", cookieFile, err)
-		}
+		hasCookies = true
 	} else {
-		// Log where we are looking for cookies to help the user
 		absPath, _ := filepath.Abs(cookieFile)
 		logger.Warnf("YouTube cookies file not found at %s. Age-restricted videos may fail.", absPath)
 	}
 
-	// Get video info
-	video, err := client.GetVideo(pageURL)
-	if err != nil {
-		// If initial fetch fails, try it with a different client as well
-		// Sometimes TVClient works better for age-restricted content
-		// This is a common workaround in youtube-dl based tools
-		logger.Warnf("Primary YouTube fetch failed: %v. Retrying with different client...", err)
+	// Internal helper to create a client with specific settings
+	createClient := func(userAgent string) *youtube.Client {
+		c := &youtube.Client{}
+		httpClient := &http.Client{}
 
-		// Note: ClientType is not directly switchable on the Client struct easily in v2
-		// without creating a new client or using internal methods.
-		// However, we can try to re-init some settings if needed.
-		// For now, let's just log and fail if the above didn't work.
-		return "", "", fmt.Errorf("failed to get YouTube video info: %w", err)
+		if hasCookies {
+			jar, err := cookiejar.New(nil)
+			if err != nil {
+				logger.Warnf("Failed to create cookie jar: %v", err)
+			} else if err := LoadCookies(jar, cookieFile); err == nil {
+				httpClient.Jar = jar
+				logger.Infof("Loaded YouTube cookies from %s", cookieFile)
+
+				// Verify cookies for youtube.com
+				u, _ := url.Parse("https://www.youtube.com")
+				loaded := jar.Cookies(u)
+				logger.Infof("Jar has %d cookies active for %s", len(loaded), u.Host)
+			} else {
+				logger.Warnf("Failed to load YouTube cookies from %s: %v", cookieFile, err)
+			}
+		}
+
+		httpClient.Transport = &userAgentRoundTripper{
+			RoundTripper: http.DefaultTransport,
+			UserAgent:    userAgent,
+		}
+		c.HTTPClient = httpClient
+		return c
 	}
 
-	logger.Infof("YouTube video title: %s", video.Title)
+	// Try fetching video info with a standard client first
+	client := createClient("")
+	video, err := client.GetVideo(pageURL)
+	if err != nil {
+		logger.Warnf("Standard YouTube fetch failed: %v.", err)
 
-	// Get formats
-	// WithAudioChannels() only returns "muxed" formats (limited resolution, e.g. 720p)
-	// For 1080p+, we need to download video and audio separately and merge.
+		// If it's an age restriction or embedding error, try with a TV client User-Agent
+		if strings.Contains(err.Error(), "age restriction") || strings.Contains(err.Error(), "embedding") {
+			logger.Infof("Age restriction or embedding issue detected. Retrying with TV Client parameters...")
+			tvClient := createClient("Mozilla/5.0 (SMART-TV; Linux; Tizen 2.4.0) AppleWebKit/538.1 (KHTML, like Gecko) SamsungBrowser/1.1 tv")
+			video, err = tvClient.GetVideo(pageURL)
+			if err != nil {
+				logger.Errorf("TV Client retry also failed: %v", err)
+				return "", "", fmt.Errorf("failed to get YouTube video info after retry: %w", err)
+			}
+			logger.Infof("TV Client retry successful.")
+			client = tvClient // Use the successful client for subsequent operations
+		} else {
+			return "", "", fmt.Errorf("failed to get YouTube video info: %w", err)
+		}
+	}
+
+	logger.Infof("YouTube video: %s", video.Title)
+
+	// Quality Selection: Search FOR ALL formats (including DASH separate streams)
+	// Resolution is usually better in separate video/audio streams (DASH)
 
 	var bestVideo *youtube.Format
 	var bestAudio *youtube.Format
 	var bestMuxed *youtube.Format
 
-	// Find best muxed (fallback)
-	muxedFormats := video.Formats.WithAudioChannels()
-	for i := range muxedFormats {
-		f := &muxedFormats[i]
-		if bestMuxed == nil || (f.Width*f.Height > bestMuxed.Width*bestMuxed.Height) {
-			bestMuxed = f
+	for i := range video.Formats {
+		f := &video.Formats[i]
+
+		// Case 1: Muxed (Video + Audio)
+		if f.AudioChannels > 0 && f.Width > 0 {
+			if bestMuxed == nil || (f.Width*f.Height > bestMuxed.Width*bestMuxed.Height) {
+				bestMuxed = f
+			}
+		}
+
+		// Case 2: Video Only
+		if f.AudioChannels == 0 && f.Width > 0 {
+			if bestVideo == nil || (f.Width*f.Height > bestVideo.Width*bestVideo.Height) {
+				bestVideo = f
+			}
+		}
+
+		// Case 3: Audio Only
+		if f.AudioChannels > 0 && f.Width == 0 {
+			if bestAudio == nil || f.Bitrate > bestAudio.Bitrate {
+				bestAudio = f
+			}
 		}
 	}
 
-	// Find best video-only
-	videoFormats := video.Formats.Type("video/mp4")
-	for i := range videoFormats {
-		f := &videoFormats[i]
-		// Skip if it has audio (those are muxed and handled above)
-		if f.AudioChannels > 0 {
-			continue
-		}
-		if bestVideo == nil || (f.Width*f.Height > bestVideo.Width*bestVideo.Height) {
-			bestVideo = f
-		}
-	}
-
-	// Find best audio-only
-	audioFormats := video.Formats.Type("audio")
-	for i := range audioFormats {
-		f := &audioFormats[i]
-		if bestAudio == nil || f.Bitrate > bestAudio.Bitrate {
-			bestAudio = f
-		}
-	}
-
-	// Determine strategy: If we have a video-only format that's better than muxed, use it and merge.
+	// Determine strategy
 	useMerge := false
 	if bestVideo != nil && bestMuxed != nil && (bestVideo.Width*bestVideo.Height > bestMuxed.Width*bestMuxed.Height) {
 		useMerge = true
@@ -111,82 +130,88 @@ func RipYouTube(pageURL string) (string, string, error) {
 		useMerge = true
 	}
 
-	var finalPath string
 	if useMerge && bestAudio != nil {
-		logger.Infof("Selected separate streams for 1080p+: Video (%dx%d), Audio (%d bps)",
-			bestVideo.Width, bestVideo.Height, bestAudio.Bitrate)
+		logger.Infof("Selected DASH streams: Video %dx%d (%s), Audio %d bps (%s)",
+			bestVideo.Width, bestVideo.Height, bestVideo.MimeType, bestAudio.Bitrate, bestAudio.MimeType)
 
-		// Download video stream
-		vStream, _, err := client.GetStream(video, bestVideo)
-		if err != nil {
-			return "", "", fmt.Errorf("failed to get video stream: %w", err)
-		}
-		defer vStream.Close()
-		vFile, _ := os.CreateTemp("", "yt_video_*.mp4")
-		io.Copy(vFile, vStream)
-		vFile.Close()
-		defer os.Remove(vFile.Name())
+		// Helper to download a format to a temp file
+		downloadToTemp := func(f *youtube.Format, suffix string) (string, error) {
+			s, _, err := client.GetStream(video, f)
+			if err != nil {
+				return "", err
+			}
+			defer s.Close()
 
-		// Download audio stream
-		aStream, _, err := client.GetStream(video, bestAudio)
-		if err != nil {
-			return "", "", fmt.Errorf("failed to get audio stream: %w", err)
+			tmp, err := os.CreateTemp("", "yt_part_*"+suffix)
+			if err != nil {
+				return "", err
+			}
+			// Close the file handle immediately so io.Copy can write to it and ffmpeg can access it later on Windows
+			defer tmp.Close()
+
+			if _, err := io.Copy(tmp, s); err != nil {
+				os.Remove(tmp.Name())
+				return "", err
+			}
+			return tmp.Name(), nil
 		}
-		defer aStream.Close()
-		aFile, _ := os.CreateTemp("", "yt_audio_*.m4a")
-		io.Copy(aFile, aStream)
-		aFile.Close()
-		defer os.Remove(aFile.Name())
+
+		vPath, err := downloadToTemp(bestVideo, ".mp4")
+		if err != nil {
+			return "", "", fmt.Errorf("failed to download video stream: %w", err)
+		}
+		defer os.Remove(vPath)
+
+		aPath, err := downloadToTemp(bestAudio, ".m4a")
+		if err != nil {
+			return "", "", fmt.Errorf("failed to download audio stream: %w", err)
+		}
+		defer os.Remove(aPath)
 
 		// Final output file
-		outFile, err := os.CreateTemp("", "youtube_*.mp4")
+		finalTmp, err := os.CreateTemp("", "youtube_*.mp4")
 		if err != nil {
 			return "", "", fmt.Errorf("failed to create final temp file: %w", err)
 		}
-		finalPath = outFile.Name()
-		outFile.Close()
+		finalPath := finalTmp.Name()
+		finalTmp.Close() // Close immediately so ffmpeg can write to it
 
-		// Merge with ffmpeg
-		logger.Infof("Merging streams with ffmpeg...")
-		cmd := exec.Command("ffmpeg", "-y", "-i", vFile.Name(), "-i", aFile.Name(), "-c", "copy", finalPath)
+		logger.Infof("Merging DASH streams with ffmpeg...")
+		cmd := exec.Command("ffmpeg", "-y", "-i", vPath, "-i", aPath, "-c", "copy", finalPath)
 		if err := cmd.Run(); err != nil {
 			logger.Errorf("ffmpeg merge failed: %v. Falling back to muxed stream.", err)
-			useMerge = false
 			os.Remove(finalPath)
+			// Fall through to muxed fallback
 		} else {
 			return finalPath, video.Title, nil
 		}
 	}
 
-	// Fallback to muxed stream
+	// Fallback to Muxed
 	if bestMuxed == nil {
-		return "", "", fmt.Errorf("no suitable formats found")
+		return "", "", fmt.Errorf("no suitable YouTube formats found")
 	}
 
-	logger.Infof("Selected muxed format: %s (Quality: %dx%d, Bitrate: %d)",
-		bestMuxed.MimeType, bestMuxed.Width, bestMuxed.Height, bestMuxed.Bitrate)
+	logger.Infof("Selected muxed format: %dx%d (%s)", bestMuxed.Width, bestMuxed.Height, bestMuxed.MimeType)
 
-	// Get stream
 	stream, _, err := client.GetStream(video, bestMuxed)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to get video stream: %w", err)
+		return "", "", fmt.Errorf("failed to get muxed stream: %w", err)
 	}
 	defer stream.Close()
 
-	// Create temp file for download
 	tempFile, err := os.CreateTemp("", "youtube_*.mp4")
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create temp file: %w", err)
 	}
 	tempPath := tempFile.Name()
-	defer tempFile.Close()
 
-	// Download to temp file
-	logger.Infof("Downloading YouTube video to temp file...")
 	if _, err = io.Copy(tempFile, stream); err != nil {
+		tempFile.Close() // Ensure file is closed on error
 		os.Remove(tempPath)
 		return "", "", fmt.Errorf("failed to download video: %w", err)
 	}
+	tempFile.Close() // Close before returning so caller can move it on Windows
 
 	return tempPath, video.Title, nil
 }
@@ -539,12 +564,34 @@ func RipPMVHaven(pageURL string) (string, string, error) {
 			}
 		})
 	}
-
 	if videoURL == "" {
 		return "", "", fmt.Errorf("could not find video URL on %s", pageURL)
 	}
 
 	return videoURL, title, nil
+}
+
+type userAgentRoundTripper struct {
+	http.RoundTripper
+	UserAgent string
+}
+
+func (rt *userAgentRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if rt.UserAgent != "" {
+		req.Header.Set("User-Agent", rt.UserAgent)
+	}
+
+	// Debug: Log if cookies are being sent
+	if cookies := req.Header.Get("Cookie"); cookies != "" {
+		logger.Debugf("Sending cookies to %s: %s...", req.URL.Host, cookies[:strings.Index(cookies, "=")+5])
+	} else {
+		// If no Cookie header, check if Jar has them
+		if rt.RoundTripper == nil {
+			// fallback
+		}
+	}
+
+	return http.DefaultTransport.RoundTrip(req)
 }
 
 // LoadCookies parses a Netscape/curl format cookies file into a CookieJar
@@ -556,18 +603,22 @@ func LoadCookies(jar *cookiejar.Jar, filepath string) error {
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
+	count := 0
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "#") || strings.TrimSpace(line) == "" {
 			continue
 		}
 
-		parts := strings.Split(line, "\t")
+		// Use regex for more robust splitting (any whitespace/tab)
+		re := regexp.MustCompile(`\s+`)
+		parts := re.Split(line, -1)
 		if len(parts) < 7 {
 			continue
 		}
 
 		domain := parts[0]
+		// rawDomainUsed := parts[1]
 		// path := parts[2]
 		rawSecure := parts[3]
 		expiresStr := parts[4]
@@ -579,20 +630,34 @@ func LoadCookies(jar *cookiejar.Jar, filepath string) error {
 
 		// Create the cookie
 		cookie := &http.Cookie{
-			Name:    name,
-			Value:   value,
-			Domain:  domain,
-			Path:    "/",
-			Expires: time.Unix(expires, 0),
-			Secure:  secure,
+			Name:   name,
+			Value:  value,
+			Domain: domain,
+			Path:   "/",
+			Secure: secure,
 		}
 
-		// Set the cookie for both http and https for the domain
-		u, _ := url.Parse("https://" + strings.TrimPrefix(domain, "."))
-		jar.SetCookies(u, []*http.Cookie{cookie})
-		u2, _ := url.Parse("http://" + strings.TrimPrefix(domain, "."))
-		jar.SetCookies(u2, []*http.Cookie{cookie})
+		// Handle session cookies (expiry 0 in Netscape format)
+		if expires > 0 {
+			cookie.Expires = time.Unix(expires, 0)
+		}
+
+		// Set the cookie for common YouTube domains to be safe
+		domains := []string{
+			strings.TrimPrefix(domain, "."),
+			"youtube.com",
+			"www.youtube.com",
+			"m.youtube.com",
+			"googlevideo.com",
+		}
+
+		for _, d := range domains {
+			u, _ := url.Parse("https://" + d)
+			jar.SetCookies(u, []*http.Cookie{cookie})
+		}
+		count++
 	}
+	logger.Infof("Successfully parsed %d cookies from file", count)
 
 	return scanner.Err()
 }
