@@ -49,10 +49,16 @@ function PersonPicker({ onPersonSelect }) {
                     <div className="person-loading">Loading...</div>
                 ) : people.length > 0 ? (
                     people.map(person => (
-                        <button
+                        <a
                             key={person.id}
+                            href={`/people/${person.id}`}
                             className="person-item"
-                            onClick={() => onPersonSelect(person)}
+                            onClick={(e) => {
+                                if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+                                    e.preventDefault();
+                                    onPersonSelect(person);
+                                }
+                            }}
                         >
                             <div className="person-avatar">
                                 {person.thumbnail_path ? (
@@ -67,7 +73,7 @@ function PersonPicker({ onPersonSelect }) {
                                 <span className="person-name">{person.name}</span>
                                 <span className="person-count">{person.gallery_count} galleries</span>
                             </div>
-                        </button>
+                        </a>
                     ))
                 ) : (
                     <div className="person-empty">No people found</div>

@@ -221,6 +221,10 @@
     transition: all var(--transition-fast);
     border: 1px solid var(--color-border-subtle);
     position: relative;
+    /* Remove default link styling */
+    text-decoration: none;
+    color: inherit;
+    display: block;
 }
 
 .gallery-card:hover {

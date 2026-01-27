@@ -149,3 +149,35 @@
     background: var(--color-accent-primary, #3b82f6);
     transition: width 0.3s ease;
 }
+
+/* Delete button for video cards */
+.video-card .delete-image-btn {
+    position: absolute;
+    top: var(--spacing-sm);
+    right: var(--spacing-sm);
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(244, 67, 54, 0.9);
+    color: white;
+    border: none;
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity var(--transition-base), transform var(--transition-fast);
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+}
+
+.video-card:hover .delete-image-btn {
+    opacity: 1;
+}
+
+.video-card .delete-image-btn:hover {
+    transform: scale(1.1);
+    background: rgba(211, 47, 47, 1);
+}

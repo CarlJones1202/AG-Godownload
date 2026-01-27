@@ -135,5 +135,8 @@ func IsVideoURL(url string) bool {
 	if strings.Contains(url, "pmvhaven.com") {
 		return true
 	}
+	if strings.Contains(url, "youtube.com") || strings.Contains(url, "youtu.be") {
+		return true
+	}
 	return false
 }

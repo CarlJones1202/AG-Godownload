@@ -315,7 +315,7 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-// DeleteImage removes an image from both database and filesystem
+// DeleteImage removes an image or video from both database and filesystem
 func DeleteImage(c *gin.Context) {
 	idStr := c.Param("imageId")
 	id, err := strconv.Atoi(idStr)
@@ -324,17 +324,28 @@ func DeleteImage(c *gin.Context) {
 		return
 	}
 
-	// Get image details first
-	// Get image details first (preload galleries and source)
+	// Get image details first (preload galleries, source for videos)
 	var image models.Image
-	if err := database.DB.Preload("Galleries.Source").First(&image, id).Error; err != nil {
+	if err := database.DB.Preload("Galleries.Source").Preload("Source").First(&image, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Image not found"})
 		return
 	}
 
 	// Determine source directory
 	sourceDir := "uncategorized"
-	if len(image.Galleries) > 0 {
+
+	// For videos, check direct Source association first
+	if image.Type == "video" && image.SourceID != nil {
+		if image.Source != nil && image.Source.Name != "" {
+			sourceDir = services.SanitizeDirectoryName(image.Source.Name)
+		} else {
+			var source models.Source
+			if err := database.DB.First(&source, *image.SourceID).Error; err == nil {
+				sourceDir = services.SanitizeDirectoryName(source.Name)
+			}
+		}
+	} else if len(image.Galleries) > 0 {
+		// For images, use gallery source
 		if image.Galleries[0].Source != nil {
 			sourceDir = services.SanitizeDirectoryName(image.Galleries[0].Source.Name)
 		} else if image.Galleries[0].SourceID != nil {
@@ -345,31 +356,67 @@ func DeleteImage(c *gin.Context) {
 		}
 	}
 
-	// Delete from filesystem
-	// Try constructed path first
-	imagePath := filepath.Join(services.UploadsDir, sourceDir, filepath.Base(image.Filename))
+	baseFilename := filepath.Base(image.Filename)
 
-	// Fallback to direct check if not found (in case it was stored as relative path)
-	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
-		directPath := filepath.Join(services.UploadsDir, image.Filename)
-		if _, err := os.Stat(directPath); err == nil {
-			imagePath = directPath
-			// If we found it via direct path which includes directory, we might need to adjust logic
-			// But usually directPath is for legacy cases.
-			// Re-eval sourceDir for thumbnail? If image.Filename was "source/file.jpg", Base is "file.jpg".
+	// Handle video deletion
+	if image.Type == "video" {
+		// Delete video file
+		videoPath := filepath.Join(services.UploadsDir, sourceDir, baseFilename)
+
+		// Fallback to direct check if not found
+		if _, err := os.Stat(videoPath); os.IsNotExist(err) {
+			directPath := filepath.Join(services.UploadsDir, image.Filename)
+			if _, err := os.Stat(directPath); err == nil {
+				videoPath = directPath
+			}
 		}
-	}
 
-	if err := services.DeleteFile(imagePath); err != nil {
-		// Log but don't fail if file doesn't exist
-		println("Warning: Failed to delete image file:", err.Error())
-	}
+		if err := services.DeleteFile(videoPath); err != nil {
+			println("Warning: Failed to delete video file:", err.Error())
+		}
 
-	// Delete thumbnail
-	// Delete thumbnail
-	thumbnailPath := filepath.Join(services.UploadsDir, sourceDir, "thumbnails", filepath.Base(image.Filename))
-	if err := services.DeleteFile(thumbnailPath); err != nil {
-		println("Warning: Failed to delete thumbnail:", err.Error())
+		// Delete video thumbnail (video files have .jpg appended)
+		thumbnailFilename := baseFilename + ".jpg"
+		thumbnailPath := filepath.Join(services.UploadsDir, sourceDir, "thumbnails", thumbnailFilename)
+		if err := services.DeleteFile(thumbnailPath); err != nil {
+			println("Warning: Failed to delete video thumbnail:", err.Error())
+		}
+
+		// Delete trickplay files
+		baseNameWithoutExt := strings.TrimSuffix(baseFilename, filepath.Ext(baseFilename))
+
+		// Delete trickplay VTT
+		trickplayVTT := filepath.Join(services.UploadsDir, sourceDir, "trickplay", baseNameWithoutExt+".vtt")
+		if err := services.DeleteFile(trickplayVTT); err != nil {
+			println("Warning: Failed to delete trickplay VTT:", err.Error())
+		}
+
+		// Delete trickplay sprite
+		trickplaySprite := filepath.Join(services.UploadsDir, sourceDir, "trickplay", baseNameWithoutExt+"_sprite.jpg")
+		if err := services.DeleteFile(trickplaySprite); err != nil {
+			println("Warning: Failed to delete trickplay sprite:", err.Error())
+		}
+	} else {
+		// Handle image deletion (original logic)
+		imagePath := filepath.Join(services.UploadsDir, sourceDir, baseFilename)
+
+		// Fallback to direct check if not found
+		if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+			directPath := filepath.Join(services.UploadsDir, image.Filename)
+			if _, err := os.Stat(directPath); err == nil {
+				imagePath = directPath
+			}
+		}
+
+		if err := services.DeleteFile(imagePath); err != nil {
+			println("Warning: Failed to delete image file:", err.Error())
+		}
+
+		// Delete image thumbnail
+		thumbnailPath := filepath.Join(services.UploadsDir, sourceDir, "thumbnails", baseFilename)
+		if err := services.DeleteFile(thumbnailPath); err != nil {
+			println("Warning: Failed to delete thumbnail:", err.Error())
+		}
 	}
 
 	// Delete from database

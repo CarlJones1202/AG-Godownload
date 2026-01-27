@@ -227,9 +227,12 @@ function GalleryDetail() {
 
     return (
         <div className="gallery-detail">
-            <button className="back-btn" onClick={() => navigate('/galleries')}>
+            <a href="/galleries" className="back-btn" onClick={(e) => {
+                e.preventDefault();
+                navigate('/galleries');
+            }}>
                 ← Back to Galleries
-            </button>
+            </a>
 
             <div className="gallery-header-layout">
                 {/* Left Column: Cover Info */}
@@ -356,9 +359,18 @@ function GalleryDetail() {
                             {gallery.people && gallery.people.length > 0 ? (
                                 gallery.people.map(person => (
                                     <div key={person.id} className="person-chip">
-                                        <span onClick={() => navigate(`/people/${person.id}`)} className="person-name">
+                                        <a
+                                            href={`/people/${person.id}`}
+                                            className="person-name"
+                                            onClick={(e) => {
+                                                if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+                                                    e.preventDefault();
+                                                    navigate(`/people/${person.id}`);
+                                                }
+                                            }}
+                                        >
                                             {person.name}
-                                        </span>
+                                        </a>
                                         <button onClick={() => handleUntagPerson(person.id)} className="remove-person">
                                             ✕
                                         </button>

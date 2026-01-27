@@ -131,10 +131,17 @@ function PersonList({ people, onRefresh, meta, onPageChange }) {
             ) : (
                 <div className="people-grid">
                     {people.map((person) => (
-                        <div
+                        <a
                             key={person.id}
+                            href={`/people/${person.id}`}
                             className="person-card"
-                            onClick={() => navigate(`/people/${person.id}`)}
+                            onClick={(e) => {
+                                // Only prevent default for regular left-clicks
+                                if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+                                    e.preventDefault();
+                                    navigate(`/people/${person.id}`);
+                                }
+                            }}
                         >
                             <div className="person-thumbnail">
                                 {person.thumbnail_path ? (
@@ -188,7 +195,7 @@ function PersonList({ people, onRefresh, meta, onPageChange }) {
                                     Delete
                                 </button>
                             </div>
-                        </div>
+                        </a>
                     ))}
                 </div>
             )}

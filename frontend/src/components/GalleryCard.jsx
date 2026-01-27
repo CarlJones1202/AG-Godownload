@@ -11,7 +11,18 @@ function GalleryCard({ gallery, onClick, actionNode, showProvider = true }) {
         : null
 
     return (
-        <div className="gallery-card" onClick={onClick}>
+        <a
+            href={`/galleries/${gallery.id}`}
+            className="gallery-card"
+            onClick={(e) => {
+                // Only prevent default for regular left-clicks
+                // Allow middle-click, Ctrl+click, Cmd+click to open in new tab
+                if (e.button === 0 && !e.ctrlKey && !e.metaKey && onClick) {
+                    e.preventDefault();
+                    onClick();
+                }
+            }}
+        >
             <div className={`gallery-thumbnail ${isVideo ? 'video-thumbnail' : ''}`}>
                 {thumbnailPath ? (
                     <div className={`gallery-thumb-inner ${isVideo ? "video-thumb-container" : ""}`}>
@@ -42,7 +53,7 @@ function GalleryCard({ gallery, onClick, actionNode, showProvider = true }) {
             </div>
 
             {actionNode}
-        </div>
+        </a>
     )
 }
 

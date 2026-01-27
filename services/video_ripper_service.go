@@ -13,7 +13,97 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/kkdai/youtube/v2"
 )
+
+// RipYouTube downloads a YouTube video and returns the file path and title
+func RipYouTube(pageURL string) (string, string, error) {
+	logger.Infof("Starting RipYouTube for %s", pageURL)
+
+	// Create YouTube client
+	client := youtube.Client{}
+
+	// Get video info
+	video, err := client.GetVideo(pageURL)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get YouTube video info: %w", err)
+	}
+
+	logger.Infof("YouTube video title: %s", video.Title)
+
+	// Get formats with audio
+	formats := video.Formats.WithAudioChannels()
+	if len(formats) == 0 {
+		return "", "", fmt.Errorf("no formats with audio found for video")
+	}
+
+	// Select highest quality format
+	// Formats are typically ordered, but let's find the one with highest quality
+	var bestFormat *youtube.Format
+	var maxQuality int
+
+	for i := range formats {
+		format := &formats[i]
+		// Prefer formats with higher quality (resolution)
+		quality := format.Width * format.Height
+		if quality > maxQuality {
+			maxQuality = quality
+			bestFormat = format
+		}
+	}
+
+	if bestFormat == nil {
+		// Fallback to first format
+		bestFormat = &formats[0]
+	}
+
+	logger.Infof("Selected format: %s (Quality: %dx%d, Bitrate: %d)",
+		bestFormat.MimeType, bestFormat.Width, bestFormat.Height, bestFormat.Bitrate)
+
+	// Get stream
+	stream, _, err := client.GetStream(video, bestFormat)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get video stream: %w", err)
+	}
+	defer stream.Close()
+
+	// Create temp file for download
+	tempFile, err := os.CreateTemp("", "youtube_*.mp4")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tempPath := tempFile.Name()
+	defer os.Remove(tempPath) // Clean up temp file
+
+	// Download to temp file
+	logger.Infof("Downloading YouTube video to temp file...")
+	_, err = io.Copy(tempFile, stream)
+	tempFile.Close()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to download video: %w", err)
+	}
+
+	// Calculate hash of downloaded file
+	f, err := os.Open(tempPath)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to open temp file for hashing: %w", err)
+	}
+	defer f.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, f); err != nil {
+		return "", "", fmt.Errorf("failed to hash video: %w", err)
+	}
+	hashStr := hex.EncodeToString(hash.Sum(nil))
+	f.Close()
+
+	// Determine final filename and path
+	filename := hashStr + ".mp4"
+
+	// Return the temp path and title
+	// The caller will handle moving to final location
+	return tempPath, video.Title, nil
+}
 
 // RipTnaFlix extracts the direct video URL and title from a TnaFlix page
 func RipTnaFlix(pageURL string) (string, string, error) {

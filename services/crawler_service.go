@@ -23,20 +23,6 @@ func CrawlSource(sourceID uint) error {
 	// Update status to crawling
 	database.DB.Model(&source).Updates(models.Source{Status: "crawling", LastCheckedAt: time.Now()})
 
-	// Find or create gallery for this source
-	var gallery models.Gallery
-	if err := database.DB.Where("source_id = ?", source.ID).First(&gallery).Error; err != nil {
-		// Create if not exists
-		gallery = models.Gallery{
-			Name:     source.Name,
-			SourceID: &source.ID,
-		}
-		if err := database.DB.Create(&gallery).Error; err != nil {
-			database.DB.Model(&source).Update("Status", "error")
-			return err
-		}
-	}
-
 	// Check if source is a local file
 	if IsVideoFile(source.Location) || IsLocalPath(source.Location) {
 		logger.Infof("Processing local source: %s", source.Location)
@@ -50,12 +36,26 @@ func CrawlSource(sourceID uint) error {
 	// Check if source is a video URL
 	if IsVideoURL(source.Location) {
 		logger.Infof("Processing video URL: %s", source.Location)
-		if err := ProcessVideoSource(source, gallery); err != nil {
+		if err := ProcessVideoSource(source); err != nil {
 			database.DB.Model(&source).Update("Status", "error")
 			return err
 		}
 		database.DB.Model(&source).Update("Status", "idle")
 		return nil
+	}
+
+	// For image gallery sources, find or create gallery
+	var gallery models.Gallery
+	if err := database.DB.Where("source_id = ?", source.ID).First(&gallery).Error; err != nil {
+		// Create if not exists
+		gallery = models.Gallery{
+			Name:     source.Name,
+			SourceID: &source.ID,
+		}
+		if err := database.DB.Create(&gallery).Error; err != nil {
+			database.DB.Model(&source).Update("Status", "error")
+			return err
+		}
 	}
 
 	// Fetch the URL using WireGuard if needed
@@ -321,12 +321,14 @@ func CrawlSource(sourceID uint) error {
 }
 
 // ProcessVideoSource handles video URL sources
-func ProcessVideoSource(source models.Source, gallery models.Gallery) error {
+func ProcessVideoSource(source models.Source) error {
 	logger.Infof("Processing video source: %s", source.Location)
 
 	// Extract video URL based on the hosting site
 	var videoURL, videoTitle string
 	var err error
+	var isLocalFile bool
+	var localPath string
 
 	if strings.Contains(source.Location, "tnaflix.com") {
 		videoURL, videoTitle, err = RipTnaFlix(source.Location)
@@ -344,40 +346,44 @@ func ProcessVideoSource(source models.Source, gallery models.Gallery) error {
 		if err != nil {
 			return fmt.Errorf("failed to extract PMVHaven video: %w", err)
 		}
+	} else if strings.Contains(source.Location, "youtube.com") || strings.Contains(source.Location, "youtu.be") {
+		logger.Infof("Detected YouTube URL, invoking RipYouTube...")
+		localPath, videoTitle, err = RipYouTube(source.Location)
+		if err != nil {
+			return fmt.Errorf("failed to download YouTube video: %w", err)
+		}
+		isLocalFile = true
 	} else {
 		// For other video sites, we could add more rippers here
 		return fmt.Errorf("unsupported video site: %s", source.Location)
 	}
 
-	logger.Infof("Extracted video URL: %s", videoURL)
+	logger.Infof("Extracted video title: %s", videoTitle)
 
-	// Check if video already exists in database
-	var images []models.Image
-	if err := database.DB.Where("download_url = ?", videoURL).Limit(1).Find(&images).Error; err == nil && len(images) > 0 {
-		existingImage := images[0]
-		logger.Infof("Video already exists in database: %s", videoURL)
-
-		// Associate with this gallery if not already associated
-		var count int64
-		database.DB.Model(&models.Image{}).
-			Joins("JOIN image_galleries ON image_galleries.image_id = images.id").
-			Where("image_galleries.gallery_id = ? AND images.id = ?", gallery.ID, existingImage.ID).
-			Count(&count)
-
-		if count == 0 {
-			if err := database.DB.Model(&existingImage).Association("Galleries").Append(&gallery); err != nil {
-				logger.Warnf("Failed to associate existing video with gallery: %v", err)
-			} else {
-				logger.Infof("Associated existing video with gallery")
-			}
+	// Check if video already exists in database (by URL for remote, skip for local)
+	if !isLocalFile {
+		var images []models.Image
+		if err := database.DB.Where("download_url = ?", videoURL).Limit(1).Find(&images).Error; err == nil && len(images) > 0 {
+			logger.Infof("Video already exists in database: %s", videoURL)
+			return nil
 		}
-		return nil
 	}
 
-	// Download the video
-	result, err := DownloadVideo(videoURL, source.Name, source.Location, videoTitle)
-	if err != nil {
-		return fmt.Errorf("failed to download video: %w", err)
+	var result *DownloadImageResult
+
+	if isLocalFile {
+		// For YouTube (and future local downloads), use ImportLocalVideo
+		result, err = ImportLocalVideo(localPath, source.Name)
+		if err != nil {
+			return fmt.Errorf("failed to import video: %w", err)
+		}
+		videoURL = source.Location // Use original URL as download URL
+	} else {
+		// Download the video from URL
+		result, err = DownloadVideo(videoURL, source.Name, source.Location, videoTitle)
+		if err != nil {
+			return fmt.Errorf("failed to download video: %w", err)
+		}
 	}
 
 	logger.Infof("Successfully downloaded video to: %s", result.Path)
@@ -388,9 +394,8 @@ func ProcessVideoSource(source models.Source, gallery models.Gallery) error {
 		relPath = filepath.Base(result.Path)
 	}
 
-	// Create image record with Type="video"
+	// Create image record with Type="video" (no gallery association)
 	image := models.Image{
-		GalleryID:      gallery.ID,
 		SourceID:       &source.ID,
 		Filename:       relPath,
 		OriginalURL:    source.Location,
@@ -402,7 +407,6 @@ func ProcessVideoSource(source models.Source, gallery models.Gallery) error {
 		SizeMB:         result.SizeMB,
 		DominantColors: result.DominantColors,
 		Type:           "video",
-		Galleries:      []*models.Gallery{&gallery},
 	}
 
 	if err := database.DB.Create(&image).Error; err != nil {

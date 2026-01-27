@@ -302,9 +302,12 @@ function PersonDetail() {
 
     return (
         <div className="person-detail">
-            <button className="back-btn" onClick={() => navigate('/people')}>
+            <a href="/people" className="back-btn" onClick={(e) => {
+                e.preventDefault();
+                navigate('/people');
+            }}>
                 ← Back to People
-            </button>
+            </a>
 
             <div className="person-profile-container">
                 {/* Left Sidebar: Photo & Social */}
