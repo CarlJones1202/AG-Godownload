@@ -20,7 +20,8 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
     const [showControls, setShowControls] = useState(true)
     const [showMetadata, setShowMetadata] = useState(false) // Sidebar state
     const [isFullscreen, setIsFullscreen] = useState(false)
-    const [vrMode, setVrMode] = useState(null) // null, '180', '360'
+    const [vrMode, setVrMode] = useState(video.vr_mode || null) // Initialized from DB
+    const [isPip, setIsPip] = useState(false)
 
     // Autohide controls logic
     const controlsTimeoutRef = useRef(null)
@@ -124,12 +125,40 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
         }
     }
 
-    const toggleVrMode = () => {
-        setVrMode(prev => {
-            if (prev === null) return '180'
-            if (prev === '180') return '360'
-            return null
-        })
+    const toggleVrMode = async () => {
+        const nextMode = vrMode === null ? '180' : (vrMode === '180' ? '360' : null);
+        setVrMode(nextMode);
+
+        // Persist to DB
+        try {
+            await fetch(`/api/images/${video.id}/vr-mode`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ vr_mode: nextMode || '' })
+            });
+        } catch (err) {
+            console.error('Failed to save VR mode:', err);
+        }
+    }
+
+    const togglePip = async () => {
+        if (!videoRef.current) return;
+        try {
+            if (document.pictureInPictureElement) {
+                await document.exitPictureInPicture();
+                setIsPip(false);
+            } else {
+                // Exit fullscreen if active so we can navigate
+                if (document.fullscreenElement) {
+                    await document.exitFullscreen();
+                    setIsFullscreen(false);
+                }
+                await videoRef.current.requestPictureInPicture();
+                setIsPip(true);
+            }
+        } catch (err) {
+            console.error('PiP failed:', err);
+        }
     }
 
     // Timeline logic
@@ -304,6 +333,11 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
                                     </svg>
                                 </button>
                             )}
+                            <button className="icon-btn" onClick={togglePip} title="Picture in Picture">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z" />
+                                </svg>
+                            </button>
                             <button className="icon-btn" onClick={toggleFullscreen} title="Fullscreen">
                                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2-2h3" />
@@ -357,7 +391,7 @@ function VideoPlayer({ video, onClose, onNext, onPrev }) {
                     </div>
                 </div>
             </div>
-        </div>
+        </div >
     )
 }
 

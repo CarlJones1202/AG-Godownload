@@ -454,3 +454,38 @@ func ToggleFavorite(c *gin.Context) {
 		"is_favorite": image.IsFavorite,
 	})
 }
+
+// UpdateImageVrMode updates the VR mode for a video
+func UpdateImageVrMode(c *gin.Context) {
+	idStr := c.Param("imageId")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid image ID"})
+		return
+	}
+
+	var req struct {
+		VRMode string `json:"vr_mode"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var image models.Image
+	if err := database.DB.First(&image, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Video not found"})
+		return
+	}
+
+	image.VRMode = req.VRMode
+	if err := database.DB.Save(&image).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update VR mode"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "VR mode updated",
+		"vr_mode": image.VRMode,
+	})
+}
