@@ -202,7 +202,7 @@ func VerifyDownloadedVideos() error {
 				go func(t recoveryTask) {
 					defer wg.Done()
 					UpdateVideoActiveCount(1)
-					AddActiveVideoDownload(t.ID, t.Title, t.DownloadURL)
+					AddActiveVideoDownload(t.ID, t.Title, t.DownloadURL, t.SourceName)
 					sem <- struct{}{}
 					defer func() {
 						<-sem

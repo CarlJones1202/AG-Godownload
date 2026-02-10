@@ -16,6 +16,7 @@ type ActiveSourceInfo struct {
 	ID               uint   `json:"id"`
 	Name             string `json:"name"`
 	Location         string `json:"location"`
+	SourceName       string `json:"source_name,omitempty"`
 	DownloadProgress int    `json:"download_progress"`
 	DownloadedItems  int    `json:"downloaded_items"`
 	TotalItems       int    `json:"total_items"`
@@ -132,12 +133,13 @@ func UpdateProviderStatus(provider string, active int, max int) {
 	TriggerBroadcast()
 }
 
-func AddActiveVerificationDownload(id uint, name string, location string) {
+func AddActiveVerificationDownload(id uint, name string, location string, sourceName string) {
 	statusMutex.Lock()
 	GlobalStatus.Verification.ActiveDownloads = append(GlobalStatus.Verification.ActiveDownloads, ActiveSourceInfo{
-		ID:       id,
-		Name:     name,
-		Location: location,
+		ID:         id,
+		Name:       name,
+		Location:   location,
+		SourceName: sourceName,
 	})
 	statusMutex.Unlock()
 	TriggerBroadcast()
@@ -186,12 +188,13 @@ func UpdateVideoActiveCount(delta int32) {
 	TriggerBroadcast()
 }
 
-func AddActiveVideoDownload(id uint, name string, location string) {
+func AddActiveVideoDownload(id uint, name string, location string, sourceName string) {
 	statusMutex.Lock()
 	GlobalStatus.Videos.ActiveDownloads = append(GlobalStatus.Videos.ActiveDownloads, ActiveSourceInfo{
-		ID:       id,
-		Name:     name,
-		Location: location,
+		ID:         id,
+		Name:       name,
+		Location:   location,
+		SourceName: sourceName,
 	})
 	statusMutex.Unlock()
 	TriggerBroadcast()

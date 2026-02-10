@@ -346,7 +346,7 @@ function App() {
                                 onRefresh={() => fetchSources(sourcePage)}
                                 meta={sourceMeta}
                                 onPageChange={handleSourcePageChange}
-                                onSearch={fetchSources}
+                                onSearch={(query) => fetchSources(1, query)}
                                 searchQuery={searchParams.get('q') || ''}
                             />
                         } />

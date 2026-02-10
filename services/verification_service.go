@@ -229,7 +229,7 @@ func VerifyDownloadedImages() error {
 
 					sem <- struct{}{}
 					UpdateProviderStatus(provider, len(sem), cap(sem))
-					AddActiveVerificationDownload(t.ID, filepath.Base(t.CurrentDBPath), t.DownloadURL)
+					AddActiveVerificationDownload(t.ID, filepath.Base(t.CurrentDBPath), t.DownloadURL, t.SourceName)
 					defer func() {
 						<-sem
 						UpdateProviderStatus(provider, len(sem), cap(sem))

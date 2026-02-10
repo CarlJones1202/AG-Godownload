@@ -313,9 +313,12 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
                                     </div>
                                     {globalStatus.verification.active_downloads?.length > 0 && (
                                         <div className="active-item-list">
-                                            {globalStatus.verification.active_downloads.map(dl => (
-                                                <div key={dl.id} className="active-item-mini">
-                                                    <span className="mini-filename">{dl.name}</span>
+                                            {globalStatus.verification.active_downloads.map((dl, idx) => (
+                                                <div key={`${dl.id}-${idx}`} className="active-item-mini">
+                                                    <div className="mini-top">
+                                                        <span className="mini-filename">{dl.name}</span>
+                                                        {dl.source_name && <span className="mini-source-tag">{dl.source_name}</span>}
+                                                    </div>
                                                     <span className="mini-url">{dl.location}</span>
                                                 </div>
                                             ))}
@@ -346,9 +349,12 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
                                     </div>
                                     {globalStatus.videos.active_downloads?.length > 0 && (
                                         <div className="active-item-list">
-                                            {globalStatus.videos.active_downloads.map(dl => (
-                                                <div key={dl.id} className="active-item-mini">
-                                                    <span className="mini-filename">{dl.name}</span>
+                                            {globalStatus.videos.active_downloads.map((dl, idx) => (
+                                                <div key={`${dl.id}-${idx}`} className="active-item-mini">
+                                                    <div className="mini-top">
+                                                        <span className="mini-filename">{dl.name}</span>
+                                                        {dl.source_name && <span className="mini-source-tag">{dl.source_name}</span>}
+                                                    </div>
                                                     <span className="mini-url">{dl.location}</span>
                                                 </div>
                                             ))}
