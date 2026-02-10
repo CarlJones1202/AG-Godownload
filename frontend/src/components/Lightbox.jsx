@@ -39,8 +39,8 @@ function Lightbox({ image, onClose, onNext, onPrev, currentIndex, totalImages })
 
     return (
         <div className={`lightbox ${showInfo ? 'info-open' : ''}`} onClick={onClose}>
-            {/* Main Content Area */}
-            <div className="lightbox-main" onClick={(e) => e.stopPropagation()}>
+            {/* Main Content Area - Click here (blank space) will now close since we removed e.stopPropagation() */}
+            <div className="lightbox-main">
                 <div className="lightbox-content">
                     {(image.type === 'video' || (typeof isVideo !== 'undefined' && isVideo)) ? (
                         <video
@@ -48,6 +48,7 @@ function Lightbox({ image, onClose, onNext, onPrev, currentIndex, totalImages })
                             controls
                             autoPlay
                             className="lightbox-media"
+                            onClick={(e) => e.stopPropagation()}
                         >
                             {image.trickplay_vtt && (
                                 <track
@@ -62,17 +63,18 @@ function Lightbox({ image, onClose, onNext, onPrev, currentIndex, totalImages })
                             src={image.web_path || `/api/images/${image.filename}`}
                             alt={`Image ${image.id}`}
                             className="lightbox-media"
+                            onClick={(e) => e.stopPropagation()}
                         />
                     )}
                 </div>
 
                 {/* Navigation & Controls */}
-                <button className="lightbox-nav lightbox-prev" onClick={onPrev} title="Previous">
+                <button className="lightbox-nav lightbox-prev" onClick={(e) => { e.stopPropagation(); onPrev(); }} title="Previous">
                     <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="15 18 9 12 15 6"></polyline>
                     </svg>
                 </button>
-                <button className="lightbox-nav lightbox-next" onClick={onNext} title="Next">
+                <button className="lightbox-nav lightbox-next" onClick={(e) => { e.stopPropagation(); onNext(); }} title="Next">
                     <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="9 18 15 12 9 6"></polyline>
                     </svg>
