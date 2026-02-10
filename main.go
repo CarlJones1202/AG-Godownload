@@ -63,13 +63,11 @@ func main() {
 		}
 	}()
 
-	// Start background crawler worker
+	// Start workers
 	services.StartCrawlerWorker()
-	logger.Info("Background crawler worker started")
-
-	// Start AI Tag worker
-	// services.StartAITagWorker()
-	logger.Info("Background AI Tag worker started")
+	services.StartAITagWorker()
+	services.StartWebSocketHub()
+	logger.Info("Background workers started")
 
 	r := gin.Default()
 
@@ -78,6 +76,9 @@ func main() {
 	r.GET("/sources", handlers.GetSources)
 	r.POST("/sources/:id/crawl", handlers.CrawlSource)
 	r.DELETE("/sources/:id", handlers.DeleteSource)
+	r.PATCH("/sources/:id/priority", handlers.UpdateSourcePriority)
+	r.GET("/downloads/status", handlers.GetDownloadStatus)
+	r.GET("/ws", services.HandleWebSocket)
 
 	r.POST("/galleries", handlers.CreateGallery)
 	r.GET("/galleries", handlers.GetGalleries)

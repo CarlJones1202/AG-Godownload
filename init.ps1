@@ -47,7 +47,21 @@ if (Get-Command "ffmpeg" -ErrorAction SilentlyContinue) {
     Write-Warning-Host "Restart your terminal after this script completes."
 }
 
-# 4. Install Go
+# 4. Install yt-dlp
+Write-Step "Checking for yt-dlp..."
+if (-not (Get-Command "yt-dlp" -ErrorAction SilentlyContinue)) {
+    Write-Host "Installing yt-dlp via winget..."
+    winget install --id yt-dlp.yt-dlp --silent --accept-package-agreements --accept-source-agreements
+    # Refresh path
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+}
+if (Get-Command "yt-dlp" -ErrorAction SilentlyContinue) {
+    Write-Success "yt-dlp is ready."
+} else {
+    Write-Warning-Host "yt-dlp was installed but 'yt-dlp' command is not in the current session path."
+}
+
+# 5. Install Go
 Write-Step "Checking for Go..."
 if (-not (Get-Command "go" -ErrorAction SilentlyContinue)) {
     Write-Host "Installing Go via winget..."

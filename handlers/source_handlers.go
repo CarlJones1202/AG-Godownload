@@ -169,3 +169,40 @@ func DeleteSource(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Source deleted successfully"})
 }
+
+func UpdateSourcePriority(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid source ID"})
+		return
+	}
+
+	var input struct {
+		Priority int `json:"priority"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := database.DB.Model(&models.Source{}).Where("id = ?", id).Update("priority", input.Priority).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update priority"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Priority updated", "priority": input.Priority})
+}
+
+func GetDownloadStatus(c *gin.Context) {
+	status := services.GetGlobalDownloadStatus()
+
+	// Add currently crawling sources from DB for complete picture
+	var activeSources []models.Source
+	database.DB.Where("status = ?", "crawling").Find(&activeSources)
+
+	// We could also refine the status struct to include source details
+	// but for now, the UI can match by ID from the sources list.
+
+	c.JSON(http.StatusOK, status)
+}

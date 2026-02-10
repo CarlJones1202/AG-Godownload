@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Routes, Route, NavLink, useLocation, useSearchParams, useNavigate } from 'react-router-dom'
 import './App.css'
 import GalleryList from './components/GalleryList'
@@ -60,7 +60,7 @@ function App() {
         }
     }, [location.pathname, searchParams])
 
-    const fetchGalleries = async (page = 1) => {
+    const fetchGalleries = useCallback(async (page = 1) => {
         setLoading(true)
         try {
             const response = await fetch(`/api/galleries?page=${page}&limit=50`)
@@ -77,9 +77,9 @@ function App() {
         } finally {
             setLoading(false)
         }
-    }
+    }, [])
 
-    const fetchSources = async (page = 1, search = '') => {
+    const fetchSources = useCallback(async (page = 1, search = '') => {
         // Only set global loading if we don't have data yet (initial load)
         if (sources.length === 0) {
             setLoading(true)
@@ -100,7 +100,7 @@ function App() {
         } finally {
             setLoading(false)
         }
-    }
+    }, [sources.length])
 
     const fetchImages = async (page = 1) => {
         setLoading(true)
@@ -346,7 +346,7 @@ function App() {
                                 onRefresh={() => fetchSources(sourcePage)}
                                 meta={sourceMeta}
                                 onPageChange={handleSourcePageChange}
-                                onSearch={(query) => fetchSources(1, query)}
+                                onSearch={fetchSources}
                                 searchQuery={searchParams.get('q') || ''}
                             />
                         } />

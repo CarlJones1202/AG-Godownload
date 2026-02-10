@@ -34,6 +34,9 @@ func VerifyDownloadedVideos() error {
 	}
 
 	go func() {
+		SetVideoVerificationRunning(true, len(videos))
+		defer SetVideoVerificationRunning(false, 0)
+
 		missingCount := 0
 		var recoveredCount int32 = 0
 		var skippedCount int32 = 0
@@ -89,6 +92,7 @@ func VerifyDownloadedVideos() error {
 						logger.Errorf("Failed to update video %d in batch: %v", res.ID, err)
 					} else {
 						atomic.AddInt32(&recoveredCount, 1)
+						IncVideoVerificationRecovered()
 					}
 				}
 				tx.Commit()
@@ -114,10 +118,12 @@ func VerifyDownloadedVideos() error {
 
 		// Phase 1: scan and collect missing files
 		for _, video := range videos {
+			IncVideoVerificationProcessed()
 			expectedFullPath := filepath.Join(UploadsDir, video.Filename)
 
 			if _, err := os.Stat(expectedFullPath); os.IsNotExist(err) {
 				missingCount++
+				IncVideoVerificationMissing()
 				fmt.Printf("Missing video: %s (ID: %d)\n", video.Filename, video.ID)
 
 				// Check if this is a local video file
@@ -195,8 +201,14 @@ func VerifyDownloadedVideos() error {
 				wg.Add(1)
 				go func(t recoveryTask) {
 					defer wg.Done()
+					UpdateVideoActiveCount(1)
+					AddActiveVideoDownload(t.ID, t.Title, t.DownloadURL)
 					sem <- struct{}{}
-					defer func() { <-sem }()
+					defer func() {
+						<-sem
+						UpdateVideoActiveCount(-1)
+						RemoveActiveVideoDownload(t.ID)
+					}()
 
 					start := time.Now()
 

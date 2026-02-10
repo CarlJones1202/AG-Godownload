@@ -71,6 +71,9 @@ func VerifyDownloadedImages() error {
 	}
 
 	go func() {
+		SetVerificationRunning(true, len(images))
+		defer SetVerificationRunning(false, 0)
+
 		missingCount := 0
 		var recoveredCount int32 = 0
 
@@ -116,6 +119,7 @@ func VerifyDownloadedImages() error {
 						logger.Errorf("Failed to update image %d in batch: %v", res.ID, err)
 					} else {
 						atomic.AddInt32(&recoveredCount, 1)
+						IncVerificationRecovered()
 					}
 				}
 				tx.Commit()
@@ -141,10 +145,12 @@ func VerifyDownloadedImages() error {
 
 		// Phase 1: scan and collect missing files
 		for _, img := range images {
+			IncVerificationProcessed()
 			expectedFullPath := filepath.Join(UploadsDir, img.Filename)
 
 			if _, err := os.Stat(expectedFullPath); os.IsNotExist(err) {
 				missingCount++
+				IncVerificationMissing()
 
 				// Optional: regenerate thumbnail if main file exists but thumb doesn't
 				thumbPath := filepath.Join(UploadsDir, "thumbnails", filepath.Base(img.Filename))
@@ -222,7 +228,13 @@ func VerifyDownloadedImages() error {
 					sem := getSemaphore(provider)
 
 					sem <- struct{}{}
-					defer func() { <-sem }()
+					UpdateProviderStatus(provider, len(sem), cap(sem))
+					AddActiveVerificationDownload(t.ID, filepath.Base(t.CurrentDBPath), t.DownloadURL)
+					defer func() {
+						<-sem
+						UpdateProviderStatus(provider, len(sem), cap(sem))
+						RemoveActiveVerificationDownload(t.ID)
+					}()
 
 					start := time.Now()
 

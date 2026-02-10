@@ -6,10 +6,69 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
     const [formData, setFormData] = useState({
         name: '',
         type: 'url',
-        location: ''
+        location: '',
+        priority: 0
     })
     const [submitting, setSubmitting] = useState(false)
     const [searchTerm, setSearchTerm] = useState(searchQuery || '')
+    const [globalStatus, setGlobalStatus] = useState(null)
+    const [showMonitor, setShowMonitor] = useState(true)
+
+    // WebSocket for real-time updates
+    useEffect(() => {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+        const host = window.location.host
+        const socketUrl = `${protocol}//${host}/api/ws`
+
+        let socket
+        let reconnectTimeout
+
+        const connect = () => {
+            console.log('Connecting to WebSocket status...')
+            socket = new WebSocket(socketUrl)
+
+            socket.onmessage = (event) => {
+                try {
+                    const status = JSON.parse(event.data)
+
+                    setGlobalStatus(prevStatus => {
+                        // Only refresh the main sources list if activity starts or stops
+                        // This prevents constant API calls during progress updates
+                        const prevActiveIds = prevStatus?.crawler?.active_sources?.map(s => s.id).sort().join(',') || ''
+                        const newActiveIds = status.crawler?.active_sources?.map(s => s.id).sort().join(',') || ''
+
+                        const verificationChanged = prevStatus?.verification?.is_running !== status.verification?.is_running
+                        const videosChanged = prevStatus?.videos?.is_running !== status.videos?.is_running
+
+                        if (prevActiveIds !== newActiveIds || verificationChanged || videosChanged) {
+                            console.log('Activity state changed, refreshing sources list...')
+                            onRefresh()
+                        }
+                        return status
+                    })
+                } catch (error) {
+                    console.error('Error parsing WebSocket message:', error)
+                }
+            }
+
+            socket.onclose = () => {
+                console.log('WebSocket disconnected, reconnecting...')
+                reconnectTimeout = setTimeout(connect, 3000)
+            }
+
+            socket.onerror = (error) => {
+                console.error('WebSocket error:', error)
+                socket.close()
+            }
+        }
+
+        connect()
+
+        return () => {
+            if (socket) socket.close()
+            if (reconnectTimeout) clearTimeout(reconnectTimeout)
+        }
+    }, [onRefresh])
 
 
     // Sync local state if prop changes (e.g. user navigates back/forward)
@@ -27,7 +86,7 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
                 body: JSON.stringify(formData),
             })
             if (response.ok) {
-                setFormData({ name: '', type: 'url', location: '' })
+                setFormData({ name: '', type: 'url', location: '', priority: 0 })
                 setShowForm(false)
                 onSourceAdded()
             } else {
@@ -39,6 +98,21 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
             alert('Failed to add source')
         } finally {
             setSubmitting(false)
+        }
+    }
+
+    const handlePriorityChange = async (sourceId, newPriority) => {
+        try {
+            const response = await fetch(`/api/sources/${sourceId}/priority`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ priority: parseInt(newPriority) }),
+            })
+            if (response.ok) {
+                onRefresh()
+            }
+        } catch (error) {
+            console.error('Error updating priority:', error)
         }
     }
 
@@ -181,10 +255,133 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
                             placeholder="https://example.com/thread/..."
                         />
                     </div>
+                    <div className="form-group">
+                        <label>Priority</label>
+                        <select
+                            value={formData.priority}
+                            onChange={(e) => setFormData({ ...formData, priority: parseInt(e.target.value) })}
+                        >
+                            <option value="0">Default (0)</option>
+                            <option value="1">Low (1)</option>
+                            <option value="2">Medium (2)</option>
+                            <option value="3">High (3)</option>
+                        </select>
+                    </div>
                     <button type="submit" disabled={submitting} className="submit-btn">
                         {submitting ? 'Adding...' : 'Add Source'}
                     </button>
                 </form>
+            )}
+
+            {globalStatus && (globalStatus.verification?.is_running || globalStatus.videos?.is_running || globalStatus.crawler?.active_sources?.length > 0) && (
+                <div className="global-monitor">
+                    <div className="monitor-header" onClick={() => setShowMonitor(!showMonitor)}>
+                        <h3>
+                            <span className="active-indicator"></span>
+                            Active Download Activity
+                        </h3>
+                        <div className="monitor-toggle">{showMonitor ? 'Collapse' : 'Expand'}</div>
+                    </div>
+                    {showMonitor && (
+                        <div className="monitor-content">
+                            {globalStatus.verification?.is_running && (
+                                <div className="monitor-section">
+                                    <h4>Image Verification</h4>
+                                    <div className="activity-item">
+                                        <div className="activity-info">
+                                            <span>Progress</span>
+                                            <span>{globalStatus.verification.processed} / {globalStatus.verification.total_images}</span>
+                                        </div>
+                                        <div className="progress-container">
+                                            <div
+                                                className="progress-bar"
+                                                style={{ width: `${(globalStatus.verification.processed / globalStatus.verification.total_images) * 100}%` }}
+                                            ></div>
+                                        </div>
+                                        <div className="progress-stats">
+                                            <span>Found: {globalStatus.verification.missing_found}</span>
+                                            <span>Recovered: {globalStatus.verification.recovered}</span>
+                                        </div>
+                                    </div>
+                                    <div className="provider-grid">
+                                        {Object.entries(globalStatus.verification.provider_status || {}).map(([name, status]) => (
+                                            <div key={name} className="provider-stat">
+                                                <span className="provider-name">{name}</span>
+                                                <span className="provider-count">{status.active}/{status.max_allowed}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {globalStatus.verification.active_downloads?.length > 0 && (
+                                        <div className="active-item-list">
+                                            {globalStatus.verification.active_downloads.map(dl => (
+                                                <div key={dl.id} className="active-item-mini">
+                                                    <span className="mini-filename">{dl.name}</span>
+                                                    <span className="mini-url">{dl.location}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {globalStatus.videos?.is_running && (
+                                <div className="monitor-section">
+                                    <h4>Video Verification</h4>
+                                    <div className="activity-item">
+                                        <div className="activity-info">
+                                            <span>Progress</span>
+                                            <span>{globalStatus.videos.processed} / {globalStatus.videos.total_videos}</span>
+                                        </div>
+                                        <div className="progress-container">
+                                            <div
+                                                className="progress-bar"
+                                                style={{ width: `${(globalStatus.videos.processed / globalStatus.videos.total_videos) * 100}%` }}
+                                            ></div>
+                                        </div>
+                                        <div className="progress-stats">
+                                            <span>Found: {globalStatus.videos.missing_found}</span>
+                                            <span>Recovered: {globalStatus.videos.recovered}</span>
+                                            <span>Active: {globalStatus.videos.active}/{globalStatus.videos.max_allowed}</span>
+                                        </div>
+                                    </div>
+                                    {globalStatus.videos.active_downloads?.length > 0 && (
+                                        <div className="active-item-list">
+                                            {globalStatus.videos.active_downloads.map(dl => (
+                                                <div key={dl.id} className="active-item-mini">
+                                                    <span className="mini-filename">{dl.name}</span>
+                                                    <span className="mini-url">{dl.location}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {globalStatus.crawler?.active_sources?.length > 0 && (
+                                <div className="monitor-section">
+                                    <h4>Active Crawls</h4>
+                                    {globalStatus.crawler.active_sources.map(source => (
+                                        <div key={source.id} className="activity-item">
+                                            <div className="activity-info">
+                                                <div className="source-name-url">
+                                                    <span className="source-name">{source.name}</span>
+                                                    <span className="source-url-small">{source.location}</span>
+                                                </div>
+                                                <span>{source.downloaded_items} / {source.total_items}</span>
+                                            </div>
+                                            <div className="progress-container">
+                                                <div
+                                                    className="progress-bar"
+                                                    style={{ width: `${source.download_progress || 0}%` }}
+                                                ></div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
             )}
 
             <div className="source-list">
@@ -198,6 +395,9 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
                             <div className="source-main">
                                 <div className="source-info-header">
                                     <h3>{source.name}</h3>
+                                    <span className={`priority-badge priority-${source.priority || 0}`}>
+                                        P{source.priority || 0}
+                                    </span>
                                     <span className={`status-badge ${source.status || 'idle'}`}>
                                         {source.status || 'idle'}
                                     </span>
@@ -211,6 +411,36 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
                                     ) : (
                                         <span>Never checked</span>
                                     )}
+                                </div>
+
+                                {source.status === 'crawling' && (
+                                    <div className="source-progress">
+                                        <div className="progress-container">
+                                            <div
+                                                className="progress-bar"
+                                                style={{ width: `${source.download_progress || 0}%` }}
+                                            ></div>
+                                        </div>
+                                        <div className="progress-stats">
+                                            <span>Progress: {source.download_progress || 0}%</span>
+                                            <span>Downloaded: {source.downloaded_items || 0} / {source.total_items || 0}</span>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="source-priority-control">
+                                    <label>Priority:</label>
+                                    <select
+                                        className="priority-select"
+                                        value={source.priority || 0}
+                                        onChange={(e) => handlePriorityChange(source.id, e.target.value)}
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
+                                        <option value="0">0 (Default)</option>
+                                        <option value="1">1 (Low)</option>
+                                        <option value="2">2 (Medium)</option>
+                                        <option value="3">3 (High)</option>
+                                    </select>
                                 </div>
                             </div>
                             <div className="source-actions">

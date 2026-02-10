@@ -19,201 +19,81 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/kkdai/youtube/v2"
 )
 
-// RipYouTube downloads a YouTube video and returns the file path and title
+// RipYouTube downloads a YouTube video using yt-dlp and returns the file path and title
 func RipYouTube(pageURL string) (string, string, error) {
-	logger.Infof("Starting RipYouTube for %s", pageURL)
+	logger.Infof("Starting RipYouTube with yt-dlp for %s", pageURL)
 
-	// Determine if cookies are available
+	// Final output file - we'll let yt-dlp write directly to a temp file
+	tempDir := os.TempDir()
+	outputPathTemplate := filepath.Join(tempDir, "yt_dlp_%(id)s.%(ext)s")
+
+	// Prepare yt-dlp command
+	// -f "bestvideo+bestaudio/best" : Select best quality and merge
+	// --get-title : We'll need another call or use --print to get metadata
+	// --cookies : Use existing cookies if available
+	// -o : Output template
+	// --no-playlist : Just the video
+
+	args := []string{
+		"-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+		"--no-playlist",
+		"--merge-output-format", "mp4",
+		"-o", outputPathTemplate,
+	}
+
 	cookieFile := "youtube_cookies.txt"
-	hasCookies := false
 	if _, err := os.Stat(cookieFile); err == nil {
-		hasCookies = true
-	} else {
-		absPath, _ := filepath.Abs(cookieFile)
-		logger.Warnf("YouTube cookies file not found at %s. Age-restricted videos may fail.", absPath)
+		args = append(args, "--cookies", cookieFile)
+		logger.Infof("Using cookies from %s", cookieFile)
 	}
 
-	// Internal helper to create a client with specific settings
-	createClient := func(userAgent string) *youtube.Client {
-		c := &youtube.Client{}
-		httpClient := &http.Client{}
+	// First, let's get the title and the expected filename
+	metadataArgs := append([]string{"--get-title", "--get-filename", "-o", outputPathTemplate}, args[2:]...) // replace -o for filename check
+	metadataArgs = append(metadataArgs, pageURL)
 
-		if hasCookies {
-			jar, err := cookiejar.New(nil)
-			if err != nil {
-				logger.Warnf("Failed to create cookie jar: %v", err)
-			} else if err := LoadCookies(jar, cookieFile); err == nil {
-				httpClient.Jar = jar
-				logger.Infof("Loaded YouTube cookies from %s", cookieFile)
-
-				// Verify cookies for youtube.com
-				u, _ := url.Parse("https://www.youtube.com")
-				loaded := jar.Cookies(u)
-				logger.Infof("Jar has %d cookies active for %s", len(loaded), u.Host)
-			} else {
-				logger.Warnf("Failed to load YouTube cookies from %s: %v", cookieFile, err)
-			}
-		}
-
-		httpClient.Transport = &userAgentRoundTripper{
-			RoundTripper: http.DefaultTransport,
-			UserAgent:    userAgent,
-		}
-		c.HTTPClient = httpClient
-		return c
-	}
-
-	// Try fetching video info with a standard client first
-	client := createClient("")
-	video, err := client.GetVideo(pageURL)
+	cmdMetadata := exec.Command("yt-dlp", metadataArgs...)
+	output, err := cmdMetadata.Output()
 	if err != nil {
-		logger.Warnf("Standard YouTube fetch failed: %v.", err)
-
-		// If it's an age restriction or embedding error, try with a TV client User-Agent
-		if strings.Contains(err.Error(), "age restriction") || strings.Contains(err.Error(), "embedding") {
-			logger.Infof("Age restriction or embedding issue detected. Retrying with TV Client parameters...")
-			tvClient := createClient("Mozilla/5.0 (SMART-TV; Linux; Tizen 2.4.0) AppleWebKit/538.1 (KHTML, like Gecko) SamsungBrowser/1.1 tv")
-			video, err = tvClient.GetVideo(pageURL)
-			if err != nil {
-				logger.Errorf("TV Client retry also failed: %v", err)
-				return "", "", fmt.Errorf("failed to get YouTube video info after retry: %w", err)
-			}
-			logger.Infof("TV Client retry successful.")
-			client = tvClient // Use the successful client for subsequent operations
-		} else {
-			return "", "", fmt.Errorf("failed to get YouTube video info: %w", err)
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			logger.Errorf("yt-dlp metadata error: %s", string(exitErr.Stderr))
 		}
+		return "", "", fmt.Errorf("failed to get metadata from yt-dlp: %w", err)
 	}
 
-	logger.Infof("YouTube video: %s", video.Title)
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(lines) < 2 {
+		return "", "", fmt.Errorf("unexpected output from yt-dlp metadata: %s", string(output))
+	}
+	title := lines[0]
+	actualPath := lines[1]
 
-	// Quality Selection: Search FOR ALL formats (including DASH separate streams)
-	// Resolution is usually better in separate video/audio streams (DASH)
+	logger.Infof("YouTube video: %s (Expected Path: %s)", title, actualPath)
 
-	var bestVideo *youtube.Format
-	var bestAudio *youtube.Format
-	var bestMuxed *youtube.Format
+	// Now perform the actual download
+	downloadArgs := append(args, pageURL)
+	cmdDownload := exec.Command("yt-dlp", downloadArgs...)
 
-	for i := range video.Formats {
-		f := &video.Formats[i]
-
-		// Case 1: Muxed (Video + Audio)
-		if f.AudioChannels > 0 && f.Width > 0 {
-			if bestMuxed == nil || (f.Width*f.Height > bestMuxed.Width*bestMuxed.Height) {
-				bestMuxed = f
-			}
+	// Stream output to logs for visibility
+	stderr, _ := cmdDownload.StderrPipe()
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			logger.Debugf("yt-dlp: %s", scanner.Text())
 		}
+	}()
 
-		// Case 2: Video Only
-		if f.AudioChannels == 0 && f.Width > 0 {
-			if bestVideo == nil || (f.Width*f.Height > bestVideo.Width*bestVideo.Height) {
-				bestVideo = f
-			}
-		}
-
-		// Case 3: Audio Only
-		if f.AudioChannels > 0 && f.Width == 0 {
-			if bestAudio == nil || f.Bitrate > bestAudio.Bitrate {
-				bestAudio = f
-			}
-		}
+	if err := cmdDownload.Run(); err != nil {
+		return "", "", fmt.Errorf("yt-dlp download failed: %w", err)
 	}
 
-	// Determine strategy
-	useMerge := false
-	if bestVideo != nil && bestMuxed != nil && (bestVideo.Width*bestVideo.Height > bestMuxed.Width*bestMuxed.Height) {
-		useMerge = true
-	} else if bestVideo != nil && bestMuxed == nil {
-		useMerge = true
+	// Verify the file exists
+	if _, err := os.Stat(actualPath); err != nil {
+		return "", "", fmt.Errorf("downloaded file not found at %s: %w", actualPath, err)
 	}
 
-	if useMerge && bestAudio != nil {
-		logger.Infof("Selected DASH streams: Video %dx%d (%s), Audio %d bps (%s)",
-			bestVideo.Width, bestVideo.Height, bestVideo.MimeType, bestAudio.Bitrate, bestAudio.MimeType)
-
-		// Helper to download a format to a temp file
-		downloadToTemp := func(f *youtube.Format, suffix string) (string, error) {
-			s, _, err := client.GetStream(video, f)
-			if err != nil {
-				return "", err
-			}
-			defer s.Close()
-
-			tmp, err := os.CreateTemp("", "yt_part_*"+suffix)
-			if err != nil {
-				return "", err
-			}
-			// Close the file handle immediately so io.Copy can write to it and ffmpeg can access it later on Windows
-			defer tmp.Close()
-
-			if _, err := io.Copy(tmp, s); err != nil {
-				os.Remove(tmp.Name())
-				return "", err
-			}
-			return tmp.Name(), nil
-		}
-
-		vPath, err := downloadToTemp(bestVideo, ".mp4")
-		if err != nil {
-			return "", "", fmt.Errorf("failed to download video stream: %w", err)
-		}
-		defer os.Remove(vPath)
-
-		aPath, err := downloadToTemp(bestAudio, ".m4a")
-		if err != nil {
-			return "", "", fmt.Errorf("failed to download audio stream: %w", err)
-		}
-		defer os.Remove(aPath)
-
-		// Final output file
-		finalTmp, err := os.CreateTemp("", "youtube_*.mp4")
-		if err != nil {
-			return "", "", fmt.Errorf("failed to create final temp file: %w", err)
-		}
-		finalPath := finalTmp.Name()
-		finalTmp.Close() // Close immediately so ffmpeg can write to it
-
-		logger.Infof("Merging DASH streams with ffmpeg...")
-		cmd := exec.Command("ffmpeg", "-y", "-i", vPath, "-i", aPath, "-c", "copy", finalPath)
-		if err := cmd.Run(); err != nil {
-			logger.Errorf("ffmpeg merge failed: %v. Falling back to muxed stream.", err)
-			os.Remove(finalPath)
-			// Fall through to muxed fallback
-		} else {
-			return finalPath, video.Title, nil
-		}
-	}
-
-	// Fallback to Muxed
-	if bestMuxed == nil {
-		return "", "", fmt.Errorf("no suitable YouTube formats found")
-	}
-
-	logger.Infof("Selected muxed format: %dx%d (%s)", bestMuxed.Width, bestMuxed.Height, bestMuxed.MimeType)
-
-	stream, _, err := client.GetStream(video, bestMuxed)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to get muxed stream: %w", err)
-	}
-	defer stream.Close()
-
-	tempFile, err := os.CreateTemp("", "youtube_*.mp4")
-	if err != nil {
-		return "", "", fmt.Errorf("failed to create temp file: %w", err)
-	}
-	tempPath := tempFile.Name()
-
-	if _, err = io.Copy(tempFile, stream); err != nil {
-		tempFile.Close() // Ensure file is closed on error
-		os.Remove(tempPath)
-		return "", "", fmt.Errorf("failed to download video: %w", err)
-	}
-	tempFile.Close() // Close before returning so caller can move it on Windows
-
-	return tempPath, video.Title, nil
+	return actualPath, title, nil
 }
 
 // RipTnaFlix extracts the direct video URL and title from a TnaFlix page

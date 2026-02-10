@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -120,6 +121,30 @@ func CrawlSource(sourceID uint) error {
 		selection = doc.Find("div[id^='post_message_']").First()
 	}
 
+	// Pre-count total items to download for progress tracking
+	totalImageLinks := 0
+	selection.Each(func(i int, s *goquery.Selection) {
+		s.Find("a img").Each(func(j int, img *goquery.Selection) {
+			if img.AttrOr("alt", "") == "View Post" {
+				return
+			}
+			totalImageLinks++
+		})
+	})
+
+	// Initialize progress tracking
+	database.DB.Model(&source).Updates(map[string]interface{}{
+		"total_items":       totalImageLinks,
+		"downloaded_items":  0,
+		"download_progress": 0,
+	})
+	UpdateCrawlerProgress(source.ID, 0, 0, totalImageLinks)
+	logger.Infof("Found %d images to download for source %s", totalImageLinks, source.Name)
+
+	// Use atomic counters for progress tracking
+	var downloadedCount int32
+	var processedCount int32
+
 	selection.Each(func(i int, s *goquery.Selection) {
 		// Find images inside this div - look for <a> tags containing <img>
 		s.Find("a img").Each(func(j int, img *goquery.Selection) {
@@ -142,11 +167,26 @@ func CrawlSource(sourceID uint) error {
 			wg.Add(1)
 			go func(src string, imgSrc string) {
 				defer wg.Done()
+				defer func() {
+					// Update processing progress
+					newProcessed := atomic.AddInt32(&processedCount, 1)
+					if totalImageLinks > 0 {
+						progress := int((float64(newProcessed) / float64(totalImageLinks)) * 100)
+						downloaded := atomic.LoadInt32(&downloadedCount)
+						// Update DB periodically or on completion
+						database.DB.Model(&source).Updates(map[string]interface{}{
+							"downloaded_items":  downloaded,
+							"download_progress": progress,
+						})
+						UpdateCrawlerProgress(source.ID, progress, int(downloaded), totalImageLinks)
+					}
+				}()
 
 				// Acquire semaphore
 				sem <- struct{}{}
 				defer func() { <-sem }()
 
+				// ... (existing ripping logic remains the same) ...
 				// Use rippers to extract actual image URL based on hosting site
 				var imageURL string
 				var err error
@@ -159,10 +199,6 @@ func CrawlSource(sourceID uint) error {
 					imageURL, err = RipImageBox(src)
 				case strings.Contains(src, "imx.to"):
 					logger.Debug("Ripping from Imx.to")
-					// Use the anchor href instead of img src
-					// The 'src' variable in this goroutine already holds the anchor href.
-					// The 'imgSrc' variable holds the img src.
-					// The instruction is to use the anchor href for imx.to.
 					imageURL, err = RipImx(src)
 				case strings.Contains(src, "turboimagehost"):
 					logger.Debug("Ripping from TurboImageHost")
@@ -178,12 +214,10 @@ func CrawlSource(sourceID uint) error {
 					imageURL, err = RipPostImages(src)
 				case strings.Contains(src, "imagetwist"):
 					logger.Debug("Ripping from Imagetwist")
-					// Use anchor href (src)
 					imageURL, err = RipImagetwist(src)
 				case strings.Contains(src, "acidimg"):
 					logger.Debug("Ripping from AcidImg")
 					imageURL, err = RipAcidImg(imgSrc)
-
 				case strings.Contains(src, "mymypic.net") || strings.Contains(imgSrc, "mymypic.net") ||
 					strings.Contains(src, "mymyatt.net") || strings.Contains(imgSrc, "mymyatt.net"):
 					logger.Debug("Ripping from MyMyPic/MyMyAtt")
@@ -231,7 +265,6 @@ func CrawlSource(sourceID uint) error {
 					}
 					logger.Debugf("Download attempt %d failed for %s: %v", attempt, imageURL, err)
 					if attempt < maxRetries {
-						// Exponential backoff
 						time.Sleep(time.Duration(attempt*2) * time.Second)
 					}
 				}
@@ -241,6 +274,9 @@ func CrawlSource(sourceID uint) error {
 					return
 				}
 
+				// Successfully downloaded
+				atomic.AddInt32(&downloadedCount, 1)
+
 				// Generate thumbnail
 				_, err = GenerateThumbnail(result.Path)
 				if err != nil {
@@ -248,18 +284,16 @@ func CrawlSource(sourceID uint) error {
 				}
 
 				// Save to slice for batch insert
-				// Calculate relative path for DB (e.g. "Source/file.jpg")
 				relPath, err := filepath.Rel(UploadsDir, result.Path)
 				if err != nil {
-					// Fallback if Rel fails
 					relPath = filepath.Base(result.Path)
 				}
 
 				image := models.Image{
 					GalleryID:      gallery.ID,
 					Filename:       relPath,
-					OriginalURL:    src,      // The hosting page URL
-					DownloadURL:    imageURL, // The final direct image URL
+					OriginalURL:    src,
+					DownloadURL:    imageURL,
 					DominantColors: result.DominantColors,
 					Galleries:      []*models.Gallery{&gallery},
 				}
@@ -332,7 +366,12 @@ func CrawlSource(sourceID uint) error {
 		}
 	}
 
-	database.DB.Model(&source).Update("Status", "idle")
+	database.DB.Model(&source).Updates(map[string]interface{}{
+		"Status":            "idle",
+		"download_progress": 0,
+		"downloaded_items":  0,
+		"total_items":       0,
+	})
 	return nil
 }
 
