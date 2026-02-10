@@ -1,15 +1,17 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import './PersonDetail.css'
 import './PersonDetail_identifiers.css'
 import './AutoTag.css'
 import PersonStats from './PersonStats'
 import AutoTagModal from './AutoTagModal'
 import GalleryCard from './GalleryCard'
+import SortControls from './SortControls'
 
 function PersonDetail() {
     const { id } = useParams()
     const navigate = useNavigate()
+    const [searchParams, setSearchParams] = useSearchParams()
     const [person, setPerson] = useState(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
@@ -17,11 +19,14 @@ function PersonDetail() {
     const [editForm, setEditForm] = useState({ name: '', aliases: '' })
     const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0)
 
+    const sort = searchParams.get('sort') || 'newest'
+    const seed = searchParams.get('seed') || '0'
+
     const fetchPerson = useCallback(async () => {
         setLoading(true)
         setError(null)
         try {
-            const response = await fetch(`/api/people/${id}`)
+            const response = await fetch(`/api/people/${id}?sort=${sort}&seed=${seed}`)
             if (!response.ok) {
                 throw new Error(`Failed to fetch person: ${response.status}`)
             }
@@ -39,11 +44,30 @@ function PersonDetail() {
         } finally {
             setLoading(false)
         }
-    }, [id])
+    }, [id, sort, seed])
 
     useEffect(() => {
         fetchPerson()
     }, [fetchPerson])
+
+    const handleSortChange = (newSort) => {
+        setSearchParams(prev => {
+            prev.set('sort', newSort)
+            if (newSort !== 'shuffle') {
+                prev.delete('seed')
+            } else if (!prev.get('seed')) {
+                prev.set('seed', Math.floor(Math.random() * 1000000).toString())
+            }
+            return prev
+        })
+    }
+
+    const handleSeedChange = (newSeed) => {
+        setSearchParams(prev => {
+            prev.set('seed', newSeed.toString())
+            return prev
+        })
+    }
 
     const parseAliases = (aliasesStr) => {
         try {
@@ -312,13 +336,18 @@ function PersonDetail() {
             <div className="person-profile-container">
                 {/* Left Sidebar: Photo & Social */}
                 <div className="person-sidebar">
-                    {person.photos && (() => {
+                    {(() => {
+                        let photos = [];
                         try {
-                            const photos = JSON.parse(person.photos);
-                            if (!photos || !Array.isArray(photos) || photos.length === 0) {
-                                return <div className="no-photo-placeholder">{person.name[0]}</div>;
+                            if (person.photos) {
+                                photos = JSON.parse(person.photos);
                             }
+                        } catch (e) {
+                            console.error('Failed to parse photos:', e);
+                        }
 
+                        // Use actual photos if they exist
+                        if (photos && Array.isArray(photos) && photos.length > 0) {
                             return (
                                 <div className="person-photos-section">
                                     <div className="person-photos-carousel">
@@ -354,10 +383,21 @@ function PersonDetail() {
                                     </div>
                                 </div>
                             );
-                        } catch (e) {
-                            console.error('Failed to parse photos:', e);
-                            return <div className="no-photo-placeholder">{person.name[0]}</div>;
                         }
+
+                        // Fallback to the thumbnail_path from backend
+                        if (person.thumbnail_path) {
+                            return (
+                                <div className="person-photos-section">
+                                    <div className="person-fallback-thumbnail">
+                                        <img src={person.thumbnail_path} alt={person.name} />
+                                    </div>
+                                </div>
+                            );
+                        }
+
+                        // Absolute fallback to initial
+                        return <div className="no-photo-placeholder">{person.name[0]}</div>;
                     })()}
 
                     {(person.twitter || person.instagram) && (
@@ -496,7 +536,16 @@ function PersonDetail() {
 
             {/* Galleries Section */}
             <div className="content-section">
-                <h2>Galleries <span className="count-badge">{photoGalleries.length}</span></h2>
+                <div className="section-header-flex">
+                    <h2>Galleries <span className="count-badge">{photoGalleries.length}</span></h2>
+                    <SortControls
+                        sort={sort}
+                        setSort={handleSortChange}
+                        seed={parseInt(seed)}
+                        setSeed={handleSeedChange}
+                        onRandomize={handleSeedChange}
+                    />
+                </div>
                 {photoGalleries.length === 0 && videoGalleries.length === 0 ? (
                     <div className="empty-state">
                         <p>No content linked to this person.</p>

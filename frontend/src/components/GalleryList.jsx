@@ -1,11 +1,8 @@
-import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import './GalleryList.css'
-import './PersonTagging.css'
-import './GalleryList_recrawl.css'
 import GalleryCard from './GalleryCard'
+import SortControls from './SortControls'
 
-function GalleryList({ galleries, onRefresh, meta, onPageChange }) {
+function GalleryList({ galleries, onRefresh, meta, onPageChange, sort, setSort, seed, setSeed }) {
     const navigate = useNavigate()
     const location = useLocation()
 
@@ -41,6 +38,19 @@ function GalleryList({ galleries, onRefresh, meta, onPageChange }) {
 
     return (
         <div className="gallery-list">
+            <div className="gallery-header">
+                <h2>Galleries</h2>
+                <div className="header-actions">
+                    <SortControls
+                        sort={sort}
+                        setSort={setSort}
+                        seed={seed}
+                        setSeed={setSeed}
+                        onRandomize={setSeed}
+                    />
+                    <button onClick={onRefresh}>🔄 Refresh</button>
+                </div>
+            </div>
             {galleries.length === 0 ? (
                 <div className="no-galleries">
                     <p>No galleries found. Add a source to start crawling!</p>

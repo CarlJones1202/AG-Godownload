@@ -11,7 +11,7 @@ type Source struct {
 	CreatedAt     time.Time      `json:"created_at"`
 	UpdatedAt     time.Time      `json:"updated_at"`
 	DeletedAt     gorm.DeletedAt `gorm:"index" json:"-"`
-	Name          string         `json:"name"`
+	Name          string         `gorm:"index" json:"name"`
 	Type          string         `json:"type" gorm:"index"` // e.g., "url", "local"
 	Location      string         `gorm:"uniqueIndex" json:"location"`
 	LastCheckedAt time.Time      `gorm:"index" json:"last_checked_at"`

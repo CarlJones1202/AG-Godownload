@@ -9,6 +9,12 @@
     margin-bottom: var(--spacing-lg);
 }
 
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
 .gallery-header h2 {
     margin: 0;
     font-size: 1.25rem;

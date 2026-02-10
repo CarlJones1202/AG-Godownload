@@ -167,7 +167,7 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
 
         const delayDebounceFn = setTimeout(() => {
             onSearch(searchTerm)
-        }, 500)
+        }, 800)
         return () => clearTimeout(delayDebounceFn)
     }, [searchTerm, searchQuery])
 
@@ -393,7 +393,11 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
             <div className="source-list">
                 {sources.length === 0 ? (
                     <div className="empty-state">
-                        <p>No sources found. Add one to start collecting content!</p>
+                        {searchTerm ? (
+                            <p>No results found for "{searchTerm}".</p>
+                        ) : (
+                            <p>No sources found. Add one to start collecting content!</p>
+                        )}
                     </div>
                 ) : (
                     sources.map(source => (

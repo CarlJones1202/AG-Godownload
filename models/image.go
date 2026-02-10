@@ -16,8 +16,8 @@ type Image struct {
 	Galleries       []*Gallery     `json:"galleries,omitempty" gorm:"many2many:image_galleries;"`
 	SourceID        *uint          `gorm:"index" json:"source_id,omitempty"` // Direct source association for videos
 	Source          *Source        `json:"source,omitempty" gorm:"foreignKey:SourceID"`
-	Filename        string         `json:"filename"`
-	Title           string         `json:"title"`                     // Video title or display name
+	Filename        string         `gorm:"index" json:"filename"`
+	Title           string         `gorm:"index" json:"title"`        // Video title or display name
 	Duration        float64        `json:"duration"`                  // Runtime in seconds
 	Width           int            `json:"width"`                     // Video width in pixels
 	Height          int            `json:"height"`                    // Video height in pixels

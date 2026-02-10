@@ -149,6 +149,9 @@ func GetImages(c *gin.Context) {
 
 	// Sorting
 	sortBy := c.DefaultQuery("sort", "newest")
+	seedStr := c.Query("seed")
+	seed, _ := strconv.Atoi(seedStr)
+
 	switch sortBy {
 	case "newest":
 		query = query.Order("created_at DESC")
@@ -160,6 +163,11 @@ func GetImages(c *gin.Context) {
 		query = query.Order("size_mb ASC")
 	case "random":
 		query = query.Order("RANDOM()")
+	case "shuffle":
+		// Deterministic seeded shuffle using a simple LCG-style formula
+		// ((id * multiplier + seed) % modulus)
+		// We use a large prime multiplier and 2^31-1 as modulus
+		query = query.Order(fmt.Sprintf("(((id + 1) * 1103515245 + %d * 12345) %% 2147483647)", seed))
 	default:
 		query = query.Order("created_at DESC")
 	}

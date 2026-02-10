@@ -11,7 +11,7 @@ type Gallery struct {
 	CreatedAt time.Time      `json:"created_at" gorm:"index"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
-	Name      string         `json:"name"`
+	Name      string         `gorm:"index" json:"name"`
 	SourceID  *uint          `gorm:"index" json:"source_id"` // Nullable if created manually
 	Source    *Source        `json:"source,omitempty" gorm:"foreignKey:SourceID"`
 	Images    []Image        `json:"images,omitempty" gorm:"foreignKey:GalleryID"`

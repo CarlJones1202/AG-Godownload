@@ -108,7 +108,35 @@ func GetPeople(c *gin.Context) {
 			}
 		}
 
-		// If no photo in photos array, try to get from first gallery
+		// If no photo in photos array, try to get from directly tagged images
+		if thumbnailPath == "" {
+			var firstImage models.Image
+			err := database.DB.Model(&models.Image{}).
+				Joins("JOIN person_images ON person_images.image_id = images.id").
+				Where("person_images.person_id = ?", people[i].ID).
+				Preload("Source").
+				Preload("Galleries.Source").
+				Order("images.created_at DESC").
+				First(&firstImage).Error
+
+			if err == nil {
+				sourceName := "uncategorized"
+				if firstImage.Source != nil {
+					sourceName = firstImage.Source.Name
+				} else if len(firstImage.Galleries) > 0 && firstImage.Galleries[0].Source != nil {
+					sourceName = firstImage.Galleries[0].Source.Name
+				}
+
+				sanitizedSource := services.SanitizeDirectoryName(sourceName)
+				thumbName := filepath.Base(firstImage.Filename)
+				if firstImage.Type == "video" {
+					thumbName += ".jpg"
+				}
+				thumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, thumbName)
+			}
+		}
+
+		// If still no thumbnail, try to get from first gallery
 		if thumbnailPath == "" {
 			var firstGallery models.Gallery
 			// Find the first gallery for this person that has images
@@ -121,24 +149,16 @@ func GetPeople(c *gin.Context) {
 			if err == nil {
 				var firstImage models.Image
 				if err := database.DB.Where("gallery_id = ?", firstGallery.ID).Order("created_at ASC").First(&firstImage).Error; err == nil {
-					// Determine source name
 					sourceName := "uncategorized"
 					if firstGallery.Source != nil {
 						sourceName = firstGallery.Source.Name
-					} else if firstGallery.SourceID != nil {
-						var source models.Source
-						if err := database.DB.First(&source, *firstGallery.SourceID).Error; err == nil {
-							sourceName = source.Name
-						}
 					}
 
 					sanitizedSource := services.SanitizeDirectoryName(sourceName)
-
 					thumbName := filepath.Base(firstImage.Filename)
 					if firstImage.Type == "video" {
 						thumbName += ".jpg"
 					}
-
 					thumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, thumbName)
 				}
 			}
@@ -173,9 +193,28 @@ func GetPerson(c *gin.Context) {
 		return
 	}
 
-	// Load galleries for this person
+	// Load galleries for this person with sorting
+	sortBy := c.DefaultQuery("sort", "newest")
+	seedStr := c.Query("seed")
+	seed, _ := strconv.Atoi(seedStr)
+
 	var galleries []models.Gallery
-	database.DB.Model(&person).Association("Galleries").Find(&galleries)
+	query := database.DB.Model(&models.Gallery{}).
+		Joins("JOIN person_galleries ON person_galleries.gallery_id = galleries.id").
+		Where("person_galleries.person_id = ?", person.ID)
+
+	switch sortBy {
+	case "newest":
+		query = query.Order("galleries.created_at DESC")
+	case "oldest":
+		query = query.Order("galleries.created_at ASC")
+	case "shuffle":
+		query = query.Order(fmt.Sprintf("(((galleries.id + 1) * 1103515245 + %d * 12345) %% 2147483647)", seed))
+	default:
+		query = query.Order("galleries.id DESC")
+	}
+
+	query.Find(&galleries)
 
 	// Enhance galleries with image counts and first image
 	type GalleryResponse struct {
@@ -226,30 +265,72 @@ func GetPerson(c *gin.Context) {
 		}
 	}
 
+	// Get fallback thumbnail if no photos
+	var thumbnailPath string
+	if person.Photos != "" {
+		var photos []string
+		if err := json.Unmarshal([]byte(person.Photos), &photos); err == nil && len(photos) > 0 {
+			thumbnailPath = photos[0]
+		}
+	}
+	if thumbnailPath == "" {
+		// Try tagged images first
+		var firstImage models.Image
+		err := database.DB.Model(&models.Image{}).
+			Joins("JOIN person_images ON person_images.image_id = images.id").
+			Where("person_images.person_id = ?", person.ID).
+			Preload("Source").
+			Preload("Galleries.Source").
+			Order("images.created_at DESC").
+			First(&firstImage).Error
+
+		if err == nil {
+			sourceName := "uncategorized"
+			if firstImage.Source != nil {
+				sourceName = firstImage.Source.Name
+			} else if len(firstImage.Galleries) > 0 && firstImage.Galleries[0].Source != nil {
+				sourceName = firstImage.Galleries[0].Source.Name
+			}
+			sanitizedSource := services.SanitizeDirectoryName(sourceName)
+			thumbName := filepath.Base(firstImage.Filename)
+			if firstImage.Type == "video" {
+				thumbName += ".jpg"
+			}
+			thumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, thumbName)
+		}
+	}
+	if thumbnailPath == "" && len(galleryResponses) > 0 {
+		// Fallback to first gallery icon
+		if len(galleryResponses[0].Images) > 0 {
+			thumbnailPath = galleryResponses[0].Images[0].ThumbnailPath
+		}
+	}
+
 	// Return person with enhanced galleries
 	c.JSON(http.StatusOK, gin.H{
-		"id":            person.ID,
-		"created_at":    person.CreatedAt,
-		"updated_at":    person.UpdatedAt,
-		"name":          person.Name,
-		"aliases":       person.Aliases,
-		"stash_id":      person.StashID,
-		"birthdate":     person.Birthdate,
-		"country":       person.Country,
-		"ethnicity":     person.Ethnicity,
-		"eye_color":     person.EyeColor,
-		"hair_color":    person.HairColor,
-		"height":        person.Height,
-		"measurements":  person.Measurements,
-		"fake_tits":     person.FakeTits,
-		"career_length": person.CareerLength,
-		"tattoos":       person.Tattoos,
-		"piercings":     person.Piercings,
-		"bio":           person.Bio,
-		"twitter":       person.Twitter,
-		"instagram":     person.Instagram,
-		"photos":        person.Photos,
-		"galleries":     galleryResponses,
+		"id":             person.ID,
+		"created_at":     person.CreatedAt,
+		"updated_at":     person.UpdatedAt,
+		"name":           person.Name,
+		"aliases":        person.Aliases,
+		"stash_id":       person.StashID,
+		"birthdate":      person.Birthdate,
+		"country":        person.Country,
+		"ethnicity":      person.Ethnicity,
+		"eye_color":      person.EyeColor,
+		"hair_color":     person.HairColor,
+		"height":         person.Height,
+		"measurements":   person.Measurements,
+		"fake_tits":      person.FakeTits,
+		"career_length":  person.CareerLength,
+		"tattoos":        person.Tattoos,
+		"piercings":      person.Piercings,
+		"bio":            person.Bio,
+		"twitter":        person.Twitter,
+		"instagram":      person.Instagram,
+		"photos":         person.Photos,
+		"thumbnail_path": thumbnailPath,
+		"galleries":      galleryResponses,
 	})
 }
 

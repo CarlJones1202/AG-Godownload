@@ -1,15 +1,20 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import './GalleryDetail.css'
 import './GalleryMetadata.css'
 import ImageGrid from './ImageGrid'
+import SortControls from './SortControls'
 
 function GalleryDetail() {
     const { id } = useParams()
     const navigate = useNavigate()
+    const [searchParams, setSearchParams] = useSearchParams()
     const [gallery, setGallery] = useState(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
+
+    const sort = searchParams.get('sort') || 'newest'
+    const seed = searchParams.get('seed') || '0'
 
     // Person Tagging State
     const [showPersonModal, setShowPersonModal] = useState(false)
@@ -30,7 +35,7 @@ function GalleryDetail() {
     const fetchGallery = useCallback(async () => {
         setLoading(true)
         try {
-            const response = await fetch(`/api/galleries/${id}`)
+            const response = await fetch(`/api/galleries/${id}?sort=${sort}&seed=${seed}`)
             if (!response.ok) throw new Error('Gallery not found')
             const data = await response.json()
             setGallery(data)
@@ -39,11 +44,30 @@ function GalleryDetail() {
         } finally {
             setLoading(false)
         }
-    }, [id])
+    }, [id, sort, seed])
 
     useEffect(() => {
         fetchGallery()
     }, [fetchGallery])
+
+    const handleSortChange = (newSort) => {
+        setSearchParams(prev => {
+            prev.set('sort', newSort)
+            if (newSort !== 'shuffle') {
+                prev.delete('seed')
+            } else if (!prev.get('seed')) {
+                prev.set('seed', Math.floor(Math.random() * 1000000).toString())
+            }
+            return prev
+        })
+    }
+
+    const handleSeedChange = (newSeed) => {
+        setSearchParams(prev => {
+            prev.set('seed', newSeed.toString())
+            return prev
+        })
+    }
 
     const fetchPeople = async () => {
         try {
@@ -389,7 +413,16 @@ function GalleryDetail() {
             </div>
 
             <div className="gallery-content">
-                <h2>Gallery Content</h2>
+                <div className="content-section-header">
+                    <h2>Gallery Content</h2>
+                    <SortControls
+                        sort={sort}
+                        setSort={handleSortChange}
+                        seed={parseInt(seed)}
+                        setSeed={handleSeedChange}
+                        onRandomize={handleSeedChange}
+                    />
+                </div>
                 <ImageGrid gallery={gallery} onRefresh={fetchGallery} />
             </div>
 

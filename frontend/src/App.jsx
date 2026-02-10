@@ -38,32 +38,11 @@ function App() {
     const [personPage, setPersonPage] = useState(1)
     const [personMeta, setPersonMeta] = useState({ total_pages: 1, current_page: 1 })
 
-    useEffect(() => {
-        // Get page from URL query params
-        const pageFromUrl = parseInt(searchParams.get('page')) || 1
 
-        if (location.pathname === '/' || location.pathname === '/galleries' || location.pathname.startsWith('/galleries/')) {
-            fetchGalleries(pageFromUrl)
-        } else if (location.pathname === '/sources') {
-            const searchQ = searchParams.get('q') || ''
-            fetchSources(pageFromUrl, searchQ)
-        } else if (location.pathname === '/images') {
-            fetchImages(pageFromUrl)
-        } else if (location.pathname === '/videos') {
-            fetchVideos(pageFromUrl)
-        } else if (location.pathname === '/favorites') {
-            fetchFavorites(pageFromUrl)
-        } else if (location.pathname === '/people') {
-            fetchPeople(pageFromUrl)
-        } else {
-            setLoading(false)
-        }
-    }, [location.pathname, searchParams])
-
-    const fetchGalleries = useCallback(async (page = 1) => {
+    const fetchGalleries = useCallback(async (page = 1, sort = 'newest', seed = '0') => {
         setLoading(true)
         try {
-            const response = await fetch(`/api/galleries?page=${page}&limit=50`)
+            const response = await fetch(`/api/galleries?page=${page}&limit=50&sort=${sort}&seed=${seed}`)
             const result = await response.json()
             if (result.data) {
                 setGalleries(result.data)
@@ -80,10 +59,6 @@ function App() {
     }, [])
 
     const fetchSources = useCallback(async (page = 1, search = '') => {
-        // Only set global loading if we don't have data yet (initial load)
-        if (sources.length === 0) {
-            setLoading(true)
-        }
         try {
             const query = search ? `&q=${encodeURIComponent(search)}` : ''
             const response = await fetch(`/api/sources?page=${page}&limit=12${query}`)
@@ -100,12 +75,12 @@ function App() {
         } finally {
             setLoading(false)
         }
-    }, [sources.length])
+    }, [])
 
-    const fetchImages = async (page = 1) => {
+    const fetchImages = useCallback(async (page = 1, sort = 'newest', seed = '0') => {
         setLoading(true)
         try {
-            const response = await fetch(`/api/images?page=${page}&limit=100`)
+            const response = await fetch(`/api/images?page=${page}&limit=100&sort=${sort}&seed=${seed}`)
             const result = await response.json()
             if (result.data) {
                 setImages(result.data)
@@ -119,12 +94,12 @@ function App() {
         } finally {
             setLoading(false)
         }
-    }
+    }, [])
 
-    const fetchFavorites = async (page = 1) => {
+    const fetchFavorites = useCallback(async (page = 1, sort = 'newest', seed = '0') => {
         setLoading(true)
         try {
-            const response = await fetch(`/api/images?favorites=true&page=${page}&limit=100`)
+            const response = await fetch(`/api/images?favorites=true&page=${page}&limit=100&sort=${sort}&seed=${seed}`)
             const result = await response.json()
             if (result.data) {
                 setFavorites(result.data)
@@ -138,9 +113,9 @@ function App() {
         } finally {
             setLoading(false)
         }
-    }
+    }, [])
 
-    const fetchPeople = async (page = 1) => {
+    const fetchPeople = useCallback(async (page = 1) => {
         setLoading(true)
         try {
             const response = await fetch(`/api/people?page=${page}&limit=50`)
@@ -157,12 +132,12 @@ function App() {
         } finally {
             setLoading(false)
         }
-    }
+    }, [])
 
-    const fetchVideos = async (page = 1) => {
+    const fetchVideos = useCallback(async (page = 1, sort = 'newest', seed = '0') => {
         setLoading(true)
         try {
-            const response = await fetch(`/api/images?type=video&page=${page}&limit=50`)
+            const response = await fetch(`/api/images?type=video&page=${page}&limit=50&sort=${sort}&seed=${seed}`)
             const result = await response.json()
             if (result.data) {
                 setVideos(result.data)
@@ -176,17 +151,94 @@ function App() {
         } finally {
             setLoading(false)
         }
-    }
+    }, [])
+
+    useEffect(() => {
+        // Get params from URL
+        const pageFromUrl = parseInt(searchParams.get('page')) || 1
+        const sortFromUrl = searchParams.get('sort') || 'newest'
+        const seedFromUrl = searchParams.get('seed') || '0'
+
+        if (location.pathname === '/' || location.pathname === '/galleries' || location.pathname.startsWith('/galleries/')) {
+            fetchGalleries(pageFromUrl, sortFromUrl, seedFromUrl)
+        } else if (location.pathname === '/sources') {
+            const searchQ = searchParams.get('q') || ''
+            fetchSources(pageFromUrl, searchQ)
+        } else if (location.pathname === '/images') {
+            fetchImages(pageFromUrl, sortFromUrl, seedFromUrl)
+        } else if (location.pathname === '/videos') {
+            fetchVideos(pageFromUrl, sortFromUrl, seedFromUrl)
+        } else if (location.pathname === '/favorites') {
+            fetchFavorites(pageFromUrl, sortFromUrl, seedFromUrl)
+        } else if (location.pathname === '/people') {
+            fetchPeople(pageFromUrl)
+        } else {
+            setLoading(false)
+        }
+    }, [location.pathname, searchParams, fetchGalleries, fetchSources, fetchImages, fetchVideos, fetchFavorites, fetchPeople])
+
+    const handleRefreshGalleries = useCallback(() => {
+        fetchGalleries(galleryPage, searchParams.get('sort') || 'newest', searchParams.get('seed') || '0')
+    }, [fetchGalleries, galleryPage, searchParams])
+
+    const handleRefreshSources = useCallback(() => {
+        fetchSources(sourcePage, searchParams.get('q') || '')
+    }, [fetchSources, sourcePage, searchParams])
+
+    const handleRefreshImages = useCallback(() => {
+        fetchImages(imagePage, searchParams.get('sort') || 'newest', searchParams.get('seed') || '0')
+    }, [fetchImages, imagePage, searchParams])
+
+    const handleRefreshVideos = useCallback(() => {
+        fetchVideos(videoPage, searchParams.get('sort') || 'newest', searchParams.get('seed') || '0')
+    }, [fetchVideos, videoPage, searchParams])
+
+    const handleRefreshFavorites = useCallback(() => {
+        fetchFavorites(favoritePage, searchParams.get('sort') || 'newest', searchParams.get('seed') || '0')
+    }, [fetchFavorites, favoritePage, searchParams])
+
+    const handleRefreshPeople = useCallback(() => {
+        fetchPeople(personPage)
+    }, [fetchPeople, personPage])
 
     const handleSourceAdded = () => {
+        // Clear search to show the new source
+        setSearchParams(prev => {
+            prev.delete('q')
+            prev.set('page', '1')
+            return prev
+        })
         fetchSources(1)
         fetchGalleries(1)
         fetchImages(1)
     }
 
+    const handleSortChange = (newSort) => {
+        setSearchParams(prev => {
+            prev.set('sort', newSort)
+            if (newSort !== 'shuffle') {
+                prev.delete('seed')
+            } else if (!prev.get('seed')) {
+                prev.set('seed', Math.floor(Math.random() * 1000000).toString())
+            }
+            prev.set('page', '1')
+            return prev
+        })
+    }
+
+    const handleSeedChange = (newSeed) => {
+        setSearchParams(prev => {
+            prev.set('seed', newSeed.toString())
+            prev.set('page', '1')
+            return prev
+        })
+    }
+
     const handleGalleryPageChange = (page) => {
-        setSearchParams({ page: page.toString() })
-        fetchGalleries(page)
+        setSearchParams(prev => {
+            prev.set('page', page.toString())
+            return prev
+        })
     }
 
     const handleSourcePageChange = (page) => {
@@ -197,23 +249,31 @@ function App() {
     }
 
     const handleImagePageChange = (page) => {
-        setSearchParams({ page: page.toString() })
-        fetchImages(page)
+        setSearchParams(prev => {
+            prev.set('page', page.toString())
+            return prev
+        })
     }
 
     const handleVideoPageChange = (page) => {
-        setSearchParams({ page: page.toString() })
-        fetchVideos(page)
+        setSearchParams(prev => {
+            prev.set('page', page.toString())
+            return prev
+        })
     }
 
     const handleFavoritePageChange = (page) => {
-        setSearchParams({ page: page.toString() })
-        fetchFavorites(page)
+        setSearchParams(prev => {
+            prev.set('page', page.toString())
+            return prev
+        })
     }
 
     const handlePersonPageChange = (page) => {
-        setSearchParams({ page: page.toString() })
-        fetchPeople(page)
+        setSearchParams(prev => {
+            prev.set('page', page.toString())
+            return prev
+        })
     }
 
     const searchByColor = async (color) => {
@@ -301,59 +361,86 @@ function App() {
                         <Route path="/" element={
                             <GalleryList
                                 galleries={galleries}
-                                onRefresh={() => fetchGalleries(galleryPage)}
+                                onRefresh={handleRefreshGalleries}
                                 meta={galleryMeta}
                                 onPageChange={handleGalleryPageChange}
+                                sort={searchParams.get('sort') || 'newest'}
+                                setSort={handleSortChange}
+                                seed={parseInt(searchParams.get('seed')) || 0}
+                                setSeed={handleSeedChange}
                             />
                         } />
                         <Route path="/galleries" element={
                             <GalleryList
                                 galleries={galleries}
-                                onRefresh={() => fetchGalleries(galleryPage)}
+                                onRefresh={handleRefreshGalleries}
                                 meta={galleryMeta}
                                 onPageChange={handleGalleryPageChange}
+                                sort={searchParams.get('sort') || 'newest'}
+                                setSort={handleSortChange}
+                                seed={parseInt(searchParams.get('seed')) || 0}
+                                setSeed={handleSeedChange}
                             />
                         } />
                         <Route path="/galleries/:id" element={<GalleryDetail />} />
                         <Route path="/images" element={
                             <ImageList
                                 images={images}
-                                onRefresh={() => fetchImages(imagePage)}
+                                onRefresh={handleRefreshImages}
                                 meta={imageMeta}
                                 onPageChange={handleImagePageChange}
+                                sort={searchParams.get('sort') || 'newest'}
+                                setSort={handleSortChange}
+                                seed={parseInt(searchParams.get('seed')) || 0}
+                                setSeed={handleSeedChange}
                             />
                         } />
                         <Route path="/videos" element={
                             <VideoList
                                 videos={videos}
-                                onRefresh={() => fetchVideos(videoPage)}
+                                onRefresh={handleRefreshVideos}
                                 meta={videoMeta}
                                 onPageChange={handleVideoPageChange}
+                                sort={searchParams.get('sort') || 'newest'}
+                                setSort={handleSortChange}
+                                seed={parseInt(searchParams.get('seed')) || 0}
+                                setSeed={handleSeedChange}
                             />
                         } />
                         <Route path="/favorites" element={
                             <ImageList
                                 images={favorites}
-                                onRefresh={() => fetchFavorites(favoritePage)}
+                                onRefresh={handleRefreshFavorites}
                                 meta={favoriteMeta}
                                 onPageChange={handleFavoritePageChange}
+                                sort={searchParams.get('sort') || 'newest'}
+                                setSort={handleSortChange}
+                                seed={parseInt(searchParams.get('seed')) || 0}
+                                setSeed={handleSeedChange}
                             />
                         } />
                         <Route path="/sources" element={
                             <SourceManager
                                 sources={sources}
                                 onSourceAdded={handleSourceAdded}
-                                onRefresh={() => fetchSources(sourcePage)}
+                                onRefresh={handleRefreshSources}
                                 meta={sourceMeta}
                                 onPageChange={handleSourcePageChange}
-                                onSearch={(query) => fetchSources(1, query)}
+                                onSearch={(query) => {
+                                    setSearchParams(prev => {
+                                        if (query) prev.set('q', query)
+                                        else prev.delete('q')
+                                        prev.set('page', '1')
+                                        return prev
+                                    })
+                                }}
                                 searchQuery={searchParams.get('q') || ''}
                             />
                         } />
                         <Route path="/people" element={
                             <PersonList
                                 people={people}
-                                onRefresh={() => fetchPeople(personPage)}
+                                onRefresh={handleRefreshPeople}
                                 meta={personMeta}
                                 onPageChange={handlePersonPageChange}
                             />

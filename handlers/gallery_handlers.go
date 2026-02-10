@@ -43,9 +43,26 @@ func GetGalleries(c *gin.Context) {
 	var total int64
 	database.DB.Model(&models.Gallery{}).Count(&total)
 
+	sortBy := c.DefaultQuery("sort", "newest")
+	seedStr := c.Query("seed")
+	seed, _ := strconv.Atoi(seedStr)
+
 	var galleries []models.Gallery
+	query := database.DB.Preload("Source")
+
+	switch sortBy {
+	case "newest":
+		query = query.Order("created_at DESC")
+	case "oldest":
+		query = query.Order("created_at ASC")
+	case "shuffle":
+		query = query.Order(fmt.Sprintf("(((id + 1) * 1103515245 + %d * 12345) %% 2147483647)", seed))
+	default:
+		query = query.Order("id DESC")
+	}
+
 	// Load galleries with Source preloaded
-	if err := database.DB.Preload("Source").Limit(limit).Offset(offset).Find(&galleries).Error; err != nil {
+	if err := query.Limit(limit).Offset(offset).Find(&galleries).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch galleries"})
 		return
 	}
@@ -119,8 +136,29 @@ func GetGalleries(c *gin.Context) {
 
 func GetGallery(c *gin.Context) {
 	id := c.Param("id")
+	sortBy := c.DefaultQuery("sort", "newest")
+	seedStr := c.Query("seed")
+	seed, _ := strconv.Atoi(seedStr)
+
 	var gallery models.Gallery
-	if err := database.DB.Preload("Source").Preload("Images.Galleries").Preload("People").First(&gallery, id).Error; err != nil {
+	query := database.DB.Preload("Source").Preload("People")
+
+	// Preload images with the requested sort order
+	query = query.Preload("Images", func(db *gorm.DB) *gorm.DB {
+		subQuery := db.Preload("Galleries.Source")
+		switch sortBy {
+		case "newest":
+			return subQuery.Order("created_at DESC")
+		case "oldest":
+			return subQuery.Order("created_at ASC")
+		case "shuffle":
+			return subQuery.Order(fmt.Sprintf("(((id + 1) * 1103515245 + %d * 12345) %% 2147483647)", seed))
+		default:
+			return subQuery.Order("created_at DESC")
+		}
+	})
+
+	if err := query.First(&gallery, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Gallery not found"})
 		return
 	}

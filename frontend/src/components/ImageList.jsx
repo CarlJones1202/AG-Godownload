@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import './ImageList.css'
 import Lightbox from './Lightbox'
+import SortControls from './SortControls'
 
-function ImageList({ images, onRefresh, meta, onPageChange }) {
+function ImageList({ images, onRefresh, meta, onPageChange, sort, setSort, seed, setSeed }) {
     const [lightboxImage, setLightboxImage] = useState(null)
     const [lightboxIndex, setLightboxIndex] = useState(0)
 
@@ -66,7 +67,16 @@ function ImageList({ images, onRefresh, meta, onPageChange }) {
         <div className="image-list">
             <div className="image-header">
                 <h2>All Images</h2>
-                <button onClick={onRefresh}>🔄 Refresh</button>
+                <div className="header-actions">
+                    <SortControls
+                        sort={sort}
+                        setSort={setSort}
+                        seed={seed}
+                        setSeed={setSeed}
+                        onRandomize={setSeed}
+                    />
+                    <button onClick={onRefresh}>🔄 Refresh</button>
+                </div>
             </div>
 
             {images.length === 0 ? (

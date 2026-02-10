@@ -3,8 +3,9 @@ import VideoPlayer from './VideoPlayer'
 // Use ImageList CSS for now as it's a grid
 import './ImageList.css'
 import './VideoList.css'
+import SortControls from './SortControls'
 
-function VideoList({ videos, onRefresh, meta, onPageChange }) {
+function VideoList({ videos, onRefresh, meta, onPageChange, sort, setSort, seed, setSeed }) {
     const [lightboxVideo, setLightboxVideo] = useState(null)
     const [lightboxIndex, setLightboxIndex] = useState(0)
     const [progressMap, setProgressMap] = useState({})
@@ -72,7 +73,16 @@ function VideoList({ videos, onRefresh, meta, onPageChange }) {
         <div className="image-list">
             <div className="image-header">
                 <h2>All Videos</h2>
-                <button onClick={onRefresh}>🔄 Refresh</button>
+                <div className="header-actions">
+                    <SortControls
+                        sort={sort}
+                        setSort={setSort}
+                        seed={seed}
+                        setSeed={setSeed}
+                        onRandomize={setSeed}
+                    />
+                    <button onClick={onRefresh}>🔄 Refresh</button>
+                </div>
             </div>
 
             {videos.length === 0 ? (

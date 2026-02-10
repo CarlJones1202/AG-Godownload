@@ -62,11 +62,19 @@
     justify-content: center;
 }
 
-.person-photos-carousel img {
+.person-photos-carousel img,
+.person-fallback-thumbnail img {
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
+}
+
+.person-fallback-thumbnail {
+    width: 100%;
+    aspect-ratio: 1;
+    overflow: hidden;
+    border-radius: var(--radius-lg);
 }
 
 /* Carousel Controls */
@@ -327,10 +335,17 @@
 .content-section h2 {
     font-size: 1.5rem;
     font-weight: 700;
-    margin-bottom: 1.5rem;
+    margin: 0;
     display: flex;
     align-items: center;
     gap: 1rem;
+}
+
+.section-header-flex {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
 }
 
 .count-badge {
