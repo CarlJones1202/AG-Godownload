@@ -10,6 +10,14 @@ A Go-based image gallery API with automatic crawling and image ripping capabilit
 - People management with automatic gallery linking
 - Automatic image downloading and thumbnail generation
 
+## Setup
+1. Clone the repository.
+2. Run the initialization script to install dependencies (FFmpeg, Go, Node.js):
+   ```powershell
+   ./init.ps1
+   ```
+   *Note: This script uses `winget` to install system dependencies. You may need to run it in an Administrator PowerShell session.*
+
 ## Running the Application
 
 ```bash

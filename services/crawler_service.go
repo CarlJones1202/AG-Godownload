@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"gallery_api/config"
 	"gallery_api/database"
 	"gallery_api/logger"
 	"gallery_api/models"
@@ -80,8 +81,7 @@ func CrawlSource(sourceID uint) error {
 
 	// Logic from reference: find div[id^='post_message_'] and extract images using rippers
 	// Use a semaphore to limit concurrent downloads
-	const maxConcurrent = 7 // Start with 7 concurrent downloads
-	sem := make(chan struct{}, maxConcurrent)
+	sem := make(chan struct{}, config.Global.MaxConcurrentDownloads)
 	var wg sync.WaitGroup
 	var imagesMutex sync.Mutex
 	var imagesToInsert []models.Image
@@ -286,7 +286,8 @@ func CrawlSource(sourceID uint) error {
 			imagesWithoutAssoc[i].Galleries = nil
 		}
 
-		if err := database.DB.Create(&imagesWithoutAssoc).Error; err != nil {
+		// Use CreateInBatches for safer large inserts
+		if err := database.DB.CreateInBatches(&imagesWithoutAssoc, 100).Error; err != nil {
 			logger.Errorf("Failed to batch insert images: %v", err)
 		} else {
 			logger.Infof("Successfully inserted %d images", len(imagesWithoutAssoc))
@@ -303,7 +304,9 @@ func CrawlSource(sourceID uint) error {
 			}
 
 			// Chunked insert to avoid SQLite variable limit
-			const chunkSize = 100
+			// SQLite default limit is 999 variables pre-3.32.0, significantly higher in newer versions.
+			// Each row has 2 params. 400 rows = 800 params, safe for old SQLite.
+			const chunkSize = 400
 			totalAssocs := len(valueStrings)
 			if totalAssocs > 0 {
 				for i := 0; i < totalAssocs; i += chunkSize {

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"gallery_api/config"
 	"gallery_api/database"
 	"gallery_api/logger"
 	"gallery_api/models"
@@ -38,7 +39,7 @@ func StartCrawlerWorker() {
 	}()
 
 	// Start workers
-	const numWorkers = 5
+	numWorkers := config.Global.CrawlerWorkers
 	for i := 0; i < numWorkers; i++ {
 		go func(workerID int) {
 			logger.Debugf("Crawler worker %d started", workerID)
@@ -64,17 +65,22 @@ func AddToAITagQueue(imageID uint) {
 }
 
 func StartAITagWorker() {
-	// Only 1 worker because it's heavy (loading models, etc)
-	// Or maybe the script is fast enough to have 2? Let's stick to 1 to avoid memory spikes.
-	go func() {
-		logger.Debug("AI Tag worker started")
-		for imageID := range AITagQueue {
-			logger.Debugf("AI Tag worker processing image %d", imageID)
-			if err := LabelImage(imageID); err != nil {
-				logger.Errorf("Error AI tagging image %d: %v", imageID, err)
+	numWorkers := config.Global.AITagWorkers
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
+
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			logger.Debug("AI Tag worker started")
+			for imageID := range AITagQueue {
+				logger.Debugf("AI Tag worker processing image %d", imageID)
+				if err := LabelImage(imageID); err != nil {
+					logger.Errorf("Error AI tagging image %d: %v", imageID, err)
+				}
 			}
-		}
-	}()
+		}()
+	}
 
 	// Startup: scan for untagged images
 	go func() {

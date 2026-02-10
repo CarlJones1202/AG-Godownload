@@ -28,8 +28,8 @@ var (
 )
 
 func init() {
-	// Default to WARN level
-	currentLevel = WARN
+	// Default to INFO level (standard default)
+	currentLevel = INFO
 
 	// Allow override via environment variable
 	if level := os.Getenv("LOG_LEVEL"); level != "" {

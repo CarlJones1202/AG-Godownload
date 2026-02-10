@@ -8,7 +8,7 @@ import (
 
 type Gallery struct {
 	ID        uint           `gorm:"primaryKey" json:"id"`
-	CreatedAt time.Time      `json:"created_at"`
+	CreatedAt time.Time      `json:"created_at" gorm:"index"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 	Name      string         `json:"name"`

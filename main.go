@@ -1,6 +1,7 @@
 ﻿package main
 
 import (
+	"gallery_api/config"
 	"gallery_api/database"
 	"gallery_api/handlers"
 	"gallery_api/logger"
@@ -10,8 +11,14 @@ import (
 )
 
 func main() {
+	// Load Configuration
+	config.Load()
+
+	// Configure logger from config
+	logger.SetLevelFromString(config.Global.LogLevel)
+
 	// Initialize Database
-	database.Connect("gallery.db")
+	database.Connect(config.Global.DatabasePath)
 	database.Migrate()
 	database.MigrateData()
 
@@ -132,6 +139,6 @@ func main() {
 	// r.GET("/thumbnails/:filename", handlers.ServeThumbnail) // Deprecated
 	r.Static("/person-images", "./uploads/person_images")
 
-	logger.Info("Server starting on :8080")
-	r.Run(":8080")
+	logger.Info("Server starting on :" + config.Global.Port)
+	r.Run(":" + config.Global.Port)
 }

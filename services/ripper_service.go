@@ -28,6 +28,9 @@ func newCollector(targetURL string) *colly.Collector {
 		} else {
 			logger.Warnf("WireGuard not available, using direct connection: %v", err)
 		}
+	} else {
+		// Use shared optimized transport for regular requests
+		c.WithTransport(GetGlobalTransport())
 	}
 
 	return c

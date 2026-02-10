@@ -126,12 +126,15 @@ func VerifyDownloadedVideos() error {
 					localPath := strings.TrimPrefix(video.OriginalURL, "file://")
 					if _, err := os.Stat(localPath); os.IsNotExist(err) {
 						// Local file no longer exists, skip gracefully
-						logger.Infof("[Source: %s] Local video file no longer exists, skipping: %s (ID: %d)", video.OriginalURL, localPath, video.ID)
+						logger.Infof("[Source: %s] Local video file no longer exists at original path: %s (ID: %d)", video.OriginalURL, localPath, video.ID)
+						logger.Infof("[Source: %s] Expected location in uploads: %s", video.OriginalURL, expectedFullPath)
 						atomic.AddInt32(&skippedCount, 1)
 						continue
 					}
 					// Local file exists, we could re-import it, but for now just log
-					logger.Infof("[Source: %s] Local video file still exists but not in expected location: %s (ID: %d)", video.OriginalURL, localPath, video.ID)
+					logger.Infof("[Source: %s] Local video file still exists at original path but not in expected location", video.OriginalURL)
+					logger.Infof("[Source: %s] Original path: %s", video.OriginalURL, localPath)
+					logger.Infof("[Source: %s] Expected location: %s (ID: %d)", video.OriginalURL, expectedFullPath, video.ID)
 					atomic.AddInt32(&skippedCount, 1)
 					continue
 				}

@@ -15,6 +15,42 @@ import (
 	"time"
 )
 
+// extractImageProvider identifies the image hosting provider from a download URL
+func extractImageProvider(url string) string {
+	urlLower := strings.ToLower(url)
+
+	switch {
+	case strings.Contains(urlLower, "imgur.com") || strings.Contains(urlLower, "i.imgur.com"):
+		return "imgur"
+	case strings.Contains(urlLower, "imx.to") || strings.Contains(urlLower, "i.imx.to"):
+		return "imx"
+	case strings.Contains(urlLower, "vipr.im") || strings.Contains(urlLower, "i.vipr.im"):
+		return "viprimg"
+	case strings.Contains(urlLower, "turboimagehost") || strings.Contains(urlLower, "turboimg"):
+		return "turboimg"
+	case strings.Contains(urlLower, "imagebam"):
+		return "imagebam"
+	case strings.Contains(urlLower, "imgbox"):
+		return "imgbox"
+	case strings.Contains(urlLower, "pixhost"):
+		return "pixhost"
+	case strings.Contains(urlLower, "postimages.org"):
+		return "postimages"
+	case strings.Contains(urlLower, "imagetwist"):
+		return "imagetwist"
+	case strings.Contains(urlLower, "acidimg"):
+		return "acidimg"
+	case strings.Contains(urlLower, "mymypic.net") || strings.Contains(urlLower, "mymyatt.net"):
+		return "mymypic"
+	case strings.HasSuffix(urlLower, ".jpg") || strings.HasSuffix(urlLower, ".jpeg") ||
+		strings.HasSuffix(urlLower, ".png") || strings.HasSuffix(urlLower, ".gif") ||
+		strings.HasSuffix(urlLower, ".webp"):
+		return "direct"
+	default:
+		return "unknown"
+	}
+}
+
 // VerifyDownloadedImages checks all images in the database and re-downloads any missing files
 // VerifyDownloadedImages checks all images and re-downloads + fixes DB if needed
 func VerifyDownloadedImages() error {
@@ -159,14 +195,32 @@ func VerifyDownloadedImages() error {
 		// Phase 2: concurrent recovery – THE IMPORTANT PART
 		if len(tasks) > 0 {
 
-			const maxConcurrent = 12
-			sem := make(chan struct{}, maxConcurrent)
+			// Per-provider semaphore system
+			const maxConcurrentPerProvider = 4
+			providerSemaphores := make(map[string]chan struct{})
+			var semMutex sync.Mutex
+
+			// Helper to get or create semaphore for a provider
+			getSemaphore := func(provider string) chan struct{} {
+				semMutex.Lock()
+				defer semMutex.Unlock()
+				if _, exists := providerSemaphores[provider]; !exists {
+					providerSemaphores[provider] = make(chan struct{}, maxConcurrentPerProvider)
+				}
+				return providerSemaphores[provider]
+			}
+
 			var wg sync.WaitGroup
 
 			for _, task := range tasks {
 				wg.Add(1)
 				go func(t recoveryTask) {
 					defer wg.Done()
+
+					// Extract provider and get its semaphore
+					provider := extractImageProvider(t.DownloadURL)
+					sem := getSemaphore(provider)
+
 					sem <- struct{}{}
 					defer func() { <-sem }()
 
@@ -176,6 +230,7 @@ func VerifyDownloadedImages() error {
 					// (e.g. /uploads/MySource/abc123.jpg or whatever it decided)
 					result, err := DownloadImage(t.DownloadURL, t.SourceName)
 					if err != nil {
+						logger.Warnf("[%s] Failed to download image ID %d: %v", provider, t.ID, err)
 						return
 					}
 
@@ -199,6 +254,7 @@ func VerifyDownloadedImages() error {
 					GenerateThumbnail(result.Path)
 
 					duration := time.Since(start)
+					logger.Debugf("[%s] Recovered image ID %d in %.2fs", provider, t.ID, duration.Seconds())
 					if duration > 5*time.Second {
 						time.Sleep(1 * time.Second) // polite pause
 					}

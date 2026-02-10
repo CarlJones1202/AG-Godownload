@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -58,7 +59,6 @@ type DownloadImageResult struct {
 // DownloadImage downloads an image and saves it with a content-based hash filename
 // in a subdirectory named after the source. Returns the path and extracted colors.
 func DownloadImage(url string, sourceName string) (*DownloadImageResult, error) {
-	client := &http.Client{}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -69,7 +69,8 @@ func DownloadImage(url string, sourceName string) (*DownloadImageResult, error) 
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("Connection", "keep-alive")
 
-	resp, err := client.Do(req)
+	// Use the shared client with retry logic
+	resp, err := DoRequestWithRetry(context.Background(), req)
 	if err != nil {
 		return nil, err
 	}
@@ -286,7 +287,6 @@ func GenerateVideoThumbnail(srcPath string) (string, error) {
 
 // DownloadPersonImage downloads an image for a person and saves it to a specific directory
 func DownloadPersonImage(url string, personID uint) (string, error) {
-	client := &http.Client{}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return "", err
@@ -297,7 +297,8 @@ func DownloadPersonImage(url string, personID uint) (string, error) {
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("Connection", "keep-alive")
 
-	resp, err := client.Do(req)
+	// Use shared client with retry logic
+	resp, err := DoRequestWithRetry(context.Background(), req)
 	if err != nil {
 		return "", err
 	}
