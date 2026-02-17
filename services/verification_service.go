@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -56,19 +57,70 @@ func extractImageProvider(url string) string {
 func VerifyDownloadedImages() error {
 	logger.Info("Verifying downloaded images...")
 
+	// Step 1: Identify images belonging to "favorited galleries"
+	// A "favorited gallery" is one that contains at least one favorited image.
+	var favGalleryIDs []uint
+	if err := database.DB.Table("image_galleries").
+		Joins("JOIN images ON images.id = image_galleries.image_id").
+		Where("images.is_favorite = ?", true).
+		Distinct("image_galleries.gallery_id").
+		Pluck("image_galleries.gallery_id", &favGalleryIDs).Error; err != nil {
+		logger.Errorf("Failed to identify favorite galleries: %v", err)
+		// Continue without this optimization if it fails
+	}
+
+	// Map of ImageID -> bool for fast lookup of "is in favorited gallery"
+	isInFavGallery := make(map[uint]bool)
+	if len(favGalleryIDs) > 0 {
+		var imgIDs []uint
+		// Batch this in chunks if we have massive amounts of favorites, but for now
+		// strict "IN" query should be okay for typical extensive usage (<50k favs).
+		if err := database.DB.Table("image_galleries").
+			Where("gallery_id IN ?", favGalleryIDs).
+			Distinct("image_id").
+			Pluck("image_id", &imgIDs).Error; err == nil {
+			for _, id := range imgIDs {
+				isInFavGallery[id] = true
+			}
+		}
+	}
+
 	var images []struct {
 		ID          uint
-		Filename    string // current value in DB (may point to missing/broken file)
+		Filename    string
 		DownloadURL string
+		IsFavorite  bool
+		CreatedAt   time.Time
 	}
 
 	if err := database.DB.
 		Model(&models.Image{}).
-		Select("id, filename, download_url").
-		Order("is_favorite DESC").
+		Select("id, filename, download_url, is_favorite, created_at").
+		// Remove SQL order as we will sort in Go
 		Find(&images).Error; err != nil {
 		return fmt.Errorf("failed to query images: %w", err)
 	}
+
+	// Sort images by priority:
+	// 1. IsFavorite (True)
+	// 2. Belongs to a Favorite Gallery (True)
+	// 3. Newest (CreatedAt Descending)
+	sort.Slice(images, func(i, j int) bool {
+		// 1. IsFavorite
+		if images[i].IsFavorite != images[j].IsFavorite {
+			return images[i].IsFavorite // True comes first
+		}
+
+		// 2. In Favorite Gallery
+		inFavGalI := isInFavGallery[images[i].ID]
+		inFavGalJ := isInFavGallery[images[j].ID]
+		if inFavGalI != inFavGalJ {
+			return inFavGalI // True comes first
+		}
+
+		// 3. Newest to Oldest
+		return images[i].CreatedAt.After(images[j].CreatedAt)
+	})
 
 	go func() {
 		SetVerificationRunning(true, len(images))
@@ -202,7 +254,7 @@ func VerifyDownloadedImages() error {
 		if len(tasks) > 0 {
 
 			// Per-provider semaphore system
-			const maxConcurrentPerProvider = 4
+			const maxConcurrentPerProvider = 10
 			providerSemaphores := make(map[string]chan struct{})
 			var semMutex sync.Mutex
 
@@ -288,18 +340,54 @@ func VerifyDownloadedImages() error {
 	return nil
 }
 
-// VerifyPersonImages checks all people with a StashID and re-downloads missing photos
+// VerifyPersonImages checks all people with identifiers and re-downloads missing photos
 func VerifyPersonImages() error {
 	logger.Info("Verifying person images...")
 
+	// Find all people that have identifiers (new system) OR stash_id (deprecated)
 	var people []models.Person
-	// Find all people that are linked to StashDB
-	if err := database.DB.Where("stash_id != ? AND stash_id != ''", "").Find(&people).Error; err != nil {
-		return fmt.Errorf("failed to query people: %w", err)
+
+	// Query people with identifiers from the new system
+	var peopleWithIdentifiers []models.Person
+	if err := database.DB.
+		Joins("JOIN person_identifiers ON person_identifiers.person_id = people.id").
+		Distinct("people.*").
+		Find(&peopleWithIdentifiers).Error; err != nil {
+		return fmt.Errorf("failed to query people with identifiers: %w", err)
+	}
+
+	// Also get people with deprecated stash_id
+	var peopleWithStashID []models.Person
+	if err := database.DB.
+		Where("stash_id != ? AND stash_id != ''", "").
+		Find(&peopleWithStashID).Error; err != nil {
+		return fmt.Errorf("failed to query people with stash_id: %w", err)
+	}
+
+	// Merge both lists (avoiding duplicates)
+	seen := make(map[uint]bool)
+	for _, p := range peopleWithIdentifiers {
+		if !seen[p.ID] {
+			seen[p.ID] = true
+			people = append(people, p)
+		}
+	}
+	for _, p := range peopleWithStashID {
+		if !seen[p.ID] {
+			seen[p.ID] = true
+			people = append(people, p)
+		}
+	}
+
+	if len(people) == 0 {
+		logger.Info("Person image verification complete. No people with identifiers found.")
+		return nil
 	}
 
 	go func() {
 		var recoveredCount int32 = 0
+
+		registry := GetIdentifierRegistry()
 
 		for _, person := range people {
 			if person.Photos == "" {
@@ -313,26 +401,10 @@ func VerifyPersonImages() error {
 
 			needsRecovery := false
 			for _, webPath := range photoPaths {
-				// webPath is like "/person-images/1/abc.jpg"
-				// We need to convert it to "uploads/person_images/1/abc.jpg"
-
-				// Remove the leading "/" if present
 				relativePath := strings.TrimPrefix(webPath, "/")
 				if strings.HasPrefix(relativePath, "person-images/") {
-					// It's in our expected format.
-					// We need to map "person-images" to "uploads/person_images" technically?
-					// Wait, DownloadPersonImage returns `/person-images/...`
-					// And `r.Static("/person-images", "./uploads/person_images")` in main.go
-					// So `/person-images/` on web maps to `./uploads/person_images/` on disk.
-
-					// Replace "person-images" with "uploads/person_images" for filesystem check
-					// BUT filepath.Join handles separators.
-					// Let's strip "person-images/" and join with UploadsDir + "person_images"
-
 					parts := strings.SplitN(relativePath, "/", 2)
 					if len(parts) == 2 {
-						// parts[1] is "1/abc.jpg"
-						// On windows this needs to become "uploads\person_images\1\abc.jpg"
 						localPath := filepath.Join(UploadsDir, "person_images", filepath.FromSlash(parts[1]))
 						if _, err := os.Stat(localPath); os.IsNotExist(err) {
 							fmt.Printf("Missing person image: %s (Person ID: %d)\n", localPath, person.ID)
@@ -343,38 +415,61 @@ func VerifyPersonImages() error {
 				}
 			}
 
-			if needsRecovery {
-				fmt.Printf("Recovering images for person %s (ID: %d, StashID: %s)...\n", person.Name, person.ID, person.StashID)
+			if !needsRecovery {
+				continue
+			}
 
-				stashService := NewStashDBService()
-				performer, err := stashService.GetPerformer(person.StashID)
+			// Collect all identifiers for this person
+			var identifiers []models.PersonIdentifier
+			database.DB.Where("person_id = ?", person.ID).Find(&identifiers)
+
+			// Also add deprecated stash_id as a source if present
+			if person.StashID != "" {
+				identifiers = append(identifiers, models.PersonIdentifier{
+					Source:     "stashdb",
+					ExternalID: person.StashID,
+				})
+			}
+
+			if len(identifiers) == 0 {
+				continue
+			}
+
+			fmt.Printf("Recovering images for person %s (ID: %d)...\n", person.Name, person.ID)
+
+			var newPhotoURLs []string
+			personIDUint := person.ID
+
+			// Try each identifier source to get photos
+			for _, ident := range identifiers {
+				provider, err := registry.GetProvider(ident.Source)
 				if err != nil {
-					fmt.Printf("Failed to fetch performer %s from StashDB: %v\n", person.StashID, err)
 					continue
 				}
 
-				var newPhotoURLs []string
-				personIDUint := person.ID
+				personData, err := provider.GetDetails(ident.ExternalID)
+				if err != nil {
+					continue
+				}
 
-				for _, img := range performer.Images {
-					localPath, err := DownloadPersonImage(img.URL, personIDUint)
+				for _, img := range personData.Photos {
+					localPath, err := DownloadPersonImage(img, personIDUint)
 					if err != nil {
-						fmt.Printf("Failed to re-download image %s: %v\n", img.URL, err)
+						fmt.Printf("Failed to re-download image %s: %v\n", img, err)
 						continue
 					}
 					newPhotoURLs = append(newPhotoURLs, localPath)
 				}
+			}
 
-				if len(newPhotoURLs) > 0 {
-					photosJSON, _ := json.Marshal(newPhotoURLs)
+			if len(newPhotoURLs) > 0 {
+				photosJSON, _ := json.Marshal(newPhotoURLs)
 
-					// Update DB
-					if err := database.DB.Model(&models.Person{ID: person.ID}).Update("photos", string(photosJSON)).Error; err != nil {
-						fmt.Printf("Failed to update person photos for ID %d: %v\n", person.ID, err)
-					} else {
-						atomic.AddInt32(&recoveredCount, 1)
-						fmt.Printf("Successfully recovered images for person ID %d\n", person.ID)
-					}
+				if err := database.DB.Model(&models.Person{ID: person.ID}).Update("photos", string(photosJSON)).Error; err != nil {
+					fmt.Printf("Failed to update person photos for ID %d: %v\n", person.ID, err)
+				} else {
+					atomic.AddInt32(&recoveredCount, 1)
+					fmt.Printf("Successfully recovered images for person ID %d\n", person.ID)
 				}
 			}
 		}
@@ -386,6 +481,111 @@ func VerifyPersonImages() error {
 		}
 	}()
 
+	return nil
+}
+
+// RemoveDuplicateImages identifies and removes duplicate images based on DownloadURL
+func RemoveDuplicateImages() error {
+	logger.Info("Checking for duplicate images...")
+
+	// Find download URLs that appear more than once
+	var duplicates []struct {
+		DownloadURL string
+		Count       int
+	}
+
+	if err := database.DB.Model(&models.Image{}).
+		Select("download_url, count(*) as count").
+		Where("download_url != ?", "").
+		Group("download_url").
+		Having("count(*) > 1").
+		Find(&duplicates).Error; err != nil {
+		return fmt.Errorf("failed to query duplicate images: %w", err)
+	}
+
+	if len(duplicates) == 0 {
+		logger.Info("No duplicate images found.")
+		return nil
+	}
+
+	logger.Infof("Found %d duplicate download URLs. Processing removals...", len(duplicates))
+
+	removedCount := 0
+	filesRemovedCount := 0
+
+	for _, dup := range duplicates {
+		var images []models.Image
+		if err := database.DB.Where("download_url = ?", dup.DownloadURL).Find(&images).Error; err != nil {
+			logger.Errorf("Failed to fetch images for url %s: %v", dup.DownloadURL, err)
+			continue
+		}
+
+		if len(images) < 2 {
+			continue
+		}
+
+		// determine keeper
+		// Priority:
+		// 1. IsFavorite
+		// 2. File Exists on Disk
+		// 3. Oldest CreatedAt (Keep the original import)
+
+		// Sort so the best candidate is at index 0
+		sort.Slice(images, func(i, j int) bool {
+			// 1. IsFavorite
+			if images[i].IsFavorite != images[j].IsFavorite {
+				return images[i].IsFavorite // True (favorite) comes first
+			}
+
+			// 2. File Exists
+			pathI := filepath.Join(UploadsDir, images[i].Filename)
+			pathJ := filepath.Join(UploadsDir, images[j].Filename)
+			_, errI := os.Stat(pathI)
+			_, errJ := os.Stat(pathJ)
+			existsI := errI == nil
+			existsJ := errJ == nil
+
+			if existsI != existsJ {
+				return existsI // True (exists) comes first
+			}
+
+			// 3. Oldest CreatedAt (Stable ID usually implies age too, but use CreatedAt)
+			return images[i].CreatedAt.Before(images[j].CreatedAt)
+		})
+
+		keeper := images[0]
+		keeperPath := filepath.Join(UploadsDir, keeper.Filename)
+
+		// The rest are to be removed
+		for i := 1; i < len(images); i++ {
+			toRemove := images[i]
+			pathToRemove := filepath.Join(UploadsDir, toRemove.Filename)
+
+			// Delete from DB
+			if err := database.DB.Unscoped().Delete(&toRemove).Error; err != nil {
+				logger.Errorf("Failed to delete duplicate image ID %d: %v", toRemove.ID, err)
+				continue
+			}
+			removedCount++
+
+			// Delete file ONLY if it is different from keeper's path
+			// (If they point to the exact same filename, we don't delete the file!)
+			if pathToRemove != keeperPath && toRemove.Filename != keeper.Filename {
+				if err := os.Remove(pathToRemove); err != nil {
+					if !os.IsNotExist(err) {
+						logger.Warnf("Failed to delete duplicate file %s: %v", pathToRemove, err)
+					}
+				} else {
+					filesRemovedCount++
+					// Try to remove thumbnail too
+					thumbPath := filepath.Join(UploadsDir, "thumbnails", filepath.Base(pathToRemove))
+					os.Remove(thumbPath)
+				}
+			}
+		}
+	}
+
+	logger.Infof("Duplicate removal complete. Removed %d DB entries and %d files.", removedCount, filesRemovedCount)
 	return nil
 }
 

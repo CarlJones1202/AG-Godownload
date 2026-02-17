@@ -3,13 +3,16 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"gallery_api/database"
 	"gallery_api/logger"
+	"gallery_api/models"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/PuerkitoBio/goquery"
 )
@@ -22,6 +25,7 @@ type GallerySearchResult struct {
 	Thumbnail   string `json:"thumbnail"`
 	ReleaseDate string `json:"release_date"`
 	SourceID    string `json:"source_id"` // UUID for MetArt or similar ID
+	ID          uint   `json:"id"`        // Database gallery ID if matched
 }
 
 // GalleryMetadata represents scraped metadata from a gallery
@@ -48,6 +52,14 @@ func SearchGalleryMatches(galleryName string, people []string) ([]GallerySearchR
 		logger.Warnf("MetArt search failed: %v", err)
 	} else {
 		results = append(results, metartResults...)
+	}
+
+	// Search MetartX
+	metartxResults, err := searchMetartX(searchQuery)
+	if err != nil {
+		logger.Warnf("MetartX search failed: %v", err)
+	} else {
+		results = append(results, metartxResults...)
 	}
 
 	// Search Playboy
@@ -89,6 +101,8 @@ func ScrapeGalleryMetadata(sourceURL string, provider string, sourceID string) (
 	switch strings.ToLower(provider) {
 	case "metart":
 		return scrapeMetArtGallery(sourceURL, sourceID)
+	case "metartx":
+		return scrapeMetartXGallery(sourceURL, sourceID)
 	case "playboy":
 		return scrapePlayboyGallery(sourceURL)
 	case "playboyplus":
@@ -184,6 +198,71 @@ func searchMetArt(query string) ([]GallerySearchResult, error) {
 	}
 
 	logger.Infof("[MetArt] Found %d results via API", len(results))
+	return results, nil
+}
+
+// searchMetartX searches MetartX for matching galleries using their internal API
+func searchMetartX(query string) ([]GallerySearchResult, error) {
+	apiURL := fmt.Sprintf("https://www.metartx.com/api/search-results?searchPhrase=%s&page=1&pageSize=30&sortBy=latest-gallery", url.QueryEscape(query))
+	logger.Infof("[MetartX] Searching API: %s", apiURL)
+
+	client := GetHTTPClient(apiURL)
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search MetartX API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("MetartX API returned status %d", resp.StatusCode)
+	}
+
+	var apiResp struct {
+		Items []struct {
+			Item struct {
+				Name        string `json:"name"`
+				Path        string `json:"path"`
+				PublishedAt string `json:"publishedAt"`
+				Thumbnail   string `json:"thumbnailCoverPath"`
+				Models      []struct {
+					Name string `json:"name"`
+				} `json:"models"`
+			} `json:"item"`
+		} `json:"items"`
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if err := json.Unmarshal(bodyBytes, &apiResp); err != nil {
+		logger.Errorf("[MetartX] Failed to parse JSON: %v", err)
+		return nil, fmt.Errorf("failed to parse API JSON")
+	}
+
+	var results []GallerySearchResult
+	for _, entry := range apiResp.Items {
+		item := entry.Item
+
+		galleryURL := "https://www.metartx.com" + item.Path
+		thumbURL := "https://www.metartx.com" + item.Thumbnail
+
+		dateStr := item.PublishedAt
+		if len(dateStr) > 10 {
+			dateStr = dateStr[:10]
+		}
+
+		results = append(results, GallerySearchResult{
+			Provider:    "MetartX",
+			Title:       item.Name,
+			URL:         galleryURL,
+			Thumbnail:   thumbURL,
+			ReleaseDate: dateStr,
+		})
+	}
+
+	logger.Infof("[MetartX] Found %d results via API", len(results))
 	return results, nil
 }
 
@@ -325,6 +404,80 @@ func scrapeMetArtGallery(urlStr, uuid string) (*GalleryMetadata, error) {
 	}
 
 	logger.Infof("Scraped MetArt gallery: %s (Rating: %.2f)", metadata.Description[:min(50, len(metadata.Description))], metadata.Rating)
+	return metadata, nil
+}
+
+// scrapeMetartXGallery scrapes full metadata from a MetartX gallery page
+func scrapeMetartXGallery(urlStr, uuid string) (*GalleryMetadata, error) {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid source URL: %w", err)
+	}
+
+	pathParts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(pathParts) < 2 {
+		return nil, fmt.Errorf("invalid MetartX URL format, cannot extract date/name")
+	}
+
+	var galleryDate, galleryName string
+	for i, part := range pathParts {
+		if part == "gallery" && i+2 < len(pathParts) {
+			galleryDate = pathParts[i+1]
+			galleryName = pathParts[i+2]
+			break
+		}
+	}
+
+	if galleryDate == "" && len(pathParts) >= 2 {
+		galleryDate = pathParts[len(pathParts)-2]
+		galleryName = pathParts[len(pathParts)-1]
+	}
+
+	apiURL := fmt.Sprintf("https://www.metartx.com/api/gallery?name=%s&date=%s", galleryName, galleryDate)
+	logger.Infof("[MetartX] Fetching detail API: %s", apiURL)
+
+	client := GetHTTPClient(apiURL)
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch MetartX gallery API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("MetartX gallery API returned status %d", resp.StatusCode)
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read MetartX response: %w", err)
+	}
+
+	var galleryDetail struct {
+		Name          string  `json:"name"`
+		Description   string  `json:"description"`
+		RatingAverage float64 `json:"ratingAverage"`
+		PublishedAt   string  `json:"publishedAt"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &galleryDetail); err != nil {
+		logger.Errorf("[MetartX] Failed to parse detail JSON: %v", err)
+		return nil, fmt.Errorf("failed to parse detail JSON")
+	}
+
+	metadata := &GalleryMetadata{
+		Provider:    "MetartX",
+		SourceURL:   urlStr,
+		Description: galleryDetail.Description,
+		Rating:      galleryDetail.RatingAverage,
+	}
+
+	if galleryDetail.PublishedAt != "" {
+		if parsed, err := time.Parse("2006-01-02T15:04:05.000Z", galleryDetail.PublishedAt); err == nil {
+			metadata.ReleaseDate = parsed
+		}
+	}
+
+	logger.Infof("Scraped MetartX gallery: %s (Rating: %.2f)", metadata.Description[:min(50, len(metadata.Description))], metadata.Rating)
 	return metadata, nil
 }
 
@@ -620,6 +773,187 @@ func searchPlayboyPlus(query string) ([]GallerySearchResult, error) {
 	}
 
 	return results, nil
+}
+
+type PersonScanResult struct {
+	PersonID         uint                  `json:"person_id"`
+	PersonName       string                `json:"person_name"`
+	Provider         string                `json:"provider"`
+	FoundCount       int                   `json:"found_count"`
+	ExistingCount    int                   `json:"existing_count"`
+	UnsureCount      int                   `json:"unsure_count"`
+	MissingCount     int                   `json:"missing_count"`
+	MissingGalleries []GallerySearchResult `json:"missing_galleries"`
+	UnsureGalleries  []GallerySearchResult `json:"unsure_galleries"`
+}
+
+func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonScanResult, error) {
+	var person models.Person
+	if err := database.DB.First(&person, personID).Error; err != nil {
+		return nil, fmt.Errorf("person not found: %w", err)
+	}
+
+	var searchTerms []string
+	if alias != "" {
+		searchTerms = []string{alias}
+	} else {
+		searchTerms = []string{person.Name}
+		if person.Aliases != "" {
+			var aliases []string
+			if err := json.Unmarshal([]byte(person.Aliases), &aliases); err == nil {
+				searchTerms = append(searchTerms, aliases...)
+			}
+		}
+	}
+
+	var allResults []GallerySearchResult
+
+	switch strings.ToLower(provider) {
+	case "metart":
+		for _, term := range searchTerms {
+			results, err := searchMetArt(term)
+			if err != nil {
+				logger.Warnf("MetArt search failed for term %s: %v", term, err)
+				continue
+			}
+			allResults = append(allResults, results...)
+		}
+	case "metartx":
+		for _, term := range searchTerms {
+			results, err := searchMetartX(term)
+			if err != nil {
+				logger.Warnf("MetartX search failed for term %s: %v", term, err)
+				continue
+			}
+			allResults = append(allResults, results...)
+		}
+	case "playboy":
+		for _, term := range searchTerms {
+			results, err := searchPlayboy(term)
+			if err != nil {
+				logger.Warnf("Playboy search failed for term %s: %v", term, err)
+				continue
+			}
+			allResults = append(allResults, results...)
+		}
+	case "playboyplus":
+		for _, term := range searchTerms {
+			results, err := searchPlayboyPlus(term)
+			if err != nil {
+				logger.Warnf("PlayboyPlus search failed for term %s: %v", term, err)
+				continue
+			}
+			allResults = append(allResults, results...)
+		}
+	case "vixen":
+		for _, term := range searchTerms {
+			results, err := searchVixen(term)
+			if err != nil {
+				logger.Warnf("Vixen search failed for term %s: %v", term, err)
+				continue
+			}
+			allResults = append(allResults, results...)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported provider: %s", provider)
+	}
+
+	seen := make(map[string]bool)
+	uniqueResults := make([]GallerySearchResult, 0)
+	for _, r := range allResults {
+		key := r.URL
+		if r.SourceID != "" {
+			key = r.Provider + ":" + r.SourceID
+		}
+		if !seen[key] {
+			seen[key] = true
+			uniqueResults = append(uniqueResults, r)
+		}
+	}
+
+	var existingGalleries []models.Gallery
+	database.DB.Find(&existingGalleries)
+
+	galleryNames := make(map[string]models.Gallery)
+	for _, g := range existingGalleries {
+		normalizedName := normalizeGalleryName(g.Name)
+		if normalizedName != "" {
+			galleryNames[normalizedName] = g
+		}
+	}
+
+	type galleryStatus int
+	const (
+		statusMissing galleryStatus = iota
+		statusUnsure
+		statusExisting
+	)
+
+	type resultWithStatus struct {
+		result    GallerySearchResult
+		galleryID uint
+		status    galleryStatus
+	}
+
+	var resultsWithStatus []resultWithStatus
+	existingCount := 0
+	unsureCount := 0
+
+	for _, result := range uniqueResults {
+		normalizedResultName := normalizeGalleryName(result.Title)
+
+		if existingGallery, found := galleryNames[normalizedResultName]; found {
+			resultWithID := result
+			resultWithID.ID = existingGallery.ID
+
+			if existingGallery.Provider != "" && strings.EqualFold(existingGallery.Provider, provider) {
+				resultsWithStatus = append(resultsWithStatus, resultWithStatus{result: resultWithID, galleryID: existingGallery.ID, status: statusExisting})
+				existingCount++
+			} else {
+				resultsWithStatus = append(resultsWithStatus, resultWithStatus{result: resultWithID, galleryID: existingGallery.ID, status: statusUnsure})
+				unsureCount++
+			}
+		} else {
+			resultsWithStatus = append(resultsWithStatus, resultWithStatus{result: result, galleryID: 0, status: statusMissing})
+		}
+	}
+
+	var missingGalleries []GallerySearchResult
+	var unsureGalleries []GallerySearchResult
+
+	for _, rs := range resultsWithStatus {
+		if rs.status == statusMissing {
+			missingGalleries = append(missingGalleries, rs.result)
+		} else if rs.status == statusUnsure {
+			unsureGalleries = append(unsureGalleries, rs.result)
+		}
+	}
+
+	logger.Infof("[ScanSource] %s for %s: found=%d, existing=%d, unsure=%d, missing=%d",
+		provider, person.Name, len(uniqueResults), existingCount, unsureCount, len(missingGalleries))
+
+	return &PersonScanResult{
+		PersonID:         personID,
+		PersonName:       person.Name,
+		Provider:         provider,
+		FoundCount:       len(uniqueResults),
+		ExistingCount:    existingCount,
+		UnsureCount:      unsureCount,
+		MissingCount:     len(missingGalleries),
+		MissingGalleries: missingGalleries,
+		UnsureGalleries:  unsureGalleries,
+	}, nil
+}
+
+func normalizeGalleryName(name string) string {
+	name = strings.ToLower(name)
+	name = strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			return r
+		}
+		return -1
+	}, name)
+	return strings.TrimSpace(name)
 }
 
 // scrapePlayboyPlusGallery attempts to scrape metadata for a PlayboyPlus gallery

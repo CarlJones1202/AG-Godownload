@@ -142,6 +142,23 @@ func DownloadImage(url string, sourceName string) (*DownloadImageResult, error) 
 		}
 	}
 
+	// Validate that the downloaded content is a valid image
+	if _, err := imaging.Open(destPath); err != nil {
+		// Remove the invalid file
+		os.Remove(destPath)
+
+		// Check for common "image not found" error patterns
+		errLower := strings.ToLower(err.Error())
+		if strings.Contains(errLower, "this model does not support image input") ||
+			strings.Contains(errLower, "unknown format") ||
+			strings.Contains(errLower, "invalid image") ||
+			strings.Contains(errLower, "image:") {
+			return nil, fmt.Errorf("image not found: %s returned a placeholder or error image instead of valid content", url)
+		}
+		// For other decode errors, still return the error but without assuming it's a placeholder
+		return nil, fmt.Errorf("failed to decode image: %w", err)
+	}
+
 	// Extract dominant colors
 	colors, err := ExtractDominantColors(destPath)
 	if err != nil {

@@ -3,7 +3,7 @@ import './ImageList.css'
 import Lightbox from './Lightbox'
 import SortControls from './SortControls'
 
-function ImageList({ images, onRefresh, meta, onPageChange, sort, setSort, seed, setSeed }) {
+function ImageList({ images, onRefresh, meta, onPageChange, sort, setSort, seed, setSeed, onlyExisting, setOnlyExisting }) {
     const [lightboxImage, setLightboxImage] = useState(null)
     const [lightboxIndex, setLightboxIndex] = useState(0)
 
@@ -47,6 +47,12 @@ function ImageList({ images, onRefresh, meta, onPageChange, sort, setSort, seed,
         setLightboxIndex(index)
     }
 
+    const handleToggleOnlyExisting = (e) => {
+        if (setOnlyExisting) {
+            setOnlyExisting(e.target.checked)
+        }
+    }
+
     const closeLightbox = () => {
         setLightboxImage(null)
     }
@@ -68,6 +74,16 @@ function ImageList({ images, onRefresh, meta, onPageChange, sort, setSort, seed,
             <div className="image-header">
                 <h2>All Images</h2>
                 <div className="header-actions">
+                    {setOnlyExisting && (
+                        <label className="checkbox-label">
+                            <input
+                                type="checkbox"
+                                checked={onlyExisting}
+                                onChange={handleToggleOnlyExisting}
+                            />
+                            Only Existing
+                        </label>
+                    )}
                     <SortControls
                         sort={sort}
                         setSort={setSort}

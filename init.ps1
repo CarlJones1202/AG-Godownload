@@ -51,7 +51,7 @@ if (Get-Command "ffmpeg" -ErrorAction SilentlyContinue) {
 Write-Step "Checking for yt-dlp..."
 if (-not (Get-Command "yt-dlp" -ErrorAction SilentlyContinue)) {
     Write-Host "Installing yt-dlp via winget..."
-    winget install --id yt-dlp.yt-dlp --silent --accept-package-agreements --accept-source-agreements
+    winget install --id yt-dlp.yt-dlp --silent --accept-package-agreements --accept-source-agreements --source winget
     # Refresh path
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 }

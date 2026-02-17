@@ -191,9 +191,9 @@ func VerifyDownloadedVideos() error {
 
 		// Phase 2: concurrent recovery with limited concurrency for videos
 		if len(tasks) > 0 {
-			fmt.Printf("Recovering %d missing videos (max 3 concurrent)...\n", len(tasks))
+			fmt.Printf("Recovering %d missing videos (max 10 concurrent)...\n", len(tasks))
 
-			const maxConcurrent = 3 // Lower than images due to large file sizes
+			const maxConcurrent = 10 // Lower than images due to large file sizes
 			sem := make(chan struct{}, maxConcurrent)
 			var wg sync.WaitGroup
 

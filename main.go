@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"gallery_api/config"
@@ -37,6 +37,10 @@ func main() {
 		// WireGuard test removed as it is now redundant with API integration
 
 		logger.Info("Starting background verification of downloaded images...")
+		if err := services.RemoveDuplicateImages(); err != nil {
+			logger.Error("Duplicate image removal failed:", err)
+		}
+
 		if err := services.VerifyDownloadedImages(); err != nil {
 			logger.Error("Background verification failed:", err)
 		} else {
@@ -88,6 +92,7 @@ func main() {
 	r.PUT("/galleries/:id", handlers.UpdateGallery)
 	r.GET("/galleries/:id/search-metadata", handlers.SearchGalleryMetadata)
 	r.POST("/galleries/:id/scrape-metadata", handlers.ScrapeGalleryMetadata)
+	r.POST("/galleries/:id/update-provider", handlers.UpdateGalleryProvider)
 
 	r.POST("/people", handlers.CreatePerson)
 	r.GET("/people", handlers.GetPeople)
@@ -120,6 +125,9 @@ func main() {
 
 	// Stats routes
 	r.GET("/people/:id/stats", handlers.GetPersonStats)
+
+	// Source scan routes
+	r.GET("/people/:id/scan", handlers.ScanPersonFromSource)
 
 	// Tag routes
 	r.GET("/tags", handlers.GetTags)

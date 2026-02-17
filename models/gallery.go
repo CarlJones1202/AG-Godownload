@@ -20,6 +20,7 @@ type Gallery struct {
 	// New metadata fields for gallery scraping
 	Description string    `json:"description"`
 	Provider    string    `json:"provider"` // e.g., "Playboy", "Metart"
+	SourceURL   string    `json:"source_url"`
 	Rating      float64   `json:"rating"`
 	ReleaseDate time.Time `json:"release_date"`
 }

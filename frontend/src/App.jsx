@@ -31,6 +31,7 @@ function App() {
     const [sourceMeta, setSourceMeta] = useState({ total_pages: 1, current_page: 1 })
     const [imagePage, setImagePage] = useState(1)
     const [imageMeta, setImageMeta] = useState({ total_pages: 1, current_page: 1 })
+    const [imageOnlyExisting, setImageOnlyExisting] = useState(false)
     const [favoritePage, setFavoritePage] = useState(1)
     const [favoriteMeta, setFavoriteMeta] = useState({ total_pages: 1, current_page: 1 })
     const [videoPage, setVideoPage] = useState(1)
@@ -39,10 +40,11 @@ function App() {
     const [personMeta, setPersonMeta] = useState({ total_pages: 1, current_page: 1 })
 
 
-    const fetchGalleries = useCallback(async (page = 1, sort = 'newest', seed = '0') => {
+    const fetchGalleries = useCallback(async (page = 1, sort = 'newest', seed = '0', search = '') => {
         setLoading(true)
         try {
-            const response = await fetch(`/api/galleries?page=${page}&limit=50&sort=${sort}&seed=${seed}`)
+            const query = search ? `&q=${encodeURIComponent(search)}` : ''
+            const response = await fetch(`/api/galleries?page=${page}&limit=50&sort=${sort}&seed=${seed}${query}`)
             const result = await response.json()
             if (result.data) {
                 setGalleries(result.data)
@@ -77,10 +79,11 @@ function App() {
         }
     }, [])
 
-    const fetchImages = useCallback(async (page = 1, sort = 'newest', seed = '0') => {
+    const fetchImages = useCallback(async (page = 1, sort = 'newest', seed = '0', onlyExisting = false) => {
         setLoading(true)
         try {
-            const response = await fetch(`/api/images?page=${page}&limit=100&sort=${sort}&seed=${seed}`)
+            const existsParam = onlyExisting ? '&exists=true' : ''
+            const response = await fetch(`/api/images?page=${page}&limit=100&sort=${sort}&seed=${seed}${existsParam}`)
             const result = await response.json()
             if (result.data) {
                 setImages(result.data)
@@ -115,10 +118,11 @@ function App() {
         }
     }, [])
 
-    const fetchPeople = useCallback(async (page = 1) => {
+    const fetchPeople = useCallback(async (page = 1, search = '') => {
         setLoading(true)
         try {
-            const response = await fetch(`/api/people?page=${page}&limit=50`)
+            const query = search ? `&q=${encodeURIComponent(search)}` : ''
+            const response = await fetch(`/api/people?page=${page}&limit=50${query}`)
             const result = await response.json()
             if (result.data) {
                 setPeople(result.data)
@@ -160,25 +164,27 @@ function App() {
         const seedFromUrl = searchParams.get('seed') || '0'
 
         if (location.pathname === '/' || location.pathname === '/galleries' || location.pathname.startsWith('/galleries/')) {
-            fetchGalleries(pageFromUrl, sortFromUrl, seedFromUrl)
+            const searchQ = searchParams.get('q') || ''
+            fetchGalleries(pageFromUrl, sortFromUrl, seedFromUrl, searchQ)
         } else if (location.pathname === '/sources') {
             const searchQ = searchParams.get('q') || ''
             fetchSources(pageFromUrl, searchQ)
         } else if (location.pathname === '/images') {
-            fetchImages(pageFromUrl, sortFromUrl, seedFromUrl)
+            fetchImages(pageFromUrl, sortFromUrl, seedFromUrl, imageOnlyExisting)
         } else if (location.pathname === '/videos') {
             fetchVideos(pageFromUrl, sortFromUrl, seedFromUrl)
         } else if (location.pathname === '/favorites') {
             fetchFavorites(pageFromUrl, sortFromUrl, seedFromUrl)
         } else if (location.pathname === '/people') {
-            fetchPeople(pageFromUrl)
+            const searchQ = searchParams.get('q') || ''
+            fetchPeople(pageFromUrl, searchQ)
         } else {
             setLoading(false)
         }
-    }, [location.pathname, searchParams, fetchGalleries, fetchSources, fetchImages, fetchVideos, fetchFavorites, fetchPeople])
+    }, [location.pathname, searchParams, fetchGalleries, fetchSources, fetchImages, fetchVideos, fetchFavorites, fetchPeople, imageOnlyExisting])
 
     const handleRefreshGalleries = useCallback(() => {
-        fetchGalleries(galleryPage, searchParams.get('sort') || 'newest', searchParams.get('seed') || '0')
+        fetchGalleries(galleryPage, searchParams.get('sort') || 'newest', searchParams.get('seed') || '0', searchParams.get('q') || '')
     }, [fetchGalleries, galleryPage, searchParams])
 
     const handleRefreshSources = useCallback(() => {
@@ -198,8 +204,8 @@ function App() {
     }, [fetchFavorites, favoritePage, searchParams])
 
     const handleRefreshPeople = useCallback(() => {
-        fetchPeople(personPage)
-    }, [fetchPeople, personPage])
+        fetchPeople(personPage, searchParams.get('q') || '')
+    }, [fetchPeople, personPage, searchParams])
 
     const handleSourceAdded = () => {
         // Clear search to show the new source
@@ -311,6 +317,14 @@ function App() {
                     <SearchBar
                         onColorFilter={searchByColor}
                         onPersonFilter={(person) => navigate(`/people/${person.id}`)}
+                        onSearch={(query) => {
+                            setSearchParams(prev => {
+                                if (query) prev.set('q', query)
+                                else prev.delete('q')
+                                prev.set('page', '1')
+                                return prev
+                            })
+                        }}
                     />
                 </div>
                 <nav className="tabs">
@@ -393,6 +407,8 @@ function App() {
                                 setSort={handleSortChange}
                                 seed={parseInt(searchParams.get('seed')) || 0}
                                 setSeed={handleSeedChange}
+                                onlyExisting={imageOnlyExisting}
+                                setOnlyExisting={setImageOnlyExisting}
                             />
                         } />
                         <Route path="/videos" element={

@@ -195,3 +195,253 @@
 .exclude-person-btn:hover {
     background: rgba(244, 67, 54, 0.2);
 }
+
+/* Source Scan Modal Styles */
+.scan-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 1.5rem 0;
+}
+
+.scan-controls label {
+    font-weight: 600;
+    margin-right: 0.25rem;
+}
+
+.scan-controls select {
+    padding: 0.5rem 1rem;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+    font-size: 1rem;
+    background: white;
+    color: #333;
+}
+
+@media (prefers-color-scheme: dark) {
+    .scan-controls select {
+        background: #2a2a2a;
+        color: #eee;
+        border-color: rgba(255, 255, 255, 0.2);
+    }
+}
+
+.scan-btn {
+    background: linear-gradient(135deg, #646cff 0%, #535bf2 100%);
+    color: white;
+    border: none;
+    padding: 0.5rem 1.5rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.scan-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(100, 108, 255, 0.3);
+}
+
+.scan-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.scan-error {
+    background: rgba(244, 67, 54, 0.1);
+    border: 1px solid rgba(244, 67, 54, 0.3);
+    color: #f44336;
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
+
+.scan-results {
+    margin-top: 1.5rem;
+}
+
+.scan-summary {
+    display: flex;
+    gap: 2rem;
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.03);
+    border-radius: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+    .scan-summary {
+        background: rgba(255, 255, 255, 0.05);
+    }
+}
+
+.summary-item {
+    font-size: 0.95rem;
+}
+
+.summary-item.missing {
+    color: #f44336;
+    font-weight: 600;
+}
+
+.missing-galleries h3 {
+    margin: 0 0 1rem 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #f44336;
+}
+
+.scan-gallery-list {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.gallery-item {
+    display: flex;
+    gap: 1rem;
+    padding: 0.75rem;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+    transition: background 0.2s;
+}
+
+@media (prefers-color-scheme: dark) {
+    .gallery-item {
+        border-color: rgba(255, 255, 255, 0.1);
+    }
+}
+
+.gallery-item:hover {
+    background: rgba(100, 108, 255, 0.05);
+}
+
+.gallery-thumb {
+    width: 80px;
+    height: 60px;
+    flex-shrink: 0;
+    border-radius: 4px;
+    overflow: hidden;
+    background: #eee;
+}
+
+.gallery-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.no-thumb {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    color: #666;
+}
+
+.gallery-info {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.25rem;
+}
+
+.gallery-title {
+    font-weight: 600;
+    color: #333;
+    text-decoration: none;
+    font-size: 0.95rem;
+}
+
+.gallery-title:hover {
+    color: #646cff;
+    text-decoration: underline;
+}
+
+@media (prefers-color-scheme: dark) {
+    .gallery-title {
+        color: #eee;
+    }
+}
+
+.gallery-date {
+    font-size: 0.85rem;
+    color: #666;
+}
+
+.no-missing {
+    text-align: center;
+    padding: 2rem;
+    color: #4caf50;
+    font-weight: 500;
+}
+
+.summary-item.unsure {
+    color: #ff9800;
+}
+
+.unsure-galleries {
+    margin-top: 1.5rem;
+}
+
+.unsure-galleries h3 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #ff9800;
+}
+
+.unsure-galleries .help-text {
+    font-size: 0.85rem;
+    color: #666;
+    margin-bottom: 1rem;
+}
+
+@media (prefers-color-scheme: dark) {
+    .unsure-galleries .help-text {
+        color: #aaa;
+    }
+}
+
+.link-btn {
+    background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.link-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(255, 152, 0, 0.4);
+}
+
+.link-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.view-btn {
+    background: rgba(100, 108, 255, 0.1);
+    color: #646cff;
+    border: 1px solid rgba(100, 108, 255, 0.3);
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+}
+
+.view-btn:hover {
+    background: rgba(100, 108, 255, 0.2);
+}

@@ -5,6 +5,7 @@ import './PersonDetail_identifiers.css'
 import './AutoTag.css'
 import PersonStats from './PersonStats'
 import AutoTagModal from './AutoTagModal'
+import SourceScanModal from './SourceScanModal'
 import GalleryCard from './GalleryCard'
 import SortControls from './SortControls'
 
@@ -118,6 +119,9 @@ function PersonDetail() {
     const [autoTagging, setAutoTagging] = useState(false)
     const [selectedSuggestions, setSelectedSuggestions] = useState(new Set())
     const [exclusions, setExclusions] = useState([])
+
+    // Source scan state
+    const [showSourceScanModal, setShowSourceScanModal] = useState(false)
 
     // Fetch available identifier sources
     useEffect(() => {
@@ -440,6 +444,12 @@ function PersonDetail() {
                             >
                                 Auto-Tag
                             </button>
+                            <button
+                                onClick={() => setShowSourceScanModal(true)}
+                                className="action-btn secondary"
+                            >
+                                Scan Sources
+                            </button>
                         </div>
                     </div>
 
@@ -580,6 +590,14 @@ function PersonDetail() {
                 selectedSuggestions={selectedSuggestions}
                 onToggleSuggestion={handleToggleSuggestion}
                 onApply={handleApplySuggestions}
+            />
+
+            <SourceScanModal
+                show={showSourceScanModal}
+                onClose={() => setShowSourceScanModal(false)}
+                personId={person?.id}
+                personName={person?.name}
+                personAliases={person?.aliases}
             />
 
             {showIdentifierModal && (

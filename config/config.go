@@ -40,7 +40,7 @@ func Load() {
 		CrawlerWorkers:         getEnvAsInt("CRAWLER_WORKERS", 5),
 		AITagWorkers:           getEnvAsInt("AITAG_WORKERS", 1),
 		UploadsDir:             getEnv("UPLOADS_DIR", "uploads"),
-		MaxConcurrentDownloads: getEnvAsInt("MAX_CONCURRENT_DOWNLOADS", 7),
+		MaxConcurrentDownloads: getEnvAsInt("MAX_CONCURRENT_DOWNLOADS", 10),
 		HTTPConnectTimeout:     time.Duration(getEnvAsInt("HTTP_CONNECT_TIMEOUT_SEC", 10)) * time.Second,
 		HTTPRequestTimeout:     time.Duration(getEnvAsInt("HTTP_REQUEST_TIMEOUT_SEC", 30)) * time.Second,
 		HTTPMaxRetries:         getEnvAsInt("HTTP_MAX_RETRIES", 3),

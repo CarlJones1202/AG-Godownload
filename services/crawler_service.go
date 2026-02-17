@@ -7,6 +7,7 @@ import (
 	"gallery_api/logger"
 	"gallery_api/models"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -415,12 +416,21 @@ func ProcessVideoSource(source models.Source) error {
 
 	logger.Infof("Extracted video title: %s", videoTitle)
 
-	// Check if video already exists in database (by URL for remote, skip for local)
-	if !isLocalFile {
-		var images []models.Image
-		if err := database.DB.Where("download_url = ?", videoURL).Limit(1).Find(&images).Error; err == nil && len(images) > 0 {
-			logger.Infof("Video already exists in database: %s", videoURL)
-			return nil
+	// Delete existing videos from this source before re-downloading
+	var existingVideos []models.Image
+	if err := database.DB.Where("source_id = ? AND type = ?", source.ID, "video").Find(&existingVideos).Error; err == nil {
+		for _, existingVideo := range existingVideos {
+			// Delete the file from disk
+			fullPath := filepath.Join(UploadsDir, existingVideo.Filename)
+			if err := os.Remove(fullPath); err != nil {
+				logger.Warnf("Failed to delete old video file %s: %v", fullPath, err)
+			}
+			// Delete from database
+			if err := database.DB.Delete(&existingVideo).Error; err != nil {
+				logger.Warnf("Failed to delete old video record %d: %v", existingVideo.ID, err)
+			} else {
+				logger.Infof("Deleted old video: %s (ID: %d)", existingVideo.Title, existingVideo.ID)
+			}
 		}
 	}
 

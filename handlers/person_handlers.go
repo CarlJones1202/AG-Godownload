@@ -57,7 +57,7 @@ func GetPeople(c *gin.Context) {
 	db := database.DB.Model(&models.Person{})
 	if query != "" {
 		searchTerm := "%" + strings.ToLower(query) + "%"
-		db = db.Where("LOWER(name) LIKE ?", searchTerm)
+		db = db.Where("LOWER(name) LIKE ? OR LOWER(aliases) LIKE ?", searchTerm, searchTerm)
 	}
 
 	var total int64
@@ -468,4 +468,29 @@ func LinkPersonToGalleries(c *gin.Context) {
 		"matched_count":     len(matchedGalleries),
 		"matched_galleries": matchedGalleries,
 	})
+}
+
+func ScanPersonFromSource(c *gin.Context) {
+	id := c.Param("id")
+	provider := c.Query("source")
+	alias := c.Query("alias")
+
+	if provider == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source query parameter is required (MetArt, Playboy, PlayboyPlus, or Vixen)"})
+		return
+	}
+
+	personID, err := strconv.ParseUint(id, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid person ID"})
+		return
+	}
+
+	result, err := services.ScanSourceForPerson(uint(personID), provider, alias)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
 }

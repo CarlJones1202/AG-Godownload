@@ -40,15 +40,25 @@ func GetGalleries(c *gin.Context) {
 	}
 	offset := (page - 1) * limit
 
+	// Base query
+	db := database.DB.Model(&models.Gallery{})
+
+	// Apply search if provided
+	searchQuery := c.Query("q")
+	if searchQuery != "" {
+		searchTerm := "%" + strings.ToLower(searchQuery) + "%"
+		db = db.Where("LOWER(name) LIKE ? OR LOWER(description) LIKE ?", searchTerm, searchTerm)
+	}
+
 	var total int64
-	database.DB.Model(&models.Gallery{}).Count(&total)
+	db.Count(&total)
 
 	sortBy := c.DefaultQuery("sort", "newest")
 	seedStr := c.Query("seed")
 	seed, _ := strconv.Atoi(seedStr)
 
 	var galleries []models.Gallery
-	query := database.DB.Preload("Source")
+	query := db.Preload("Source")
 
 	switch sortBy {
 	case "newest":
@@ -261,6 +271,37 @@ func UpdateGallery(c *gin.Context) {
 	gallery.Name = input.Name
 	if err := database.DB.Save(&gallery).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update gallery"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gallery)
+}
+
+func UpdateGalleryProvider(c *gin.Context) {
+	id := c.Param("id")
+	var gallery models.Gallery
+	if err := database.DB.First(&gallery, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Gallery not found"})
+		return
+	}
+
+	var input struct {
+		Provider  string `json:"provider" binding:"required"`
+		SourceURL string `json:"source_url"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	gallery.Provider = input.Provider
+	if input.SourceURL != "" {
+		gallery.SourceURL = input.SourceURL
+	}
+
+	if err := database.DB.Save(&gallery).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update gallery provider"})
 		return
 	}
 
