@@ -88,13 +88,17 @@ func CrawlSource(sourceID uint) error {
 	var imagesMutex sync.Mutex
 	var imagesToInsert []models.Image
 
-	// Pre-load existing image URLs for this gallery to avoid duplicate checks in loop
-	existingURLs := make(map[string]bool)
-	var existingImages []models.Image
-	database.DB.Model(&models.Image{}).Where("gallery_id = ?", gallery.ID).Select("original_url").Find(&existingImages)
-	for _, img := range existingImages {
-		existingURLs[img.OriginalURL] = true
-	}
+    // Pre-load existing image URLs and filenames for this gallery to avoid duplicate checks in loop
+    existingURLs := make(map[string]bool)
+    existingFilenames := make(map[string]bool)
+    var existingImages []models.Image
+    database.DB.Model(&models.Image{}).Where("gallery_id = ?", gallery.ID).Select("original_url, filename").Find(&existingImages)
+    for _, img := range existingImages {
+        existingURLs[img.OriginalURL] = true
+        if img.Filename != "" {
+            existingFilenames[img.Filename] = true
+        }
+    }
 
 	// Parse the URL to check for a fragment
 	u, err := url.Parse(source.Location)
@@ -164,10 +168,10 @@ func CrawlSource(sourceID uint) error {
 			}
 			logger.Debugf("Element %d: Found link %s", j, src)
 
-			// Launch download in goroutine with semaphore
-			wg.Add(1)
-			go func(src string, imgSrc string) {
-				defer wg.Done()
+            // Launch download in goroutine with semaphore
+            wg.Add(1)
+            go func(src string, imgSrc string) {
+                defer wg.Done()
 				defer func() {
 					// Update processing progress
 					newProcessed := atomic.AddInt32(&processedCount, 1)
@@ -183,9 +187,15 @@ func CrawlSource(sourceID uint) error {
 					}
 				}()
 
-				// Acquire semaphore
-				sem <- struct{}{}
-				defer func() { <-sem }()
+                // Acquire semaphore
+                sem <- struct{}{}
+                defer func() { <-sem }()
+
+                // Deduplicate by original URL if we've seen this image before in this gallery
+                if existingURLs[src] {
+                    logger.Debugf("Duplicate image detected (original URL exists): %s", src)
+                    return
+                }
 
 				// ... (existing ripping logic remains the same) ...
 				// Use rippers to extract actual image URL based on hosting site
@@ -284,11 +294,17 @@ func CrawlSource(sourceID uint) error {
 					logger.Warnf("Failed to generate thumbnail: %v", err)
 				}
 
-				// Save to slice for batch insert
-				relPath, err := filepath.Rel(UploadsDir, result.Path)
-				if err != nil {
-					relPath = filepath.Base(result.Path)
-				}
+                // Save to slice for batch insert
+                relPath, err := filepath.Rel(UploadsDir, result.Path)
+                if err != nil {
+                    relPath = filepath.Base(result.Path)
+                }
+
+                // Deduplicate by filename if this image already exists in the gallery
+                if existingFilenames[relPath] {
+                    logger.Debugf("Duplicate image detected (filename exists): %s", relPath)
+                    return
+                }
 
 				image := models.Image{
 					GalleryID:      gallery.ID,
