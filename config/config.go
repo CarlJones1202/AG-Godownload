@@ -23,16 +23,18 @@ type Config struct {
 	UploadsDir             string
 	MaxConcurrentDownloads int
 
-	// HTTP Client
-	HTTPConnectTimeout time.Duration
-	HTTPRequestTimeout time.Duration
-	HTTPMaxRetries     int
+    // HTTP Client
+    HTTPConnectTimeout time.Duration
+    HTTPRequestTimeout time.Duration
+    HTTPMaxRetries     int
+    // Maintenance token for privileged API endpoints
+    MaintenanceToken string
 }
 
 var Global Config
 
 func Load() {
-	Global = Config{
+    Global = Config{
 		Port:                   getEnv("PORT", "8080"),
 		env:                    getEnv("ENV", "development"),
 		DatabasePath:           getEnv("DATABASE_PATH", "gallery.db"),
@@ -43,8 +45,9 @@ func Load() {
 		MaxConcurrentDownloads: getEnvAsInt("MAX_CONCURRENT_DOWNLOADS", 10),
 		HTTPConnectTimeout:     time.Duration(getEnvAsInt("HTTP_CONNECT_TIMEOUT_SEC", 10)) * time.Second,
 		HTTPRequestTimeout:     time.Duration(getEnvAsInt("HTTP_REQUEST_TIMEOUT_SEC", 30)) * time.Second,
-		HTTPMaxRetries:         getEnvAsInt("HTTP_MAX_RETRIES", 3),
-	}
+        HTTPMaxRetries:         getEnvAsInt("HTTP_MAX_RETRIES", 3),
+        MaintenanceToken:         getEnv("MAINTENANCE_TOKEN", ""),
+    }
 }
 
 func getEnv(key, fallback string) string {
