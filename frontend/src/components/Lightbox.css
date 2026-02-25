@@ -212,7 +212,7 @@
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #666;
+    color: var(--color-text-secondary);
     font-weight: 700;
 }
 
@@ -230,7 +230,7 @@
 }
 
 .metadata-item a.link {
-    color: var(--color-accent-primary, #3b82f6);
+    color: var(--color-accent-primary);
     text-decoration: none;
 }
 
@@ -241,20 +241,20 @@
 .tags-list {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: var(--spacing-sm);
 }
 
 .tag {
     background: #2a2a2a;
     color: #ddd;
     padding: 0.3rem 0.75rem;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     font-size: 0.85rem;
     border: 1px solid #333;
 }
 
 .tag-ghost {
-    color: #666;
+    color: var(--color-text-secondary);
     font-style: italic;
     font-size: 0.9rem;
 }
@@ -281,7 +281,7 @@
 }
 
 .text-muted {
-    color: #666;
+    color: var(--color-text-secondary);
     font-style: italic;
 }
 

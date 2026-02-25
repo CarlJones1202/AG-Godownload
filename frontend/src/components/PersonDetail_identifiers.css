@@ -68,17 +68,17 @@
 
 /* Source Specific Colors */
 .identifier-badge.stashdb .identifier-source {
-    color: #3b82f6;
+    color: var(--color-source-stashdb);
 }
 
 /* Blue */
 .identifier-badge.iafd .identifier-source {
-    color: #ef4444;
+    color: var(--color-source-iafd);
 }
 
 /* Red */
 .identifier-badge.theporndb .identifier-source {
-    color: #10b981;
+    color: var(--color-source-theporndb);
 }
 
 /* Green */
@@ -120,19 +120,6 @@
     font-weight: 600;
     padding-bottom: 1rem;
     border-bottom: 1px solid var(--color-border-subtle);
-}
-
-.close-modal-btn {
-    margin-top: 1.5rem;
-    width: 100%;
-    background: var(--color-bg-secondary);
-    color: var(--color-text-secondary);
-    border: 1px solid var(--color-border-primary);
-}
-
-.close-modal-btn:hover {
-    background: var(--color-bg-tertiary);
-    color: var(--color-text-primary);
 }
 
 /* Animations */

@@ -439,7 +439,7 @@
 }
 
 .tagged-person-chip button:hover {
-    color: #f44336;
+    color: var(--color-accent-danger);
     transform: none;
     box-shadow: none;
 }

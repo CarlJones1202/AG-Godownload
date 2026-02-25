@@ -149,7 +149,7 @@
     top: 50%;
     transform: translateY(-50%);
     height: 4px;
-    background: var(--color-accent-primary, #3b82f6);
+    background: var(--color-accent-primary);
     border-radius: 2px;
     pointer-events: none;
 }
@@ -215,10 +215,8 @@
     font-variant-numeric: tabular-nums;
     font-weight: 500;
     white-space: nowrap;
-    /* Prevent wrapping */
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-    margin-left: 1rem;
-    /* Specific spacing from volume */
+    margin-left: var(--spacing-lg);
 }
 
 .volume-container {
@@ -293,7 +291,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 1.5rem;
+    padding: var(--spacing-xl);
     border-bottom: 1px solid #333;
 }
 
@@ -309,7 +307,7 @@
     color: #888;
     cursor: pointer;
     font-size: 1.25rem;
-    padding: 0.5rem;
+    padding: var(--spacing-sm);
     border-radius: 50%;
 }
 
@@ -320,19 +318,19 @@
 
 .sidebar-content {
     flex: 1;
-    padding: 1.5rem;
+    padding: var(--spacing-xl);
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 2rem;
+    gap: var(--spacing-2xl);
 }
 
 .info-group label {
     display: block;
     font-size: 0.75rem;
     text-transform: uppercase;
-    color: #666;
-    margin-bottom: 0.5rem;
+    color: var(--color-text-secondary);
+    margin-bottom: var(--spacing-sm);
     font-weight: 700;
 }
 
@@ -350,7 +348,7 @@
 .tags-list {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: var(--spacing-sm);
 }
 
 .person-tag {
@@ -361,7 +359,7 @@
     font-size: 0.85rem;
     border: 1px solid #333;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background var(--transition-fast);
 }
 
 .person-tag:hover {
@@ -371,7 +369,7 @@
 }
 
 .empty-tag {
-    color: #666;
+    color: var(--color-text-secondary);
     font-style: italic;
     font-size: 0.9rem;
 }

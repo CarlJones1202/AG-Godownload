@@ -127,13 +127,13 @@
 
 .action-btn.danger {
     background: rgba(239, 68, 68, 0.1);
-    color: #ef4444;
+    color: var(--color-accent-danger);
     border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
 .action-btn.danger:hover {
-    background: #ef4444;
-    color: white;
+    background: var(--color-accent-danger);
+    color: var(--color-text-inverse);
     box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
 }
 

@@ -61,8 +61,8 @@
 }
 
 .search-icon-btn.active {
-    background: rgba(100, 108, 255, 0.2);
-    color: #646cff;
+    background: rgba(59, 130, 246, 0.2);
+    color: var(--color-accent-primary);
 }
 
 .filter-dropdown {
@@ -105,25 +105,6 @@
     font-size: 1rem;
     font-weight: 600;
     color: var(--color-text-primary);
-}
-
-.close-btn {
-    background: transparent;
-    border: none;
-    color: var(--color-text-secondary);
-    font-size: 1.25rem;
-    cursor: pointer;
-    padding: 0.25rem var(--spacing-sm);
-    border-radius: var(--radius-sm);
-    transition: all var(--transition-base);
-    line-height: 1;
-}
-
-.close-btn:hover {
-    background: var(--overlay-hover);
-    color: var(--color-text-primary);
-    transform: none;
-    box-shadow: none;
 }
 
 .dropdown-content {

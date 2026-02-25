@@ -29,17 +29,57 @@
   --color-accent-active: #1d4ed8;
   --color-accent-danger: #ef4444;
   --color-accent-success: #10b981;
-
-  /* Shadows - Minimal */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.08);
-  --shadow-xl: 0 8px 16px rgba(0, 0, 0, 0.1);
+  --color-accent-warning: #f59e0b;
 
   /* Interactive States */
   --overlay-hover: rgba(0, 0, 0, 0.04);
   --overlay-active: rgba(0, 0, 0, 0.08);
   --focus-ring: 0 0 0 2px var(--color-accent-primary);
+
+  /* Button Tokens */
+  --btn-padding-x: 1rem;
+  --btn-padding-y: 0.5rem;
+  --btn-font-size: 0.875rem;
+  --btn-font-weight: 500;
+  --btn-radius: var(--radius-md);
+  --btn-transition: background-color var(--transition-fast);
+
+  /* Input Tokens */
+  --input-height: 40px;
+  --input-padding-x: 0.75rem;
+  --input-padding-y: 0.5rem;
+  --input-font-size: 0.875rem;
+  --input-radius: var(--radius-md);
+  --input-border: 1px solid var(--color-border-primary);
+
+  /* Card Tokens */
+  --card-padding: var(--spacing-lg);
+  --card-radius: var(--radius-lg);
+  --card-border: 1px solid var(--color-border-subtle);
+  --card-bg: var(--color-bg-secondary);
+
+  /* Modal Tokens */
+  --modal-max-width: 800px;
+  --modal-radius: var(--radius-xl);
+  --modal-overlay: rgba(0, 0, 0, 0.4);
+
+  /* Chip/Badge Tokens */
+  --chip-padding-x: 0.5rem;
+  --chip-padding-y: 0.25rem;
+  --chip-radius: var(--radius-md);
+  --chip-font-size: 0.75rem;
+  --chip-font-weight: 500;
+
+  /* Empty State */
+  --empty-padding: var(--spacing-xl);
+  --empty-color: var(--color-text-secondary);
+  --empty-font-size: 0.9375rem;
+
+  /* Source-specific brand colors */
+  --color-source-stashdb: #3b82f6;
+  --color-source-iafd: #ef4444;
+  --color-source-theporndb: #10b981;
+  --color-source-default: #6b7280;
 
   /* Transitions - Fast */
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -99,6 +139,51 @@
     --overlay-hover: rgba(255, 255, 255, 0.04);
     --overlay-active: rgba(255, 255, 255, 0.08);
     --focus-ring: 0 0 0 3px rgba(255, 255, 255, 0.05);
+
+    /* Button Tokens */
+    --btn-padding-x: 1rem;
+    --btn-padding-y: 0.5rem;
+    --btn-font-size: 0.875rem;
+    --btn-font-weight: 500;
+    --btn-radius: var(--radius-md);
+    --btn-transition: background-color var(--transition-fast);
+
+    /* Input Tokens */
+    --input-height: 40px;
+    --input-padding-x: 0.75rem;
+    --input-padding-y: 0.5rem;
+    --input-font-size: 0.875rem;
+    --input-radius: var(--radius-md);
+    --input-border: 1px solid var(--color-border-primary);
+
+    /* Card Tokens */
+    --card-padding: var(--spacing-lg);
+    --card-radius: var(--radius-lg);
+    --card-border: 1px solid var(--color-border-subtle);
+    --card-bg: var(--color-bg-secondary);
+
+    /* Modal Tokens */
+    --modal-max-width: 800px;
+    --modal-radius: var(--radius-xl);
+    --modal-overlay: rgba(0, 0, 0, 0.6);
+
+    /* Chip/Badge Tokens */
+    --chip-padding-x: 0.5rem;
+    --chip-padding-y: 0.25rem;
+    --chip-radius: var(--radius-md);
+    --chip-font-size: 0.75rem;
+    --chip-font-weight: 500;
+
+    /* Empty State */
+    --empty-padding: var(--spacing-xl);
+    --empty-color: var(--color-text-secondary);
+    --empty-font-size: 0.9375rem;
+
+    /* Source-specific brand colors */
+    --color-source-stashdb: #3b82f6;
+    --color-source-iafd: #ef4444;
+    --color-source-theporndb: #10b981;
+    --color-source-default: #6b7280;
   }
 }
 
