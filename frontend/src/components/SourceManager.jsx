@@ -86,15 +86,9 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
                 body: JSON.stringify(formData),
             })
             if (response.ok) {
-                const newSource = await response.json()
                 setFormData({ name: '', type: 'url', location: '', priority: 0 })
                 setShowForm(false)
                 onSourceAdded()
-                
-                // Try to auto-link to people based on source name
-                if (newSource && newSource.id) {
-                    tryAutoLinkPeople(newSource)
-                }
             } else {
                 const data = await response.json()
                 alert(data.error || 'Failed to add source')
@@ -104,52 +98,6 @@ function SourceManager({ sources, onSourceAdded, onRefresh, meta, onPageChange, 
             alert('Failed to add source')
         } finally {
             setSubmitting(false)
-        }
-    }
-
-    const tryAutoLinkPeople = async (source) => {
-        try {
-            // Get the source with its gallery
-            const sourceResponse = await fetch(`/api/sources/${source.id}`)
-            if (!sourceResponse.ok) return
-            
-            const sourceData = await sourceResponse.json()
-            const galleryId = sourceData.gallery?.id
-            if (!galleryId) return
-            
-            // Search for people with matching names
-            const peopleResponse = await fetch(`/api/people?limit=100&q=${encodeURIComponent(sourceData.name)}`)
-            if (!peopleResponse.ok) return
-            
-            const peopleData = await peopleResponse.json()
-            const people = peopleData.data || peopleData.people || []
-            
-            // Link matching people to the gallery
-            let linkedCount = 0
-            for (const person of people) {
-                // Check if name matches (case-insensitive)
-                const personName = person.name || ''
-                if (personName.toLowerCase().includes(sourceData.name.toLowerCase()) ||
-                    sourceData.name.toLowerCase().includes(personName.toLowerCase())) {
-                    try {
-                        const linkResponse = await fetch(`/api/people/${person.id}/galleries/${galleryId}`, {
-                            method: 'POST'
-                        })
-                        if (linkResponse.ok) {
-                            linkedCount++
-                        }
-                    } catch (err) {
-                        // Continue even if one fails
-                    }
-                }
-            }
-            
-            if (linkedCount > 0) {
-                console.log(`Auto-linked ${linkedCount} person(s) to gallery`)
-            }
-        } catch (error) {
-            console.error('Error auto-linking people:', error)
-            // Silently fail - this is a nice-to-have feature
         }
     }
 

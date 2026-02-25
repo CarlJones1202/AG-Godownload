@@ -392,10 +392,12 @@ func ProcessVideoSource(source models.Source) error {
 			return fmt.Errorf("failed to extract TnaFlix video: %w", err)
 		}
 	} else if strings.Contains(source.Location, "pornhub.com") {
-		videoURL, videoTitle, err = RipPornhub(source.Location)
+		logger.Infof("Detected Pornhub URL, using yt-dlp...")
+		localPath, videoTitle, err = RipYouTube(source.Location)
 		if err != nil {
-			return fmt.Errorf("failed to extract Pornhub video: %w", err)
+			return fmt.Errorf("failed to download Pornhub video: %w", err)
 		}
+		isLocalFile = true
 	} else if strings.Contains(source.Location, "pmvhaven.com") {
 		logger.Infof("Detected PMVHaven URL, invoking RipPMVHaven...")
 		videoURL, videoTitle, err = RipPMVHaven(source.Location)
