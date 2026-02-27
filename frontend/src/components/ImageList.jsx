@@ -160,6 +160,9 @@ function ImageList({ images, onRefresh, meta, onPageChange, sort, setSort, seed,
             {lightboxImage && (
                 <Lightbox
                     image={lightboxImage}
+                    images={images}
+                    currentIndex={lightboxIndex}
+                    totalImages={images.length}
                     onClose={closeLightbox}
                     onNext={nextImage}
                     onPrev={prevImage}

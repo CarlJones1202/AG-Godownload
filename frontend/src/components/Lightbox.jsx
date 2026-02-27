@@ -1,7 +1,35 @@
 import { useState, useEffect } from 'react'
 import './Lightbox.css'
 
-function Lightbox({ image, onClose, onNext, onPrev, currentIndex, totalImages }) {
+function Lightbox({ image, images = [], onClose, onNext, onPrev, currentIndex = 1, totalImages = 1 }) {
+    // slideshow state
+    const [isPlaying, setIsPlaying] = useState(false)
+    const [intervalMs, setIntervalMs] = useState(3000)
+    // track a timer id so we can clear when paused/closed
+    useEffect(() => {
+        let timer
+        if (isPlaying) {
+            // advance after interval
+            timer = setTimeout(() => {
+                // advance to next image
+                onNext()
+            }, intervalMs)
+        }
+        return () => clearTimeout(timer)
+    }, [isPlaying, intervalMs, onNext])
+
+    // preload next image for smoothness
+    useEffect(() => {
+        if (!images || images.length === 0) return
+        const nextIndex = (currentIndex + 1) % images.length
+        const nextImage = images[nextIndex]
+        if (nextImage) {
+            const src = nextImage.web_path || `/api/images/${nextImage.filename}`
+            const img = new Image()
+            img.src = src
+        }
+    }, [currentIndex, images])
+
     useEffect(() => {
         const handleKeyDown = (e) => {
             if (e.key === 'Escape') onClose()
@@ -80,8 +108,20 @@ function Lightbox({ image, onClose, onNext, onPrev, currentIndex, totalImages })
                     </svg>
                 </button>
 
-                <div className="lightbox-footer">
-                    <span>{currentIndex} / {totalImages}</span>
+                <div className="lightbox-footer" onClick={(e) => e.stopPropagation()}>
+                    <span>{(typeof currentIndex === 'number' ? currentIndex + 1 : currentIndex)} / {totalImages}</span>
+                    <div style={{display: 'inline-block', marginLeft: '1rem'}}>
+                        <button onClick={(e) => { e.stopPropagation(); setIsPlaying(!isPlaying) }} style={{marginRight: '0.5rem'}}>{isPlaying ? 'Pause' : 'Play'}</button>
+                        <label style={{color: 'rgba(255,255,255,0.7)'}}>Delay:
+                            <input
+                                type="number"
+                                value={intervalMs}
+                                onChange={(e) => setIntervalMs(Math.max(500, Number(e.target.value || 0)))}
+                                style={{width: '80px', marginLeft: '0.5rem'}}
+                            />
+                            ms
+                        </label>
+                    </div>
                 </div>
             </div>
 

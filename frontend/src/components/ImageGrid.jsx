@@ -104,11 +104,12 @@ function ImageGrid({ gallery, onRefresh }) {
             {selectedImage && (
                 <Lightbox
                     image={selectedImage}
+                    images={gallery.images}
+                    currentIndex={selectedIndex}
+                    totalImages={gallery.images.length}
                     onClose={handleClose}
                     onNext={handleNext}
                     onPrev={handlePrev}
-                    currentIndex={selectedIndex + 1}
-                    totalImages={gallery.images.length}
                 />
             )}
         </>
