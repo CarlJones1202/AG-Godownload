@@ -32,6 +32,9 @@ function GalleryDetail() {
     const [isEditingName, setIsEditingName] = useState(false)
     const [editedName, setEditedName] = useState('')
 
+    // Settings menu state
+    const [showSettingsMenu, setShowSettingsMenu] = useState(false)
+
     const fetchGallery = useCallback(async () => {
         setLoading(true)
         try {
@@ -49,6 +52,20 @@ function GalleryDetail() {
     useEffect(() => {
         fetchGallery()
     }, [fetchGallery])
+
+    // Close settings menu when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (showSettingsMenu && !event.target.closest('.gallery-settings-container')) {
+                setShowSettingsMenu(false)
+            }
+        }
+
+        if (showSettingsMenu) {
+            document.addEventListener('mousedown', handleClickOutside)
+            return () => document.removeEventListener('mousedown', handleClickOutside)
+        }
+    }, [showSettingsMenu])
 
     const handleSortChange = (newSort) => {
         setSearchParams(prev => {
@@ -245,6 +262,8 @@ function GalleryDetail() {
             provider = 'LifeErotic'
         } else if (lowerUrl.includes('eternaldesire.com')) {
             provider = 'EternalDesire'
+        } else if (lowerUrl.includes('mplstudios.com') || lowerUrl.includes('mplstudios')) {
+            provider = 'MPLStudios'
         } else if (lowerUrl.includes('metart.com')) {
             provider = 'MetArt'
         } else if (lowerUrl.includes('metartx.com')) {
@@ -263,6 +282,56 @@ function GalleryDetail() {
 
     return (
         <div className="gallery-detail">
+            {/* Settings Cogwheel */}
+            <div className="gallery-settings-container">
+                <button 
+                    className="gallery-settings-btn"
+                    onClick={() => setShowSettingsMenu(!showSettingsMenu)}
+                    title="Gallery settings"
+                >
+                    ⚙
+                </button>
+                
+                {showSettingsMenu && (
+                    <div className="gallery-settings-menu">
+                        <button 
+                            className="settings-menu-item"
+                            onClick={() => {
+                                setShowSettingsMenu(false)
+                                handleSearchMetadata()
+                            }}
+                        >
+                            <span className="menu-icon">🔍</span>
+                            <span>Fetch Metadata</span>
+                        </button>
+                        
+                        {gallery.source && (
+                            <button 
+                                className="settings-menu-item"
+                                onClick={() => {
+                                    setShowSettingsMenu(false)
+                                    handleRecrawlSource()
+                                }}
+                            >
+                                <span className="menu-icon">↻</span>
+                                <span>Re-crawl Source</span>
+                            </button>
+                        )}
+                        
+                        <button 
+                            className="settings-menu-item danger"
+                            onClick={() => {
+                                setShowSettingsMenu(false)
+                                handleDeleteGallery()
+                            }}
+                        >
+                            <span className="menu-icon">🗑</span>
+                            <span>Delete Gallery</span>
+                        </button>
+                    </div>
+                )}
+            </div>
+
             <a href="/galleries" className="back-btn" onClick={(e) => {
                 e.preventDefault();
                 navigate('/galleries');
@@ -285,20 +354,6 @@ function GalleryDetail() {
                         <div className="gallery-meta-overlay">
                             <span className="image-count-badge">{gallery.images ? gallery.images.length : 0} Items</span>
                         </div>
-                    </div>
-
-                    <div className="gallery-actions">
-                        <button onClick={handleSearchMetadata} className="action-btn primary full-width">
-                            🔍 Fetch Metadata
-                        </button>
-                        {gallery.source && (
-                            <button onClick={handleRecrawlSource} className="action-btn secondary full-width">
-                                ↻ Re-crawl Source
-                            </button>
-                        )}
-                        <button onClick={handleDeleteGallery} className="action-btn danger full-width">
-                            🗑 Delete Gallery
-                        </button>
                     </div>
                 </div>
 

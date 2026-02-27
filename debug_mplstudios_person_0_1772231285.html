@@ -1,0 +1,1204 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="shortcut icon" type="image/x-icon" href="https://cdn.mplstudios.com/favicon.ico">
+	<title>Monika May | MPL Studios</title>
+
+	<link href="https://cdn.mplstudios.com/v3css/bootstrap.min.css" rel="stylesheet">
+	<link href="https://cdn.mplstudios.com/v3css/mplv3.css" rel="stylesheet">
+    <script defer src="https://cdn.mplstudios.com/v3js/all.min.js"></script>
+
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GPPF3FZNGX"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-GPPF3FZNGX');
+</script>
+    
+	<style>
+		#modelName {
+			user-select: none;
+		}
+		#explorerFader {
+			max-width: 1200px;
+		}
+		.fs-85 {
+			font-size: 0.85rem;
+		}
+		.fs-sa {
+			font-size: 1em;
+		}	
+		@media(max-width:666px){
+			.fs-6 {
+				font-size: 0.85rem !important;
+			}
+			#statsPanel > div.d-flex > div {
+				flex: 0 0 50%;
+			}
+		}
+		@media(max-width:575px){
+			.hidePage {
+				display: none;
+			}
+		}
+		@media(min-width:768px){
+			.w-md-auto {
+				width: auto !important;
+			}
+		}
+	</style>
+</head>
+
+<body>
+    <nav class="navbar fixed-top navbar-expand-md pt-0">
+        <div class="d-flex justify-content-center flex-shrink-0 w-100 pb-2">
+        	<div class="px-sm-0 mplMainLogo">
+            	<a href="/">
+        			<img class="flipDark w-100" src="https://cdn.mplstudios.com/v3Assets/MPLStudios.png" alt="MPL Studios">
+        		</a>
+            </div>
+        </div>
+        <div class="container-fluid">
+        	<div class="row w-100 g-0">
+            	<span id="theme" class="">
+                	<i class="far fa-adjust"></i>
+            	</span>
+            </div>
+        </div>
+			           
+        <button class="navbar-toggler px-1 py-0 fs-6 border bg-transparent" id="navbarDropToggler" type="button" data-bs-toggle="offcanvas" data-bs-target="#navbarDrop" style="border-color: #bbb !important; z-index:1050">
+      		<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="#bbb" class="bi bi-list" viewBox="0 0 16 16">
+  				<path fill-rule="evenodd" d="M2.5 12a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5zm0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5zm0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5z"/>
+			</svg>
+    	</button>
+        <div class="offcanvas offcanvas-end w-100 flex-column" id="navbarDrop">
+            <ul class="navbar-nav pe-2 pe-md-0 text-end flex-row flex-wrap flex-md-nowrap align-items-baseline text-md-center">
+                <li class="nav-item">
+                    <a class="nav-link" href="/explore/">EXPLORE</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/updates/">UPDATES</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/videos/">VIDEOS</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link active" href="/studio_girls/">MODELS</a>
+                </li>  
+                <li class="nav-item d-md-none">
+                    <a class="nav-link" href="/legends/">MPL LEGENDS <img class="pb-1 flipDark" src="https://cdn.mplstudios.com/v3Assets/general/crown_model.png"></a>
+                </li> 
+                <li class="nav-item d-none d-md-inline-block">
+                	<div class="dropdown">
+                    	<div class="nav-link hand" data-bs-toggle="dropdown">MORE <i class="far fa-chevron-double-down fa-xs"></i></div>
+                        <ul class="dropdown-menu dropdown-menu-end moreDropdown">
+    						<li><a class="dropdown-item text-white" href="/legends/">MPL Legends <img class="pb-1 flipDark" src="https://cdn.mplstudios.com/v3Assets/general/crown_model.png"></a></li>
+    						<li><a class="dropdown-item text-white" href="/explore/series/Postcard_Series/">Postcard Series</a></li>
+    						<li><a class="dropdown-item text-white" href="/explore/series/BTS_Series/">Shoot Day Series</a></li>
+    						<li><a class="dropdown-item text-white" href="/explore/series/Obsession_Series/">Obsession Series</a></li>
+    						<li><a class="dropdown-item text-white" href="/photographers/">Creative Team</a></li>
+  						</ul>
+					</div>
+                </li>  
+                <li class="nav-item d-md-none">
+                    <a class="nav-link" href="/explore/series/Postcard_Series/">POSTCARD SERIES</a>
+                </li>  
+                <li class="nav-item d-md-none">
+                    <a class="nav-link" href="/explore/series/BTS_Series/">SHOOT DAY SERIES</a>
+                </li>  
+                <li class="nav-item d-md-none">
+                    <a class="nav-link" href="/explore/series/Obsession_Series/">OBSESSION</a>
+                </li>  
+                <li class="nav-item d-md-none">
+                    <a class="nav-link" href="/photographers/">CREATIVE TEAM</a>
+                </li>  
+		                
+                <li class="nav-item">
+                    <a class="nav-link" href="/models/">LOGIN</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link cherry" href="/join/" target="_blank">JOIN</a>
+                </li>
+		
+                <li class="nav-item d-none d-md-inline-block">
+                    <a class="openSearch" href="#"><i class="far fa-search fa-lg"></i></a>
+                </li>
+            </ul>
+            <div class="w-100 bg-dark" id="searchDrop">
+                <div class="container">
+                    <div class="row">
+                        <form id="siteSearch">
+                            <div class="col overflow-hidden" id="navSearch">
+                                <div class="input-group my-3">
+                                    <input type="search" class="form-control bg-secondary text-white" id="searchInput" placeholder="Search MPL Studios" autocomplete="off">
+                                    <span class="clearForm hand d-none">
+                                    	<i class="far fa-times fa-2x p-1"></i>
+                                    </span>
+                                    <button class="btn btn-secondary input-group-text hand" type="submit" id="searchSearch"><i class="far fa-search fa-lg"></i></button>
+                                </div>
+                            </div>
+                        <ul class="dropdown-menu moreDropdown open" id="suggestSearch">
+						</ul>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+	
+    </nav>
+
+    <div class="container-fluid">
+    	<div class="row g-0">
+        	<div class="mx-auto" id="explorerFader">
+        		<div class="position-relative w-100" id="v3fader" style="padding-bottom: 66.6666%">
+
+					<div id="e44c3bdf" class="v3faderDiv w-100">
+						<img class="w-100 mw-100" src=""
+							data-srcset="/v3Assets/models/profiles/472/6101053_600.jpg 500w, /v3Assets/models/profiles/472/6101053_1200.jpg 1200w"
+							sizes="100vw"
+							alt="Monika May"
+							data-src="/home/mplstudi/public_html/v3Assets/models/profiles/472/6101053_1200.jpg">
+					</div>
+
+					<div id="51dcb359" class="v3faderDiv w-100">
+						<img class="w-100 mw-100" src=""
+							data-srcset="/v3Assets/models/profiles/472/6187043_600.jpg 500w, /v3Assets/models/profiles/472/6187043_1200.jpg 1200w"
+							sizes="100vw"
+							alt="Monika May"
+							data-src="/home/mplstudi/public_html/v3Assets/models/profiles/472/6187043_1200.jpg">
+					</div>
+
+					<div id="45bc40a3" class="v3faderDiv w-100">
+						<img class="w-100 mw-100" src=""
+							data-srcset="/v3Assets/models/profiles/472/6101132_600.jpg 500w, /v3Assets/models/profiles/472/6101132_1200.jpg 1200w"
+							sizes="100vw"
+							alt="Monika May"
+							data-src="/home/mplstudi/public_html/v3Assets/models/profiles/472/6101132_1200.jpg">
+					</div>
+
+					<div id="e6284697" class="v3faderDiv w-100">
+						<img class="w-100 mw-100" src=""
+							data-srcset="/v3Assets/models/profiles/472/6196022_600.jpg 500w, /v3Assets/models/profiles/472/6196022_1200.jpg 1200w"
+							sizes="100vw"
+							alt="Monika May"
+							data-src="/home/mplstudi/public_html/v3Assets/models/profiles/472/6196022_1200.jpg">
+					</div>
+
+					<div id="b91e9b0b" class="v3faderDiv w-100">
+						<img class="w-100 mw-100" src=""
+							data-srcset="/v3Assets/models/profiles/472/6231032_600.jpg 500w, /v3Assets/models/profiles/472/6231032_1200.jpg 1200w"
+							sizes="100vw"
+							alt="Monika May"
+							data-src="/home/mplstudi/public_html/v3Assets/models/profiles/472/6231032_1200.jpg">
+					</div>
+
+					<div id="94f5db47" class="v3faderDiv w-100">
+						<img class="w-100 mw-100" src=""
+							data-srcset="/v3Assets/models/profiles/472/6231084_600.jpg 500w, /v3Assets/models/profiles/472/6231084_1200.jpg 1200w"
+							sizes="100vw"
+							alt="Monika May"
+							data-src="/home/mplstudi/public_html/v3Assets/models/profiles/472/6231084_1200.jpg">
+					</div>
+
+					<div id="00c7c518" class="v3faderDiv w-100">
+						<img class="w-100 mw-100" src=""
+							data-srcset="/v3Assets/models/profiles/472/6231016_600.jpg 500w, /v3Assets/models/profiles/472/6231016_1200.jpg 1200w"
+							sizes="100vw"
+							alt="Monika May"
+							data-src="/home/mplstudi/public_html/v3Assets/models/profiles/472/6231016_1200.jpg">
+					</div>
+
+					<div id="709b1f49" class="v3faderDiv w-100">
+						<img class="w-100 mw-100" src=""
+							data-srcset="/v3Assets/models/profiles/472/6196087_600.jpg 500w, /v3Assets/models/profiles/472/6196087_1200.jpg 1200w"
+							sizes="100vw"
+							alt="Monika May"
+							data-src="/home/mplstudi/public_html/v3Assets/models/profiles/472/6196087_1200.jpg">
+					</div>
+
+					<div id="81c79c12" class="v3faderDiv w-100">
+						<img class="w-100 mw-100" src=""
+							data-srcset="/v3Assets/models/profiles/472/6196043_600.jpg 500w, /v3Assets/models/profiles/472/6196043_1200.jpg 1200w"
+							sizes="100vw"
+							alt="Monika May"
+							data-src="/home/mplstudi/public_html/v3Assets/models/profiles/472/6196043_1200.jpg">
+					</div>
+
+					<div id="e34bce9d" class="v3faderDiv w-100">
+						<img class="w-100 mw-100" src=""
+							data-srcset="/v3Assets/models/profiles/472/6196007_600.jpg 500w, /v3Assets/models/profiles/472/6196007_1200.jpg 1200w"
+							sizes="100vw"
+							alt="Monika May"
+							data-src="/home/mplstudi/public_html/v3Assets/models/profiles/472/6196007_1200.jpg">
+					</div>
+
+					<div id="f2acd8fe" class="v3faderDiv w-100">
+						<img class="w-100 mw-100" src=""
+							data-srcset="/v3Assets/models/profiles/472/6231025_600.jpg 500w, /v3Assets/models/profiles/472/6231025_1200.jpg 1200w"
+							sizes="100vw"
+							alt="Monika May"
+							data-src="/home/mplstudi/public_html/v3Assets/models/profiles/472/6231025_1200.jpg">
+					</div>
+
+					<div id="1686b47a" class="v3faderDiv w-100">
+						<img class="w-100 mw-100" src=""
+							data-srcset="/v3Assets/models/profiles/472/6111058_600.jpg 500w, /v3Assets/models/profiles/472/6111058_1200.jpg 1200w"
+							sizes="100vw"
+							alt="Monika May"
+							data-src="/home/mplstudi/public_html/v3Assets/models/profiles/472/6111058_1200.jpg">
+					</div>
+
+					<div id="b3b6abe8" class="v3faderDiv w-100">
+						<img class="w-100 mw-100" src=""
+							data-srcset="/v3Assets/models/profiles/472/6196096_600.jpg 500w, /v3Assets/models/profiles/472/6196096_1200.jpg 1200w"
+							sizes="100vw"
+							alt="Monika May"
+							data-src="/home/mplstudi/public_html/v3Assets/models/profiles/472/6196096_1200.jpg">
+					</div>
+
+					<div id="0bcc191f" class="v3faderDiv w-100">
+						<img class="w-100 mw-100" src=""
+							data-srcset="/v3Assets/models/profiles/472/6111138_600.jpg 500w, /v3Assets/models/profiles/472/6111138_1200.jpg 1200w"
+							sizes="100vw"
+							alt="Monika May"
+							data-src="/home/mplstudi/public_html/v3Assets/models/profiles/472/6111138_1200.jpg">
+					</div>
+
+					<div id="61568156" class="v3faderDiv w-100">
+						<img class="w-100 mw-100" src=""
+							data-srcset="/v3Assets/models/profiles/472/6111035_600.jpg 500w, /v3Assets/models/profiles/472/6111035_1200.jpg 1200w"
+							sizes="100vw"
+							alt="Monika May"
+							data-src="/home/mplstudi/public_html/v3Assets/models/profiles/472/6111035_1200.jpg">
+					</div>
+
+					<div id="c8805046" class="v3faderDiv w-100">
+						<img class="w-100 mw-100" src=""
+							data-srcset="/v3Assets/models/profiles/472/6162005_600.jpg 500w, /v3Assets/models/profiles/472/6162005_1200.jpg 1200w"
+							sizes="100vw"
+							alt="Monika May"
+							data-src="/home/mplstudi/public_html/v3Assets/models/profiles/472/6162005_1200.jpg">
+					</div>
+        
+        		</div>
+                <div class="d-flex flex-wrap align-items-end w-100 mw-100 mx-auto mt-3 py-2 p-0 p-sm-2 fs-85 border bg-panel">
+                	<div class="text-center text-sm-start flex-fill flex-md-grow-0 px-1">
+                    	<h3 class="mb-0"><span class="hand" id="modelName">Monika May <i class="far fa-chevron-double-down fs-6 sand" id="openDraw"></i></span></h3>
+                    </div>
+                	<div class="flex-fill px-1 text-center text-sm-end">
+                    	
+					
+12 <span class="sand">photo Sets</span> <span class="op30">|</span> 1,375 <span class="sand">images</span> <span class="op30">|</span> 6 <span class="sand">videos</span>	
+                    </div>
+                    <div class="dNone mt-2 w-100 border-top border-panel pt-2" id="statsPanel">
+                        <div class="col-12 d-flex justify-content-around flex-wrap fs-6 text-center">
+                            <div>
+                                <span class="sand">Country <span class="op30">:</span></span> Ukraine                            </div>
+                            <div>
+                                <span class="sand">Debut Age <span class="op30">:</span></span> 27                            </div>
+                            <div class="d-sm-none"></div>
+                            <div class="d-sm-none"></div>
+                            <div>
+                                <span class="sand">Breast Size <span class="op30">:</span></span> Medium                            </div>
+                            <div>
+                                <span class="sand">Eye Colour <span class="op30">:</span></span> Brown                            </div>
+                            <div class="d-none d-lg-block">
+                                <span class="sand">Hair Colour <span class="op30">:</span></span> Dark Brown                            </div>
+                        </div>
+                        
+                        <div class="pt-3 text-center row">
+                        	<div class="mb-3 col-12 col-lg-6">
+                            	<span class="d-none d-sm-inline">Member </span>Rating <span class="op30">:</span>
+<span class="px-1 starRating" data-id="1m472"><i class="fas fa-star"></i></span><span class="px-1 starRating" data-id="2m472"><i class="fas fa-star"></i></span><span class="px-1 starRating" data-id="3m472"><i class="fas fa-star"></i></span><span class="px-1 starRating" data-id="4m472"><i class="fas fa-star"></i></span><span class="px-1 starRating" data-id="5m472"><i class="fas fa-star"></i></span><span class="px-1 starRating" data-id="6m472"><i class="fas fa-star"></i></span><span class="px-1 starRating" data-id="7m472"><i class="fas fa-star"></i></span><span class="px-1 starRating" data-id="8m472"><i class="fas fa-star"></i></span><span class="px-1 starRating" data-id="9m472"><i class="fas fa-star"></i></span><span class="px-1 starNoRating" data-id="10m472"><i class="fal fa-star"></i></span>   
+                        		<small>9.85<span class="op30">/</span>10</small>
+                            </div>
+                            <div class="col-12 col-lg-6 sand mb-1 collectionHeart hand fs-6" data-id="472-1">
+                                <small><i class="fas fa-heart"></i> <span class="favouriteAdd">Add Monika May To</span><span class="favouriteRemove dNone">Remove Monika May From</span> Your Collection</small>
+                            </div>
+                        </div> 
+                        
+                    </div>
+                </div>
+            </div>
+        </div>
+    	<div class="d-flex justify-content-center mx-auto pt-lg-4 flex-row flex-wrap mobileThumbSize mobileThumbGrid" style="max-width: 1503px;" id="exploreSite">
+            <div class="d-flex flex-column flex-sm-row w-100 g-0 mt-1">
+            	<div class="flex-fill text-center text-sm-end mb-2 mb-sm-4">				
+                </div>
+            	<div class="fw-bold order-sm-first mb-2">
+                	
+                </div>
+            </div>
+            <div class="w-100">
+                <div class="mb-3">       
+					<div class="mb-2">
+                    	<span class="fs-5 fw-bold me-2">Tags:</span>
+                        <div id="updateTags" class="d-flex flex-wrap">
+<a href="/tags/alluring+eyes/" class="tag noTrans me-1 mb-1 rounded-pill">alluring eyes</a> <a href="/tags/cute/" class="tag noTrans me-1 mb-1 rounded-pill">cute</a> <a href="/tags/girl+next+door/" class="tag noTrans me-1 mb-1 rounded-pill">girl next door</a> <a href="/tags/made+me+cum/" class="tag noTrans me-1 mb-1 rounded-pill">made me cum</a> <a href="/tags/natural/" class="tag noTrans me-1 mb-1 rounded-pill">natural</a> <a href="/tags/open+pussy/" class="tag noTrans me-1 mb-1 rounded-pill">open pussy</a> <a href="/tags/perfectlabia/" class="tag noTrans me-1 mb-1 rounded-pill">perfectlabia</a> <a href="/tags/petite/" class="tag noTrans me-1 mb-1 rounded-pill">petite</a> <a href="/tags/puff/" class="tag noTrans me-1 mb-1 rounded-pill">puff</a> <a href="/tags/seductive/" class="tag noTrans me-1 mb-1 rounded-pill">seductive</a> <a href="/tags/stunning+labia/" class="tag noTrans me-1 mb-1 rounded-pill">stunning labia</a> <a href="/tags/sweet+pussy/" class="tag noTrans me-1 mb-1 rounded-pill">sweet pussy</a> <a href="/tags/tight+ass/" class="tag noTrans me-1 mb-1 rounded-pill">tight ass</a>     
+						</div>                    
+                    </div>
+                    Add tags for Monika May.
+                    <div class="row w-100" id="addTag">
+                    	<div class="col-12 col-md-6 col-xl-4">
+                            <div class="input-group input-group-sm mb-3">
+                              	<input type="text" class="form-control" id="addTagInput" autocomplete="off" placeholder="Seperate tags with a comma">
+                              	<button class="btn btn-outline-secondary" type="button" id="addTagBtn">Add</button>
+                            </div>                    
+						</div>
+                    </div>
+                </div>
+            	<div class="text-center mb-3" id="modelFilter">
+<span class="filterPage hand sand" data-filter="latest">Latest Updates</span> <span class="op30">-</span> <span class="filterPage hand" data-filter="rating">Top Rated Updates</span>            
+            	</div>
+                <nav>
+                    <div class="nav nav-tabs" id="nav-tab" role="tablist">
+                        <button class="nav-link active" id="navLatestTab" data-show="updatePhoto updateVideo" data-bs-toggle="tab" type="button" role="tab" aria-selected="true">All<span class="hidePage"> Updates</span> <small>(18)</small></button>
+                        
+                        <button class="nav-link" id="navPhotosTab" data-show="updatePhoto" data-bs-toggle="tab" type="button" role="tab" aria-selected="false"><span class="d-none d-sm-inline-block">Photo</span> Sets<span class="d-none d-sm-inline"> <small>(12)</small></button>
+                        <button class="nav-link" id="navVideosTab" data-show="updateVideo" data-bs-toggle="tab" type="button" role="tab" aria-selected="false">Videos <small>(6)</small></button>
+						
+                        <div class="d-sm-none mobileThumbSelector flex-fill text-end align-self-center">
+                        	<i class="fas fa-th-large hand"></i><i class="far fa-square-full hand"></i>
+                        </div>
+                    </div>
+                </nav>
+				<div class="gridUpdateBox mb-3 mt-1" id="modelGrid">
+ 
+					<div class="text-center mb-3 box1 updatePhoto" data-rating="9.9615" data-latest="18">
+						<div class="d-flex flex-column">
+							<div>
+								<a href="/update/6586-Shoot_Day_Montage/">
+								  <img class="stdCover img-fluid w-100" src="https://cdn.mplstudios.com/v3Assets/covers/472/925ae85d/6586_med.jpg" srcset="https://cdn.mplstudios.com/v3Assets/covers/472/925ae85d/6586_lg.jpg 525w, https://cdn.mplstudios.com/v3Assets/covers/472/925ae85d/6586_med.jpg 238w" sizes="(max-width: 576px) 500px, 238px" width="238" height="330" loading="lazy">
+								</a>
+							</div>
+							<div class="mt-2">
+								<span class="ellipsis">Dec 1, 2022</span>
+							</div>
+							<div>
+								<span class="ellipsis"><a class="sand fw-bold" href="/portfolio/472-Monika_May/">Monika May</a></span>
+							</div>
+							<div>
+								<span class="ellipsis" title="Shoot Day: Montage">'Shoot Day: Montage'</span>
+							</div>
+							<div>
+								<span class="ellipsis">by <a class="sand" href="/photographers/20-Dante_Lionetti/">Dante Lionetti</a></span>
+							</div>
+						</div>
+					</div>
+
+					<div class="text-center mb-3 box1 updatePhoto" data-rating="9.8095" data-latest="17">
+						<div class="d-flex flex-column">
+							<div>
+								<a href="/update/6446-Shoot_Day_Montage/">
+								  <img class="stdCover img-fluid w-100" src="https://cdn.mplstudios.com/v3Assets/covers/472/dfa2eb69/6446_med.jpg" srcset="https://cdn.mplstudios.com/v3Assets/covers/472/dfa2eb69/6446_lg.jpg 525w, https://cdn.mplstudios.com/v3Assets/covers/472/dfa2eb69/6446_med.jpg 238w" sizes="(max-width: 576px) 500px, 238px" width="238" height="330" loading="lazy">
+								</a>
+							</div>
+							<div class="mt-2">
+								<span class="ellipsis">Apr 5, 2022</span>
+							</div>
+							<div>
+								<span class="ellipsis"><a class="sand fw-bold" href="/portfolio/472-Monika_May/">Monika May</a></span>
+							</div>
+							<div>
+								<span class="ellipsis" title="Shoot Day: Montage">'Shoot Day: Montage'</span>
+							</div>
+							<div>
+								<span class="ellipsis">by <a class="sand" href="/photographers/13-Anri/">Anri</a></span>
+							</div>
+						</div>
+					</div>
+
+					<div class="text-center mb-3 box1 updatePhoto" data-rating="9.8710" data-latest="16">
+						<div class="d-flex flex-column">
+							<div>
+								<a href="/update/6377-Shoot_Day_Montage/">
+								  <img class="stdCover img-fluid w-100" src="https://cdn.mplstudios.com/v3Assets/covers/472/ebd2da96/6377_med.jpg" srcset="https://cdn.mplstudios.com/v3Assets/covers/472/ebd2da96/6377_lg.jpg 525w, https://cdn.mplstudios.com/v3Assets/covers/472/ebd2da96/6377_med.jpg 238w" sizes="(max-width: 576px) 500px, 238px" width="238" height="330" loading="lazy">
+								</a>
+							</div>
+							<div class="mt-2">
+								<span class="ellipsis">Dec 15, 2021</span>
+							</div>
+							<div>
+								<span class="ellipsis"><a class="sand fw-bold" href="/portfolio/472-Monika_May/">Monika May</a></span>
+							</div>
+							<div>
+								<span class="ellipsis" title="Shoot Day: Montage">'Shoot Day: Montage'</span>
+							</div>
+							<div>
+								<span class="ellipsis">by <a class="sand" href="/photographers/49-Nick_Twin/">Nick Twin</a></span>
+							</div>
+						</div>
+					</div>
+
+					<div class="text-center mb-3 box1 updateVideo" data-rating="9.9130" data-latest="15">
+						<div class="d-flex flex-column">
+							<div>
+								<a href="/update/6222v2-Smooth_Creamy_2/">
+								  <img class="stdCover img-fluid w-100" src="https://cdn.mplstudios.com/v3Assets/covers/472/7d6a2eb5/6222v2_med.jpg" srcset="https://cdn.mplstudios.com/v3Assets/covers/472/7d6a2eb5/6222v2_lg.jpg 525w, https://cdn.mplstudios.com/v3Assets/covers/472/7d6a2eb5/6222v2_med.jpg 238w" sizes="(max-width: 576px) 500px, 238px" width="238" height="330" loading="lazy">
+								</a>
+							</div>
+							<div class="mt-2">
+								<span class="ellipsis">May 23, 2021</span>
+							</div>
+							<div>
+								<span class="ellipsis"><a class="sand fw-bold" href="/portfolio/472-Monika_May/">Monika May</a></span>
+							</div>
+							<div>
+								<span class="ellipsis" title="Smooth & Creamy 2">'Smooth & Creamy 2'</span>
+							</div>
+							<div>
+								<span class="ellipsis">by <a class="sand" href="/photographers/49-Nick_Twin/">Nick Twin</a></span>
+							</div>
+						</div>
+					</div>
+
+					<div class="text-center mb-3 box1 updatePhoto" data-rating="9.8864" data-latest="14">
+						<div class="d-flex flex-column">
+							<div>
+								<a href="/update/6247-A_View_To_A_Thrill/">
+								  <img class="stdCover img-fluid w-100" src="https://cdn.mplstudios.com/v3Assets/covers/472/265ec687/6247_med.jpg" srcset="https://cdn.mplstudios.com/v3Assets/covers/472/265ec687/6247_lg.jpg 525w, https://cdn.mplstudios.com/v3Assets/covers/472/265ec687/6247_med.jpg 238w" sizes="(max-width: 576px) 500px, 238px" width="238" height="330" loading="lazy">
+								</a>
+							</div>
+							<div class="mt-2">
+								<span class="ellipsis">May 3, 2021</span>
+							</div>
+							<div>
+								<span class="ellipsis"><a class="sand fw-bold" href="/portfolio/472-Monika_May/">Monika May</a></span>
+							</div>
+							<div>
+								<span class="ellipsis" title="A View To A Thrill">'A View To A Thrill'</span>
+							</div>
+							<div>
+								<span class="ellipsis">by <a class="sand" href="/photographers/20-Dante_Lionetti/">Dante Lionetti</a></span>
+							</div>
+						</div>
+					</div>
+
+					<div class="text-center mb-3 box1 updatePhoto" data-rating="9.9348" data-latest="13">
+						<div class="d-flex flex-column">
+							<div>
+								<a href="/update/6231-Light_Bites/">
+								  <img class="stdCover img-fluid w-100" src="https://cdn.mplstudios.com/v3Assets/covers/472/1f03b959/6231_med.jpg" srcset="https://cdn.mplstudios.com/v3Assets/covers/472/1f03b959/6231_lg.jpg 525w, https://cdn.mplstudios.com/v3Assets/covers/472/1f03b959/6231_med.jpg 238w" sizes="(max-width: 576px) 500px, 238px" width="238" height="330" loading="lazy">
+								</a>
+							</div>
+							<div class="mt-2">
+								<span class="ellipsis">Apr 7, 2021</span>
+							</div>
+							<div>
+								<span class="ellipsis"><a class="sand fw-bold" href="/portfolio/472-Monika_May/">Monika May</a></span>
+							</div>
+							<div>
+								<span class="ellipsis" title="Light Bites">'Light Bites'</span>
+							</div>
+							<div>
+								<span class="ellipsis">by <a class="sand" href="/photographers/20-Dante_Lionetti/">Dante Lionetti</a></span>
+							</div>
+						</div>
+					</div>
+
+					<div class="text-center mb-3 box1 updateVideo" data-rating="9.9474" data-latest="12">
+						<div class="d-flex flex-column">
+							<div>
+								<a href="/update/6222v1-Smooth_Creamy/">
+								  <img class="stdCover img-fluid w-100" src="https://cdn.mplstudios.com/v3Assets/covers/472/97f49469/6222v1_med.jpg" srcset="https://cdn.mplstudios.com/v3Assets/covers/472/97f49469/6222v1_lg.jpg 525w, https://cdn.mplstudios.com/v3Assets/covers/472/97f49469/6222v1_med.jpg 238w" sizes="(max-width: 576px) 500px, 238px" width="238" height="330" loading="lazy">
+								</a>
+							</div>
+							<div class="mt-2">
+								<span class="ellipsis">Mar 22, 2021</span>
+							</div>
+							<div>
+								<span class="ellipsis"><a class="sand fw-bold" href="/portfolio/472-Monika_May/">Monika May</a></span>
+							</div>
+							<div>
+								<span class="ellipsis" title="Smooth & Creamy">'Smooth & Creamy'</span>
+							</div>
+							<div>
+								<span class="ellipsis">by <a class="sand" href="/photographers/49-Nick_Twin/">Nick Twin</a></span>
+							</div>
+						</div>
+					</div>
+
+					<div class="text-center mb-3 box1 updatePhoto" data-rating="9.8611" data-latest="11">
+						<div class="d-flex flex-column">
+							<div>
+								<a href="/update/6196-Bedroom_Ready/">
+								  <img class="stdCover img-fluid w-100" src="https://cdn.mplstudios.com/v3Assets/covers/472/d99927aa/6196_med.jpg" srcset="https://cdn.mplstudios.com/v3Assets/covers/472/d99927aa/6196_lg.jpg 525w, https://cdn.mplstudios.com/v3Assets/covers/472/d99927aa/6196_med.jpg 238w" sizes="(max-width: 576px) 500px, 238px" width="238" height="330" loading="lazy">
+								</a>
+							</div>
+							<div class="mt-2">
+								<span class="ellipsis">Feb 26, 2021</span>
+							</div>
+							<div>
+								<span class="ellipsis"><a class="sand fw-bold" href="/portfolio/472-Monika_May/">Monika May</a></span>
+							</div>
+							<div>
+								<span class="ellipsis" title="Bedroom Ready">'Bedroom Ready'</span>
+							</div>
+							<div>
+								<span class="ellipsis">by <a class="sand" href="/photographers/20-Dante_Lionetti/">Dante Lionetti</a></span>
+							</div>
+						</div>
+					</div>
+
+					<div class="text-center mb-3 box1 updatePhoto" data-rating="9.8000" data-latest="10">
+						<div class="d-flex flex-column">
+							<div>
+								<a href="/update/6187-Believe_in_Miracles/">
+								  <img class="stdCover img-fluid w-100" src="https://cdn.mplstudios.com/v3Assets/covers/472/472fda2e/6187_med.jpg" srcset="https://cdn.mplstudios.com/v3Assets/covers/472/472fda2e/6187_lg.jpg 525w, https://cdn.mplstudios.com/v3Assets/covers/472/472fda2e/6187_med.jpg 238w" sizes="(max-width: 576px) 500px, 238px" width="238" height="330" loading="lazy">
+								</a>
+							</div>
+							<div class="mt-2">
+								<span class="ellipsis">Feb 3, 2021</span>
+							</div>
+							<div>
+								<span class="ellipsis"><a class="sand fw-bold" href="/portfolio/472-Monika_May/">Monika May</a></span>
+							</div>
+							<div>
+								<span class="ellipsis" title="Believe in Miracles">'Believe in Miracles'</span>
+							</div>
+							<div>
+								<span class="ellipsis">by <a class="sand" href="/photographers/20-Dante_Lionetti/">Dante Lionetti</a></span>
+							</div>
+						</div>
+					</div>
+
+					<div class="text-center mb-3 box1 updateVideo" data-rating="9.8750" data-latest="9">
+						<div class="d-flex flex-column">
+							<div>
+								<a href="/update/6146v2-A_Feeling_Called_Desire_2/">
+								  <img class="stdCover img-fluid w-100" src="https://cdn.mplstudios.com/v3Assets/covers/472/65e9e16c/6146v2_med.jpg" srcset="https://cdn.mplstudios.com/v3Assets/covers/472/65e9e16c/6146v2_lg.jpg 525w, https://cdn.mplstudios.com/v3Assets/covers/472/65e9e16c/6146v2_med.jpg 238w" sizes="(max-width: 576px) 500px, 238px" width="238" height="330" loading="lazy">
+								</a>
+							</div>
+							<div class="mt-2">
+								<span class="ellipsis">Jan 10, 2021</span>
+							</div>
+							<div>
+								<span class="ellipsis"><a class="sand fw-bold" href="/portfolio/472-Monika_May/">Monika May</a></span>
+							</div>
+							<div>
+								<span class="ellipsis" title="A Feeling Called Desire 2">'A Feeling Called Desire 2'</span>
+							</div>
+							<div>
+								<span class="ellipsis">by <a class="sand" href="/photographers/49-Nick_Twin/">Nick Twin</a></span>
+							</div>
+						</div>
+					</div>
+
+					<div class="text-center mb-3 box1 updatePhoto" data-rating="9.8980" data-latest="8">
+						<div class="d-flex flex-column">
+							<div>
+								<a href="/update/6162-A_Feeling_Called_Desire/">
+								  <img class="stdCover img-fluid w-100" src="https://cdn.mplstudios.com/v3Assets/covers/472/0618c8bc/6162_med.jpg" srcset="https://cdn.mplstudios.com/v3Assets/covers/472/0618c8bc/6162_lg.jpg 525w, https://cdn.mplstudios.com/v3Assets/covers/472/0618c8bc/6162_med.jpg 238w" sizes="(max-width: 576px) 500px, 238px" width="238" height="330" loading="lazy">
+								</a>
+							</div>
+							<div class="mt-2">
+								<span class="ellipsis">Dec 9, 2020</span>
+							</div>
+							<div>
+								<span class="ellipsis"><a class="sand fw-bold" href="/portfolio/472-Monika_May/">Monika May</a></span>
+							</div>
+							<div>
+								<span class="ellipsis" title="A Feeling Called Desire">'A Feeling Called Desire'</span>
+							</div>
+							<div>
+								<span class="ellipsis">by <a class="sand" href="/photographers/49-Nick_Twin/">Nick Twin</a></span>
+							</div>
+						</div>
+					</div>
+
+					<div class="text-center mb-3 box1 updateVideo" data-rating="9.9565" data-latest="7">
+						<div class="d-flex flex-column">
+							<div>
+								<a href="/update/6146v1-A_Feeling_Called_Desire/">
+								  <img class="stdCover img-fluid w-100" src="https://cdn.mplstudios.com/v3Assets/covers/472/8f775bb0/6146v1_med.jpg" srcset="https://cdn.mplstudios.com/v3Assets/covers/472/8f775bb0/6146v1_lg.jpg 525w, https://cdn.mplstudios.com/v3Assets/covers/472/8f775bb0/6146v1_med.jpg 238w" sizes="(max-width: 576px) 500px, 238px" width="238" height="330" loading="lazy">
+								</a>
+							</div>
+							<div class="mt-2">
+								<span class="ellipsis">Nov 5, 2020</span>
+							</div>
+							<div>
+								<span class="ellipsis"><a class="sand fw-bold" href="/portfolio/472-Monika_May/">Monika May</a></span>
+							</div>
+							<div>
+								<span class="ellipsis" title="A Feeling Called Desire">'A Feeling Called Desire'</span>
+							</div>
+							<div>
+								<span class="ellipsis">by <a class="sand" href="/photographers/49-Nick_Twin/">Nick Twin</a></span>
+							</div>
+						</div>
+					</div>
+
+					<div class="text-center mb-3 box1 updateVideo" data-rating="9.9231" data-latest="6">
+						<div class="d-flex flex-column">
+							<div>
+								<a href="/update/6129v-Addicted_To_Love_2/">
+								  <img class="stdCover img-fluid w-100" src="https://cdn.mplstudios.com/v3Assets/covers/472/9ce52d8c/6129v_med.jpg" srcset="https://cdn.mplstudios.com/v3Assets/covers/472/9ce52d8c/6129v_lg.jpg 525w, https://cdn.mplstudios.com/v3Assets/covers/472/9ce52d8c/6129v_med.jpg 238w" sizes="(max-width: 576px) 500px, 238px" width="238" height="330" loading="lazy">
+								</a>
+							</div>
+							<div class="mt-2">
+								<span class="ellipsis">Oct 7, 2020</span>
+							</div>
+							<div>
+								<span class="ellipsis"><a class="sand fw-bold" href="/portfolio/472-Monika_May/">Monika May</a></span>
+							</div>
+							<div>
+								<span class="ellipsis" title="Addicted To Love 2">'Addicted To Love 2'</span>
+							</div>
+							<div>
+								<span class="ellipsis">by <a class="sand" href="/photographers/49-Nick_Twin/">Nick Twin</a></span>
+							</div>
+						</div>
+					</div>
+
+					<div class="text-center mb-3 box1 updatePhoto" data-rating="9.8571" data-latest="5">
+						<div class="d-flex flex-column">
+							<div>
+								<a href="/update/6111-Smooth_Creamy/">
+								  <img class="stdCover img-fluid w-100" src="https://cdn.mplstudios.com/v3Assets/covers/472/5aca8b1c/6111_med.jpg" srcset="https://cdn.mplstudios.com/v3Assets/covers/472/5aca8b1c/6111_lg.jpg 525w, https://cdn.mplstudios.com/v3Assets/covers/472/5aca8b1c/6111_med.jpg 238w" sizes="(max-width: 576px) 500px, 238px" width="238" height="330" loading="lazy">
+								</a>
+							</div>
+							<div class="mt-2">
+								<span class="ellipsis">Sep 9, 2020</span>
+							</div>
+							<div>
+								<span class="ellipsis"><a class="sand fw-bold" href="/portfolio/472-Monika_May/">Monika May</a></span>
+							</div>
+							<div>
+								<span class="ellipsis" title="Smooth & Creamy">'Smooth & Creamy'</span>
+							</div>
+							<div>
+								<span class="ellipsis">by <a class="sand" href="/photographers/49-Nick_Twin/">Nick Twin</a></span>
+							</div>
+						</div>
+					</div>
+
+					<div class="text-center mb-3 box1 updateVideo" data-rating="9.9286" data-latest="4">
+						<div class="d-flex flex-column">
+							<div>
+								<a href="/update/6109v1-Addicted_To_Love/">
+								  <img class="stdCover img-fluid w-100" src="https://cdn.mplstudios.com/v3Assets/covers/472/bccd6395/6109v1_med.jpg" srcset="https://cdn.mplstudios.com/v3Assets/covers/472/bccd6395/6109v1_lg.jpg 525w, https://cdn.mplstudios.com/v3Assets/covers/472/bccd6395/6109v1_med.jpg 238w" sizes="(max-width: 576px) 500px, 238px" width="238" height="330" loading="lazy">
+								</a>
+							</div>
+							<div class="mt-2">
+								<span class="ellipsis">Aug 12, 2020</span>
+							</div>
+							<div>
+								<span class="ellipsis"><a class="sand fw-bold" href="/portfolio/472-Monika_May/">Monika May</a></span>
+							</div>
+							<div>
+								<span class="ellipsis" title="Addicted To Love">'Addicted To Love'</span>
+							</div>
+							<div>
+								<span class="ellipsis">by <a class="sand" href="/photographers/49-Nick_Twin/">Nick Twin</a></span>
+							</div>
+						</div>
+					</div>
+
+					<div class="text-center mb-3 box1 updatePhoto" data-rating="9.9455" data-latest="3">
+						<div class="d-flex flex-column">
+							<div>
+								<a href="/update/6101-Addicted_to_Love/">
+								  <img class="stdCover img-fluid w-100" src="https://cdn.mplstudios.com/v3Assets/covers/472/fe06bad5/6101_med.jpg" srcset="https://cdn.mplstudios.com/v3Assets/covers/472/fe06bad5/6101_lg.jpg 525w, https://cdn.mplstudios.com/v3Assets/covers/472/fe06bad5/6101_med.jpg 238w" sizes="(max-width: 576px) 500px, 238px" width="238" height="330" loading="lazy">
+								</a>
+							</div>
+							<div class="mt-2">
+								<span class="ellipsis">Jul 19, 2020</span>
+							</div>
+							<div>
+								<span class="ellipsis"><a class="sand fw-bold" href="/portfolio/472-Monika_May/">Monika May</a></span>
+							</div>
+							<div>
+								<span class="ellipsis" title="Addicted to Love">'Addicted to Love'</span>
+							</div>
+							<div>
+								<span class="ellipsis">by <a class="sand" href="/photographers/49-Nick_Twin/">Nick Twin</a></span>
+							</div>
+						</div>
+					</div>
+
+					<div class="text-center mb-3 box1 updatePhoto" data-rating="9.8519" data-latest="2">
+						<div class="d-flex flex-column">
+							<div>
+								<a href="/update/6057-In_For_The_Night/">
+								  <img class="stdCover img-fluid w-100" src="https://cdn.mplstudios.com/v3Assets/covers/472/ae1be8d3/6057_med.jpg" srcset="https://cdn.mplstudios.com/v3Assets/covers/472/ae1be8d3/6057_lg.jpg 525w, https://cdn.mplstudios.com/v3Assets/covers/472/ae1be8d3/6057_med.jpg 238w" sizes="(max-width: 576px) 500px, 238px" width="238" height="330" loading="lazy">
+								</a>
+							</div>
+							<div class="mt-2">
+								<span class="ellipsis">May 10, 2020</span>
+							</div>
+							<div>
+								<span class="ellipsis"><a class="sand fw-bold" href="/portfolio/472-Monika_May/">Monika May</a></span>
+							</div>
+							<div>
+								<span class="ellipsis" title="In For The Night">'In For The Night'</span>
+							</div>
+							<div>
+								<span class="ellipsis">by <a class="sand" href="/photographers/13-Anri/">Anri</a></span>
+							</div>
+						</div>
+					</div>
+
+					<div class="text-center mb-3 box1 updatePhoto" data-rating="9.8788" data-latest="1">
+						<div class="d-flex flex-column">
+							<div>
+								<a href="/update/6046-In_Country/">
+								  <img class="stdCover img-fluid w-100" src="https://cdn.mplstudios.com/v3Assets/covers/472/30ad1557/6046_med.jpg" srcset="https://cdn.mplstudios.com/v3Assets/covers/472/30ad1557/6046_lg.jpg 525w, https://cdn.mplstudios.com/v3Assets/covers/472/30ad1557/6046_med.jpg 238w" sizes="(max-width: 576px) 500px, 238px" width="238" height="330" loading="lazy">
+								</a>
+							</div>
+							<div class="mt-2">
+								<span class="ellipsis">Apr 20, 2020</span>
+							</div>
+							<div>
+								<span class="ellipsis"><a class="sand fw-bold" href="/portfolio/472-Monika_May/">Monika May</a></span>
+							</div>
+							<div>
+								<span class="ellipsis" title="In Country">'In Country'</span>
+							</div>
+							<div>
+								<span class="ellipsis">by <a class="sand" href="/photographers/13-Anri/">Anri</a></span>
+							</div>
+						</div>
+					</div>
+ 
+ 				</div>
+            </div>
+		</div>
+    </div>
+        <ul class="navbar-nav mx-2 my-3 pt-3 flex-row flex-wrap flex-md-nowrap align-items-baseline text-center">
+            <li class="nav-item">
+                <a class="nav-link" href="/">HOME</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="/explore/">EXPLORE</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="/updates/">UPDATES</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="/videos/">VIDEOS</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link sand" href="/studio_girls/">MODELS</a>
+            </li> 
+            <li class="nav-item d-md-none">
+                <a class="nav-link" href="/legends/">MPL LEGENDS <img class="pb-1 flipDark" src="https://cdn.mplstudios.com/v3Assets/general/crown_model.png"></a>
+            </li>
+            <li class="nav-item d-none d-md-inline-block">
+                <div class="dropup">
+                    <div class="nav-link hand" data-bs-toggle="dropdown">MORE <i class="far fa-chevron-double-up fa-xs d-none d-md-inline"></i></div>
+                    <ul class="dropdown-menu moreDropdown noTrans">
+                        <li><a class="dropdown-item text-white" href="/legends/">MPL Legends <img class="pb-1 flipDark" src="https://cdn.mplstudios.com/v3Assets/general/crown_model.png"></a></li>
+                        <li><a class="dropdown-item text-white" href="/explore/series/Postcard_Series/">Postcard Series</a></li>
+                        <li><a class="dropdown-item text-white" href="/explore/series/BTS_Series/">Shoot Day Series</a></li>
+                        <li><a class="dropdown-item text-white" href="/photographers/">Creative Team</a></li>
+                    </ul>
+                </div>
+            </li>   
+            <li class="nav-item d-md-none">
+                <a class="nav-link" href="/explore/series/Postcard_Series/">POSTCARD SERIES</a>
+            </li>  
+            <li class="nav-item d-md-none">
+                <a class="nav-link" href="/explore/series/BTS_Series/">SHOOT DAY SERIES</a>
+            </li>    
+            <li class="nav-item d-md-none">
+                <a class="nav-link" href="/photographers/">CREATIVE TEAM</a>
+            </li>  
+		                
+                <li class="nav-item">
+                    <a class="nav-link" href="/models/">LOGIN</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link cherry" href="/join/" target="_blank">JOIN</a>
+                </li>
+	
+            <li class="nav-item d-none d-md-inline-block">
+                <a class="openSearch" href="#"><i class="far fa-search fa-lg"></i></a>
+            </li>
+        </ul>
+        
+        <div class="d-flex justify-content-center mb-2 flex-wrap" id="contactAffiliate">
+        	<div>
+        		<a href="/contact/">CONTACT</a>
+					</div>
+					<div>
+        		<a href="/rules-policy/?s=terms">TERMS &amp; CONDITIONS</a>
+					</div>
+					<div>
+        		<a href="/rules-policy/?s=privacy">PRIVACY</a>
+					</div>
+					<div>
+        		<a href="/rules-policy/?s=tips">MEMBER TIPS</a>
+					</div>
+					<div>
+        		<a href="/rules-policy/">RULES &amp; POLICIES</a>
+					</div>
+					<div>
+        		<a href="http://www.mplstudiocash.com" target="_blank">BECOME AFFILIATED</a>
+					</div>
+        </div>
+        
+        <div class="text-center pb-5 mb-5" id="complianceCopy">
+           	<a href="/rules-policy/?s=title18" class="p-0 me-md-3">18 U.S.C. 2257 Record-Keeping Requirements Compliance Statement</a><br class="d-md-none mb-2"><a href="/complaint-form/" class="p-0 me-md-3">Complaints</a><br class="d-md-none mb-2"><a href="/copyright/" class="p-0">&copy; copyright MPLStudios.com 2003 - 2026</a>
+        </div>
+            
+        <div id="scrollTop">
+            <i class="far fa-caret-square-up"></i>
+        </div>
+        
+<!--Modal-->
+<div class="modal fade" tabindex="-1" id="siteSearchModal">
+  	<div class="modal-dialog modal-fullscreen modal-dialog-scrollable">
+    	<div class="modal-content">
+      		<div class="modal-header flex-column">
+            	<div class="d-flex w-100">
+        			<h5 class="modal-title text-white d-flex mw-100">
+                    	<span class="flex-shrink-0 pe-2">Search Results for: </span>
+                        <span class="ellipsis fs-5 text-grey" id="modalSearchText"></span>
+                    </h5>
+        			<button type="button" class="btn-close bg-white position-absolute top-0 end-0 me-2 mt-2" data-bs-dismiss="modal"></button>
+                </div>
+                <div>
+                    <ul class="list-group list-group-horizontal d-flex justify-content-center" id="searchResultIcons">
+                        <button class="searchIcon p-2 list-group-item list-group-item-action" type="button" id="searchIconModel" data-id="modelResults">
+                            <i class="fas fa-lg fa-user-alt"></i>
+                        </button>
+                        <button class="searchIcon p-2 list-group-item list-group-item-action" type="button" id="searchIconPhotographer" data-id="photographerResults">
+                            <i class="fas fa-lg fa-camera"></i>
+                        </button>
+                        <button class="searchIcon p-2 list-group-item list-group-item-action" type="button" id="searchIconTag" data-id="tagResults">
+                            <i class="fas fa-lg fa-tag"></i>
+                        </button>
+                        <button class="searchIcon p-2 list-group-item list-group-item-action" type="button" id="searchIconPhoto" data-id="photoResults">
+                            <i class="fas fa-lg fa-images"></i>
+                        </button>
+                        <button class="searchIcon p-2 list-group-item list-group-item-action" type="button" id="searchIconVideo" data-id="videoResults">
+                        	<i class="fas fa-lg fa-camera-movie"></i>
+                        </button>
+                    </ul>
+                </div>
+      		</div>
+      		<div class="modal-body text-white">
+            	<div class="d-flex justify-content-center mx-auto pt-lg-4 flex-column" style="max-width: 1503px;">
+                </div>
+      		</div>
+    	</div>
+  	</div>
+</div>    
+
+<div class="closed" id="memberLoginModal">
+	<div class="border border-panel position-relative">
+    	<div id="mlmTopPanel">
+        	<div>
+        		<strong>MPL STUDIOS</strong> content is for
+            </div>
+            <div class="fw-bolder">
+            	Members Only
+        	</div>
+        </div>
+    	<div id="mlmBottomPanel">
+        	<div class="my-4">
+        		<a class="cherry fw-bold" href="/join/">Join MPL Studios</a> today for Instant Access!
+        	</div>
+            <div class="d-flex">
+                <a class="mx-auto px-5 w-auto mw-100 overflow-hidden" href="/join/">
+                    <div class="position-relative" id="mlmCenter">
+                        <img class="position-absolute top-0 left-0 mw-100" src="https://cdn.mplstudios.com/v3Assets/homePage/Enter_Today_F.webp">
+                        <img class="flipDark mw-100 ms-1" src="https://cdn.mplstudios.com/v3Assets/homePage/Enter_Today_B.png">
+                    </div>
+                </a>
+            </div>
+            <div class="my-4">
+            	Already an MPL Member? <a class="fw-bold cherry loginLink" href="/models/">Log In</a>
+            </div>
+        </div>
+        <button type="button" class="btn-close bg-white fs-5 position-absolute top-0 end-0 m-1"></button>
+    </div>
+</div>     
+	<script src="https://cdn.mplstudios.com/v3js/jquery.min.js"></script>
+    <script src="https://cdn.mplstudios.com/v3js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.mplstudios.com/v3js/lozad.min.js"></script>
+    <script src="https://cdn.mplstudios.com/v3js/mplv3.js"></script>
+	<script>
+		$( 'body' ).on( 'click', '.memberPrompt, #addTagBtn, #addTagModalBtn', function( e ){
+			e.preventDefault();
+			showPrompt();
+		} );
+		function showPrompt(){
+      lockBGScroll()
+			$( '#memberLoginModal' ).removeClass( 'closed' );
+//			$( 'body' ).addClass( 'modal-open' );
+		}
+    $('body').on('click', '#memberLoginModal, #memberLoginModal .btn-close, #sfwModal, #sfwModal .btn-close', function(e) {
+			if( e.target !== e.currentTarget ) return;
+      unlockBGScroll()
+			$( '#memberLoginModal' ).addClass( 'closed' );
+			$( '#sfwModal' ).addClass( 'closed' );
+//			$( 'body' ).removeClass( 'modal-open' );
+		} );
+		$( '.starRating, .starNoRating, .collectionHeart' ).click( function(){
+			showPrompt();
+        } );
+		$( '.mobileThumbSize' ).removeClass( 'mobileThumbGrid mobileThumbFull' ).addClass( 'mobileThumbGrid' );
+	</script>
+
+
+    <div class="modal fade" tabindex="-1" id="playerModal">
+        <div class="modal-dialog modal-fullscreen modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header py-1">
+                    <a href="" class="fs-5 modal-title text-white w-100 text-center modalUpdateTitle"></a>
+                    <button type="button" class="btn-close bg-white" data-bs-dismiss="modal" aria-label="Close" id="videoModalClose"></button>
+                </div>
+                <div class="modal-body p-1">
+                    <div class="d-flex justify-content-center">
+                        <div class="mt-1 mb-4" id="videoPlayerBin" style="width: 1280px; max-width:1280px;">
+                        	<div class="overflow-hidden position-relative">
+                            	<div class="position-absolute w-100 h-100 flex-column align-items-center justify-content-center" id="coverOver">
+                                    <h2 class="w-100 text-center">We Hope You Are Enjoying The Free Previews!</h2> 
+                                    <h4 class="w-100 text-center">To Continue To See More <br class="d-md-none"><a class="cherry" href="/join/" target="_blank">SIGN UP</a> or <a class="sand loginLink" href="/models/membership/">LOGIN</a></h4>
+                                </div>
+                                <video id="videoPlayer" class="video-js vjs-16-9 vjs-big-play-centered noTrans border border-secondary" poster="/v3Assets/general/videoPoster.webp" playsinline controls style="background-color: transparent;">
+                                </video>
+                            </div>
+                            <div class="row g-0">
+                                <div class="col text-center text-sm-start">
+                                    <div>
+                                        <span class="modalUpdateModel"></span> in <a href="" class="modalUpdateTitle fw-bold"></a>
+                                    </div>
+                                    <div>
+                                        
+                                    </div>
+                                </div>
+                                <div class="col-12 col-sm-auto text-center text-sm-end">
+                                    <div>
+                                        <small><i class="far fa-lightbulb sand me-2 hand position-relative" id="videoModalDim"></i> Full Video <span class="modelUpdateVideoLength sand"></span> <i class="fas fa-video fa-xs sand ms-2"></i> by <span class="modalUpdatePhotographer"></span></small>
+                                    </div>
+                                    <div class="sand mb-1 collectionHeart hand">
+                                        <small><i class="fas fa-heart"></i> <span class="favouriteAdd">Add To</span><span class="favouriteRemove dNone">Remove From</span> Your Collection</small>
+                                    </div>
+                                </div>
+                                <div class="col-12 text-center text-sm-start mb-3" style="margin-top: -0.5rem;">
+                                    <span class="memberPrompt hand" data-video="models/launchPlay"><i class="far fa-play-circle fa-lg sand"></i> Play Full Video</span> <span class="sand mx-1">|</span>
+                                    <div class="dropdown d-inline-block">
+                                        <a class="d-inline-block py-1" href="#" data-bs-toggle="dropdown"><i class="fal fa-download sand"></i> Download</i></a>
+                                        <ul class="dropdown-menu moreDropdown noTrans" id="modalUpdateDownload">
+                                        </ul>
+                                    </div>
+                                </div>
+                                <div class="col-12">          
+                                    <div class="mb-2">
+                                        <span class="fs-5 fw-bold me-2">Tags:</span>
+                                        <div id="videoModalTags">
+                                        </div>                    
+                                    </div>
+                                    Add you own tags to this video.
+                                    <div class="row w-100" id="addTagModal">
+                                        <div class="col-12 col-md-6 col-xl-4">
+                                            <div class="input-group input-group-sm mb-3">
+                                                <input type="text" class="form-control" id="addTagModalInput" autocomplete="off" placeholder="Seperate tags with a comma">
+                                                <button class="btn btn-outline-secondary" type="button" id="addTagModalBtn">Add</button>
+                                            </div>                    
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div> 
+                    </div>
+                    <div class="mx-auto mb-4" id="videoModalDisplayNext" style="max-width: 1503px;">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="dimCover"></div>
+    </div>
+    <script src="https://cdn.mplstudios.com/v3js/mediaPlayer.js"></script>
+    <script src="https://cdn.mplstudios.com/v3js/mediaSwitcher.js"></script>
+    <script src="https://cdn.mplstudios.com/v3js/mediaRotate.js"></script>
+	<script>
+		$( '#playerModal' ).on( 'hide.bs.modal', function(){ 
+			if( document.fullscreenElement ){
+				document.exitFullscreen();
+			}
+			$( '#dimCover' ).hide();
+			videoPlayer.pause();
+		} );
+		$( '#videoPlayerBin' ).on( 'click', '#videoModalDim', function(){
+            $( '#dimCover' ).fadeInOrOut( $( '#dimCover:hidden' ).length );
+        } );
+		var modalPlayer;
+		function loadVideo( src ){
+			var sources = [];
+			$.getJSON( src, function( data ) {
+				if( data.videos.length ) {
+					if( "over" in data ){
+						setTimeout( ()=> $( '#videoPlayerBin' ).toggleClass( 'over', data.over ), 4000 );
+					}
+					var defaultRes = 360;
+					$.each( data.videos, function(){
+						if( $( this )[ 1 ] === 720 ){
+							defaultRes = 720;
+						}
+						sources.push( { src : $( this )[ 0 ], type : 'video/mp4', res : $( this )[ 1 ], label : $( this )[ 1 ] + 'p' } );
+					} );
+					if( sources.length ) {
+						$( '.modalUpdateTitle' ).html( data.update.title );
+						$( '.modalUpdatePhotographer' ).html( data.update.photographer );
+						$( '.modalUpdateModel' ).html( data.update.model );
+						$( '.modelUpdateVideoLength' ).html( data.update.vLength );
+						$( '#modalUpdateDownload, #videoModalTags' ).html( '' );
+						$.each( data.update.videos, function(){
+							if( this[ 2 ] >= 360 ){
+								$( '#modalUpdateDownload' ).append( '<li><a class="dropdown-item text-white memberPrompt" href="' + this[ 4 ] + '">' + this[ 1 ] + ' x ' + this[ 2 ] + ' <span class="sand fw-bold">DOWNLOAD</span> mp4 (' + this[ 3 ] + ')</a></li>' );
+							}
+						} );
+						$.each( data.update.tags, function(){
+							$( '#videoModalTags' ).append( '<a href="/tags/' + this + '/" class="tag noTrans">' + this + '</a> ');
+						} );
+						modalPlayer = data.update.id;
+						$( '.modalUpdateTitle' ).attr( 'href', "/update/" + modalPlayer + "-" + data.update.title.replace( /[\W]+/g, '_' ) + "/" );
+						$( '#playerModal .collectionHeart' ).data( 'id', modalPlayer + '-0' );
+						$( '#playerModal .collectionHeart' ).toggleClass( 'collected', data.update.collected );
+						$( '#playerModal .modal-body' ).animate( { scrollTop: 0 }, 500 );
+            			$( '#playerModal' ).modal( 'show' );
+						videoPlayer.updateSrc( sources ).currentResolution( defaultRes + 'p' ).play();
+					}
+				}
+			} );
+        };
+		var videoPlayer = videojs( 'videoPlayer', { plugins : { videoJsResolutionSwitcher : { default : 720, dynamicLabel : true },  }, playbackRates: [ 0.5, 1, 1.5, 2 ] } ).ready( function() { this.on( 'ended', function(){ loadNext(); videoPlayer.hasStarted(false) } ) } );
+		videoPlayer.landscapeFullscreen();	
+		$( '.modalPlay' ).click( function(){
+            loadVideo( '/' + $( this ).data( 'video' ) + '/' + modalPlayer + '/' );
+        } );
+		
+		$( '#videoModalDisplayNext' ).on( 'click', '.gridVideoBox .playPreview', function(){
+			loadVideo( '/preview/' + $( this ).data( 'preview' ) + '/' );
+        } );	
+		
+		function loadNext(){
+			if( document.fullscreenElement ){
+				document.exitFullscreen();
+			}
+			$( '#videoPlayerBin' ).removeClass( 'over' );
+			$.getJSON( '/playNext/', { video : modalPlayer }, function( data ){
+				if( data.length ){
+					$( '#playerModal .modal-body' ).animate( { scrollTop: $( '#videoPlayerBin' ).height() }, 700 );
+					$( '#dimCover' ).fadeOut();
+					$( '#videoModalDisplayNext' ).html( '<h5>Keep Watching more</h5><div class="w-100"><div class="gridVideoBox mb-3"></div><div class="text-end"><a class="fs-5" href="/videos/">More Videos <i class="fas fa-chevron-double-right"></i></a></div></div>' );
+					$.each( data, function(){
+						$( '#videoModalDisplayNext .gridVideoBox' ).append( '<div class="text-center d-flex flex-column mb-3 box1"><div class="playCover position-relative"><div class="cover position-absolute top-0 left-0 p-2 fs-5 d-flex justify-content-center align-items-center hand"><img class="playVideoIcon mw-100" src="/v3Assets/general/play_arrow_lt.png"></div><img class="stdCover img-fluid w-auto lozad playPreview hand" data-preview="' + this[ 1 ] + '" data-src="' + this[ 0 ] + '" src="https://cdn.mplstudios.com/v3Assets/general/modelBlank.webp" width="480" height="320"></div><div class="mt-2"><span class="ellipsis">' + $( this )[ 2 ] + '</span></div><div><span class="ellipsis">' + this[ 3 ] + '</span></div><div><span class="ellipsis" title="' + $( this )[ 4 ] + '">\'' + $( this )[ 4 ] + '\'</span></div><div><span class="ellipsis">by ' + this[ 5 ] + '</span></div></div>' );
+					} );
+					observer.observe();
+				}
+			} )
+		}
+
+	
+	</script><div class="d-flex align-items-center justify-content-center" id="doorway">
+	<div id="doorwayPanel">
+		<div class="text-center">
+			<img src="https://cdn.mplstudios.com/v3Assets/MPLStudios.png" alt="MPL Studios" id="doorwayLogo">
+		</div>
+		<div id="adultsOnly">
+			MPL Studios is for Adults Only!
+		</div>
+		<p>
+			This Website is for use solely by individuals who are at least 18 years of age and have reached the age of majority or age of consent as determined by the laws of the jurisdiction from which they are accessing the Website. Accessing this Website while underage might be prohibited by law
+		</p>
+		<p>
+			By clicking "YES ENTER",  you state that the following facts are accurate:
+		</p>
+		<ul>
+			<li>You are at least 18 years of age and have reached the age of majority or age of consent in your jurisdiction.</li>
+			<li>You will promptly leave this Website if sexually explicit content offends you.</li>
+			<li>You will not hold the Website’s owners or its employees responsible for any materials located on the Website.</li>
+			<li>You acknowledge that the Website’s Terms of Use govern your use of the Website, and you have reviewed and agree to be bound by it</li>
+		</ul>
+		<p class="mb-3">
+			If you disagree with the above, click  the "EXIT" button to leave mplstudios.com<br>
+			Date: February 27, 2026		</p>
+		<div class="d-flex justify-content-between align-items-center mb-4">
+			<a href="https://www.google.com" id="exitDoorway">
+				<strong>EXIT</strong>
+			</a>
+			<div class="btn btn-success" id="enterDoorway">
+				YES I’m 18 years or older!<br>
+				<strong>ENTER MPLSTUDIOS.com</strong>
+			</div>
+		</div>
+		<p>
+			In accordance with 47 U.S.C. § 230(d), you are notified that parental control protections (including computer hardware, software, or filtering services) are commercially available that might help in limiting access to material that is harmful to minors. You can find information about providers of these protections on the Internet by searching “parental control protection” or similar terms. If minors have access to your computer, please restrain their access to sexually explicit material by using these products:
+		<p class="text-center">
+			<a href="https://www.cybersitter.com/page0.php" target="_blank">CYBERsitter&trade;</a> | <a href="https://www.netnanny.com/" target="_blank">Net Nanny&reg;</a> | <a href="https://safetonet.com/" target="_blank">SafeToNet</a> | <a href="https://www.asacp.org/" target="_blank">ASACP</a>
+		</p>
+	</div>
+</div>
+<script>
+let scrollPosition = 0;
+
+setTimeout(() => {
+    document.getElementById('doorway').classList.add('block');
+    lockBodyScroll();
+}, 800);
+
+document.getElementById('enterDoorway').addEventListener('click', () => {
+    unlockBodyScroll();
+    document.getElementById('doorway').remove();
+    const date = new Date();
+    date.setTime(date.getTime() + (30 * 60 * 1000));
+    const expires = "expires=" + date.toUTCString();
+    document.cookie = `bs3108=44lym; ${expires}; path=/`;
+});
+
+function lockBodyScroll() {
+    scrollPosition = window.scrollY;
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollPosition}px`;
+    document.body.style.width = '100%';
+}
+
+function unlockBodyScroll() {
+    document.body.style.position = '';
+    document.body.style.top = '';
+    document.body.style.width = '';
+    window.scrollTo({top: scrollPosition, behavior: 'instant'});
+}
+</script>	
+	<script>	
+		var tab = 'navLatestTab', toShow = '.updatePhoto,.updateVideo', idNumber = "472", idTag = "model";
+		$( '.nav-link' ).click( function(){
+			if( $( this ).attr( 'id' ) == tab ){
+				return
+			}
+			toShow = '.' + $( this ).data( 'show' ).split( ' ' ).join( ',.' );
+			$( '.box1' ).hide();
+			$( toShow ).fadeIn( 700 );
+			tab = $( this ).attr( 'id' );
+        } );
+		$( '#modelName' ).click( function(){
+            $( '#statsPanel' ).toggle( 0, function(){
+				$( '#openDraw' ).css( 'transform', 'rotate( ' + ( ( $( '#statsPanel' ).is( ':visible' ) ) ? '18' : '' ) + '0deg )' );
+			} );
+        } );
+		
+		var sorted = 'latest';
+		$( '#modelFilter .filterPage' ).click( function(){
+			$( '.filterPage' ).removeClass( 'sand' );
+			$( this ).addClass( 'sand' )
+            var sortBy = $( this ).data( 'filter' );
+			if( sortBy !== sorted ){
+				$( '#modelGrid' ).filterSort( '.box1', sortBy );
+				$( '.box1' ).hide();
+				$( toShow ).show();
+			}
+			sorted = sortBy;
+        } );
+	</script>
+</body>
+</html>

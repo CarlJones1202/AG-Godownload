@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import './PersonMissingGalleries.css'
+import ScanResultCard from './ScanResultCard'
 
 function PersonMissingGalleries({ personId, onScanComplete }) {
   const [scans, setScans] = useState([])
@@ -198,35 +199,14 @@ function PersonMissingGalleries({ personId, onScanComplete }) {
                       {missing.map((g, i) => {
                         const key = `${scan.provider}-missing-${g.url}`
                         return (
-                          <div
-                            key={i}
-                            className="missing-gallery-card-wrapper"
-                          >
-                            <a 
-                              href={g.url} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="missing-gallery-card"
-                            >
-                              <div className="gallery-thumbnail">
-                                {g.thumbnail ? (
-                                  <img src={g.thumbnail} alt={g.title} />
-                                ) : (
-                                  <div className="no-image">No Thumbnail</div>
-                                )}
-                              </div>
-                              <div className="gallery-info">
-                                <h3>{g.title}</h3>
-                              </div>
-                            </a>
-                            <button 
-                              className="reject-gallery-btn"
-                              onClick={() => excludeScanResult(g, scan.provider, scan.id, false)}
-                              disabled={excluding[key]}
-                              title="Reject this result"
-                            >
-                              {excluding[key] ? '...' : '✕'}
-                            </button>
+                          <div key={i} className="gallery-card-grid-item">
+                            <ScanResultCard
+                              gallery={g}
+                              provider={scan.provider}
+                              onReject={() => excludeScanResult(g, scan.provider, scan.id, false)}
+                              isExcluding={excluding[key]}
+                              titleLines={2}
+                            />
                           </div>
                         )
                       })}
@@ -242,43 +222,16 @@ function PersonMissingGalleries({ personId, onScanComplete }) {
                         const linkKey = `${scan.provider}-unsure-${g.url}`
                         const rejectKey = `${scan.provider}-unsure-reject-${g.url}`
                         return (
-                          <div 
-                            key={i}
-                            className="unsure-gallery-card-wrapper"
-                          >
-                            <a 
-                              href={g.url} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="unsure-gallery-card"
-                            >
-                              <div className="gallery-thumbnail">
-                                {g.thumbnail ? (
-                                  <img src={g.thumbnail} alt={g.title} />
-                                ) : (
-                                  <div className="no-image">No Thumbnail</div>
-                                )}
-                              </div>
-                              <div className="gallery-info">
-                                <h3>{g.title}</h3>
-                              </div>
-                            </a>
-                            <button 
-                              className="link-gallery-btn"
-                              onClick={() => linkUnsureGallery(g, scan.provider, scan.id)}
-                              disabled={adding[linkKey]}
-                              title="Link to this person"
-                            >
-                              {adding[linkKey] ? '...' : '→'}
-                            </button>
-                            <button 
-                              className="reject-gallery-btn"
-                              onClick={() => excludeScanResult(g, scan.provider, scan.id, true)}
-                              disabled={excluding[rejectKey]}
-                              title="Reject this result"
-                            >
-                              {excluding[rejectKey] ? '...' : '✕'}
-                            </button>
+                          <div key={i} className="gallery-card-grid-item">
+                            <ScanResultCard
+                              gallery={g}
+                              provider={scan.provider}
+                              onLink={() => linkUnsureGallery(g, scan.provider, scan.id)}
+                              isLinking={adding[linkKey]}
+                              onReject={() => excludeScanResult(g, scan.provider, scan.id, true)}
+                              isExcluding={excluding[rejectKey]}
+                              titleLines={2}
+                            />
                           </div>
                         )
                       })}

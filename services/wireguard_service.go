@@ -63,6 +63,7 @@ func ShouldUseWireGuard(targetURL string) bool {
 		"sexart.com",
 		"thelifeerotic.com",
 		"eternaldesire.com",
+		"mplstudios.com",
 	}
 
 	lowerURL := strings.ToLower(targetURL)

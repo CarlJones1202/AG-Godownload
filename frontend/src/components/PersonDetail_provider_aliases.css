@@ -162,7 +162,7 @@
     color: var(--color-text-tertiary);
 }
 
-.gallery-list {
+.provider-aliases-section .gallery-list {
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;

@@ -58,6 +58,12 @@
   --card-border: 1px solid var(--color-border-subtle);
   --card-bg: var(--color-bg-secondary);
 
+  /* Gallery sizing tokens (shared) */
+  --gallery-card-min: 160px; /* smallest column before wrapping */
+  --gallery-card-max: 240px; /* cap card width to avoid giant columns */
+  --gallery-thumb-height: 160px;
+  --gallery-card-height: 250px;
+
   /* Modal Tokens */
   --modal-max-width: 800px;
   --modal-radius: var(--radius-xl);
