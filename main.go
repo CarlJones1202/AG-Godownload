@@ -94,9 +94,9 @@ func main() {
 	r.DELETE("/sources/:id", handlers.DeleteSource)
 	r.PATCH("/sources/:id/priority", handlers.UpdateSourcePriority)
 	r.GET("/downloads/status", handlers.GetDownloadStatus)
-    r.GET("/ws", services.HandleWebSocket)
-    // Maintenance: cleanup duplicate images
-    r.POST("/cleanup-dupes", handlers.CleanupDupes)
+	r.GET("/ws", services.HandleWebSocket)
+	// Maintenance: cleanup duplicate images
+	r.POST("/cleanup-dupes", handlers.CleanupDupes)
 
 	r.POST("/galleries", handlers.CreateGallery)
 	r.GET("/galleries", handlers.GetGalleries)

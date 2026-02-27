@@ -6,6 +6,7 @@ import (
 	"gallery_api/database"
 	"gallery_api/logger"
 	"gallery_api/models"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"io"
 )
 
 func CrawlSource(sourceID uint) error {
@@ -63,16 +65,36 @@ func CrawlSource(sourceID uint) error {
 
 	// Fetch the URL using WireGuard if needed
 	client := GetHTTPClient(source.Location)
-	resp, err := client.Get(source.Location)
+	// Build a request so we can set headers (some sites block default Go UA)
+	req, err := http.NewRequest("GET", source.Location, nil)
+	if err != nil {
+		database.DB.Model(&source).Update("Status", "error")
+		return err
+	}
+	// Set a common browser User-Agent and accept headers to avoid simple bot blocks
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Referer", source.Location)
+	req.Header.Set("Connection", "keep-alive")
+	req.Header.Set("DNT", "1")
+	resp, err := client.Do(req)
 	if err != nil {
 		database.DB.Model(&source).Update("Status", "error")
 		return err
 	}
 	defer resp.Body.Close()
 
+	logger.Debugf("Fetched URL: %s -> status=%d, content-length=%d, final-url=%s", source.Location, resp.StatusCode, resp.ContentLength, resp.Request.URL.String())
 	if resp.StatusCode != 200 {
+		// Read a small snippet of the body for debugging
+		snippet := ""
+		limited := io.LimitReader(resp.Body, 1024)
+		if b, rerr := io.ReadAll(limited); rerr == nil {
+			snippet = string(b)
+		}
 		database.DB.Model(&source).Update("Status", "error")
-		return fmt.Errorf("failed to fetch source: status %d", resp.StatusCode)
+		return fmt.Errorf("failed to fetch source: status %d; body snippet: %s", resp.StatusCode, snippet)
 	}
 
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
@@ -81,6 +103,10 @@ func CrawlSource(sourceID uint) error {
 		return err
 	}
 
+	// Debug: log how many message posts and how many selector matches we get
+	postsFound := doc.Find("article.message--post").Length()
+	logger.Debugf("Document contains %d article.message--post elements", postsFound)
+
 	// Logic from reference: find div[id^='post_message_'] and extract images using rippers
 	// Use a semaphore to limit concurrent downloads
 	sem := make(chan struct{}, config.Global.MaxConcurrentDownloads)
@@ -88,17 +114,17 @@ func CrawlSource(sourceID uint) error {
 	var imagesMutex sync.Mutex
 	var imagesToInsert []models.Image
 
-    // Pre-load existing image URLs and filenames for this gallery to avoid duplicate checks in loop
-    existingURLs := make(map[string]bool)
-    existingFilenames := make(map[string]bool)
-    var existingImages []models.Image
-    database.DB.Model(&models.Image{}).Where("gallery_id = ?", gallery.ID).Select("original_url, filename").Find(&existingImages)
-    for _, img := range existingImages {
-        existingURLs[img.OriginalURL] = true
-        if img.Filename != "" {
-            existingFilenames[img.Filename] = true
-        }
-    }
+	// Pre-load existing image URLs and filenames for this gallery to avoid duplicate checks in loop
+	existingURLs := make(map[string]bool)
+	existingFilenames := make(map[string]bool)
+	var existingImages []models.Image
+	database.DB.Model(&models.Image{}).Where("gallery_id = ?", gallery.ID).Select("original_url, filename").Find(&existingImages)
+	for _, img := range existingImages {
+		existingURLs[img.OriginalURL] = true
+		if img.Filename != "" {
+			existingFilenames[img.Filename] = true
+		}
+	}
 
 	// Parse the URL to check for a fragment
 	u, err := url.Parse(source.Location)
@@ -120,6 +146,15 @@ func CrawlSource(sourceID uint) error {
 		if selection.Length() == 0 {
 			logger.Debug("No specific post container found, falling back to body")
 			selection = doc.Find("body")
+		}
+	} else if strings.Contains(source.Location, "kitty-kats.net") {
+		logger.Debug("Crawling kitty-kats.net")
+		// XenForo forum structure: posts are in article.message--post
+		// target the message body wrapper where BBCode content and image links live
+		selection = doc.Find("article.message--post .message-userContent .bbWrapper")
+		if selection.Length() == 0 {
+			logger.Debug("No kitty-kats specific container found, falling back to first post")
+			selection = doc.Find("div[id^='post_message_']").First()
 		}
 	} else {
 		logger.Debug("Crawling first post only")
@@ -168,10 +203,10 @@ func CrawlSource(sourceID uint) error {
 			}
 			logger.Debugf("Element %d: Found link %s", j, src)
 
-            // Launch download in goroutine with semaphore
-            wg.Add(1)
-            go func(src string, imgSrc string) {
-                defer wg.Done()
+			// Launch download in goroutine with semaphore
+			wg.Add(1)
+			go func(src string, imgSrc string) {
+				defer wg.Done()
 				defer func() {
 					// Update processing progress
 					newProcessed := atomic.AddInt32(&processedCount, 1)
@@ -187,15 +222,15 @@ func CrawlSource(sourceID uint) error {
 					}
 				}()
 
-                // Acquire semaphore
-                sem <- struct{}{}
-                defer func() { <-sem }()
+				// Acquire semaphore
+				sem <- struct{}{}
+				defer func() { <-sem }()
 
-                // Deduplicate by original URL if we've seen this image before in this gallery
-                if existingURLs[src] {
-                    logger.Debugf("Duplicate image detected (original URL exists): %s", src)
-                    return
-                }
+				// Deduplicate by original URL if we've seen this image before in this gallery
+				if existingURLs[src] {
+					logger.Debugf("Duplicate image detected (original URL exists): %s", src)
+					return
+				}
 
 				// ... (existing ripping logic remains the same) ...
 				// Use rippers to extract actual image URL based on hosting site
@@ -294,17 +329,17 @@ func CrawlSource(sourceID uint) error {
 					logger.Warnf("Failed to generate thumbnail: %v", err)
 				}
 
-                // Save to slice for batch insert
-                relPath, err := filepath.Rel(UploadsDir, result.Path)
-                if err != nil {
-                    relPath = filepath.Base(result.Path)
-                }
+				// Save to slice for batch insert
+				relPath, err := filepath.Rel(UploadsDir, result.Path)
+				if err != nil {
+					relPath = filepath.Base(result.Path)
+				}
 
-                // Deduplicate by filename if this image already exists in the gallery
-                if existingFilenames[relPath] {
-                    logger.Debugf("Duplicate image detected (filename exists): %s", relPath)
-                    return
-                }
+				// Deduplicate by filename if this image already exists in the gallery
+				if existingFilenames[relPath] {
+					logger.Debugf("Duplicate image detected (filename exists): %s", relPath)
+					return
+				}
 
 				image := models.Image{
 					GalleryID:      gallery.ID,

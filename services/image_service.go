@@ -287,7 +287,7 @@ func GenerateVideoThumbnail(srcPath string) (string, error) {
 	if _, err := os.Stat(thumbPath); err == nil {
 		return thumbPath, nil
 	}
-	
+
 	// Download and generate thumbnail (ffmpeg logic would go here)
 	// For now, return empty to indicate no thumbnail
 	return "", nil

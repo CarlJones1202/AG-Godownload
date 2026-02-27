@@ -13,11 +13,11 @@ import (
 )
 
 type ScanQueue struct {
-	mu             sync.Mutex
-	queue          []uint // IDs of PersonScanQueue
-	cond           *sync.Cond
-	running        bool
-	providerLocks  map[string]*sync.Mutex
+	mu            sync.Mutex
+	queue         []uint // IDs of PersonScanQueue
+	cond          *sync.Cond
+	running       bool
+	providerLocks map[string]*sync.Mutex
 }
 
 var scanQueue *ScanQueue = &ScanQueue{

@@ -69,16 +69,16 @@ func GetPersonScanResults(c *gin.Context) {
 	}
 
 	type ScanResultResponse struct {
-		ID            uint                   `json:"id"`
-		PersonID      uint                   `json:"person_id"`
-		Provider      string                 `json:"provider"`
-		Alias         string                 `json:"alias"`
-		Status        string                 `json:"status"`
-		Error         string                 `json:"error,omitempty"`
-		CreatedAt     string                 `json:"created_at"`
-		StartedAt     *string                `json:"started_at,omitempty"`
-		CompletedAt   *string                `json:"completed_at,omitempty"`
-		Results       map[string]interface{} `json:"results,omitempty"`
+		ID          uint                   `json:"id"`
+		PersonID    uint                   `json:"person_id"`
+		Provider    string                 `json:"provider"`
+		Alias       string                 `json:"alias"`
+		Status      string                 `json:"status"`
+		Error       string                 `json:"error,omitempty"`
+		CreatedAt   string                 `json:"created_at"`
+		StartedAt   *string                `json:"started_at,omitempty"`
+		CompletedAt *string                `json:"completed_at,omitempty"`
+		Results     map[string]interface{} `json:"results,omitempty"`
 	}
 
 	response := make([]ScanResultResponse, len(scans))
@@ -296,4 +296,3 @@ func ExcludeScanResult(c *gin.Context) {
 	logger.Infof("Excluded scan result: person=%d, provider=%s, sourceID=%s", personID, req.Provider, req.SourceID)
 	c.JSON(http.StatusOK, exclusion)
 }
-
