@@ -10,6 +10,7 @@ require (
 	github.com/glebarez/sqlite v1.11.0
 	github.com/gocolly/colly/v2 v2.2.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/robfig/cron/v3 v3.0.1
 	golang.org/x/net v0.48.0
 	gorm.io/gorm v1.31.1
 )

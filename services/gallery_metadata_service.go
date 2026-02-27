@@ -35,6 +35,7 @@ type GalleryMetadata struct {
 	Rating      float64   `json:"rating"`
 	ReleaseDate time.Time `json:"release_date"`
 	SourceURL   string    `json:"source_url"`
+	ThumbnailURL string   `json:"thumbnail_url"`
 }
 
 // SearchGalleryMatches searches for matching galleries across providers
@@ -86,6 +87,22 @@ func SearchGalleryMatches(galleryName string, people []string) ([]GallerySearchR
 		results = append(results, vixenResults...)
 	}
 
+	// Search SexArt
+	sexartResults, err := searchSexArt(searchQuery)
+	if err != nil {
+		logger.Warnf("SexArt search failed: %v", err)
+	} else {
+		results = append(results, sexartResults...)
+	}
+
+	// Search LifeErotic
+	lifeeroticResults, err := searchLifeErotic(searchQuery)
+	if err != nil {
+		logger.Warnf("LifeErotic search failed: %v", err)
+	} else {
+		results = append(results, lifeeroticResults...)
+	}
+
 	if len(results) == 0 {
 		return nil, fmt.Errorf("no matching galleries found")
 	}
@@ -109,6 +126,10 @@ func ScrapeGalleryMetadata(sourceURL string, provider string, sourceID string) (
 		return scrapePlayboyPlusGallery(sourceURL)
 	case "vixen":
 		return scrapeVixenGallery(sourceURL)
+	case "sexart":
+		return scrapeSexArtGallery(sourceURL, sourceID)
+	case "lifeerotic":
+		return scrapeLifeEroticGallery(sourceURL, sourceID)
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", provider)
 	}
@@ -266,6 +287,136 @@ func searchMetartX(query string) ([]GallerySearchResult, error) {
 	return results, nil
 }
 
+// searchSexArt searches SexArt for matching galleries using their internal API
+func searchSexArt(query string) ([]GallerySearchResult, error) {
+	apiURL := fmt.Sprintf("https://www.sexart.com/api/search-results?searchPhrase=%s&page=1&pageSize=30&sortBy=latest-gallery", url.QueryEscape(query))
+	logger.Infof("[SexArt] Searching API: %s", apiURL)
+
+	client := GetHTTPClient(apiURL)
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search SexArt API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("SexArt API returned status %d", resp.StatusCode)
+	}
+
+	var apiResp struct {
+		Items []struct {
+			Item struct {
+				Name        string `json:"name"`
+				Path        string `json:"path"`
+				PublishedAt string `json:"publishedAt"`
+				Thumbnail   string `json:"thumbnailCoverPath"`
+				Models      []struct {
+					Name string `json:"name"`
+				} `json:"models"`
+			} `json:"item"`
+		} `json:"items"`
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if err := json.Unmarshal(bodyBytes, &apiResp); err != nil {
+		logger.Errorf("[SexArt] Failed to parse JSON: %v", err)
+		return nil, fmt.Errorf("failed to parse API JSON")
+	}
+
+	var results []GallerySearchResult
+	for _, entry := range apiResp.Items {
+		item := entry.Item
+
+		galleryURL := "https://www.sexart.com" + item.Path
+		thumbURL := "https://www.sexart.com" + item.Thumbnail
+
+		dateStr := item.PublishedAt
+		if len(dateStr) > 10 {
+			dateStr = dateStr[:10]
+		}
+
+		results = append(results, GallerySearchResult{
+			Provider:    "SexArt",
+			Title:       item.Name,
+			URL:         galleryURL,
+			Thumbnail:   thumbURL,
+			ReleaseDate: dateStr,
+		})
+	}
+
+	logger.Infof("[SexArt] Found %d results via API", len(results))
+	return results, nil
+}
+
+// searchLifeErotic searches The Life Erotic for matching galleries using their internal API
+func searchLifeErotic(query string) ([]GallerySearchResult, error) {
+	apiURL := fmt.Sprintf("https://www.thelifeerotic.com/api/search-results?searchPhrase=%s&page=1&pageSize=30&sortBy=latest-gallery", url.QueryEscape(query))
+	logger.Infof("[LifeErotic] Searching API: %s", apiURL)
+
+	client := GetHTTPClient(apiURL)
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search LifeErotic API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("LifeErotic API returned status %d", resp.StatusCode)
+	}
+
+	var apiResp struct {
+		Items []struct {
+			Item struct {
+				Name        string `json:"name"`
+				Path        string `json:"path"`
+				PublishedAt string `json:"publishedAt"`
+				Thumbnail   string `json:"thumbnailCoverPath"`
+				Models      []struct {
+					Name string `json:"name"`
+				} `json:"models"`
+			} `json:"item"`
+		} `json:"items"`
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if err := json.Unmarshal(bodyBytes, &apiResp); err != nil {
+		logger.Errorf("[LifeErotic] Failed to parse JSON: %v", err)
+		return nil, fmt.Errorf("failed to parse API JSON")
+	}
+
+	var results []GallerySearchResult
+	for _, entry := range apiResp.Items {
+		item := entry.Item
+
+		galleryURL := "https://www.thelifeerotic.com" + item.Path
+		thumbURL := "https://www.thelifeerotic.com" + item.Thumbnail
+
+		dateStr := item.PublishedAt
+		if len(dateStr) > 10 {
+			dateStr = dateStr[:10]
+		}
+
+		results = append(results, GallerySearchResult{
+			Provider:    "LifeErotic",
+			Title:       item.Name,
+			URL:         galleryURL,
+			Thumbnail:   thumbURL,
+			ReleaseDate: dateStr,
+		})
+	}
+
+	logger.Infof("[LifeErotic] Found %d results via API", len(results))
+	return results, nil
+}
+
 // searchPlayboy searches Playboy for matching galleries
 func searchPlayboy(query string) ([]GallerySearchResult, error) {
 	searchURL := fmt.Sprintf("https://www.playboy.com/search?q=%s", strings.ReplaceAll(query, " ", "+"))
@@ -382,6 +533,7 @@ func scrapeMetArtGallery(urlStr, uuid string) (*GalleryMetadata, error) {
 		Description   string  `json:"description"`
 		RatingAverage float64 `json:"ratingAverage"`
 		PublishedAt   string  `json:"publishedAt"`
+		CoverImageURL string  `json:"coverImageUrl"`
 	}
 
 	if err := json.Unmarshal(bodyBytes, &galleryDetail); err != nil {
@@ -394,6 +546,14 @@ func scrapeMetArtGallery(urlStr, uuid string) (*GalleryMetadata, error) {
 		SourceURL:   urlStr,
 		Description: galleryDetail.Description,
 		Rating:      galleryDetail.RatingAverage,
+	}
+
+	// Try to get thumbnail from API response or construct from path
+	if galleryDetail.CoverImageURL != "" {
+		metadata.ThumbnailURL = "https://www.metart.com" + galleryDetail.CoverImageURL
+	} else {
+		// Construct thumbnail URL from gallery name
+		metadata.ThumbnailURL = fmt.Sprintf("https://www.metart.com/photo/%s/0/0.jpg", strings.ToLower(galleryName))
 	}
 
 	// Parse date
@@ -478,6 +638,154 @@ func scrapeMetartXGallery(urlStr, uuid string) (*GalleryMetadata, error) {
 	}
 
 	logger.Infof("Scraped MetartX gallery: %s (Rating: %.2f)", metadata.Description[:min(50, len(metadata.Description))], metadata.Rating)
+	return metadata, nil
+}
+
+// scrapeSexArtGallery scrapes full metadata from a SexArt gallery page
+func scrapeSexArtGallery(urlStr, uuid string) (*GalleryMetadata, error) {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid source URL: %w", err)
+	}
+
+	pathParts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(pathParts) < 2 {
+		return nil, fmt.Errorf("invalid SexArt URL format, cannot extract date/name")
+	}
+
+	var galleryDate, galleryName string
+	for i, part := range pathParts {
+		if part == "gallery" && i+2 < len(pathParts) {
+			galleryDate = pathParts[i+1]
+			galleryName = pathParts[i+2]
+			break
+		}
+	}
+
+	if galleryDate == "" && len(pathParts) >= 2 {
+		galleryDate = pathParts[len(pathParts)-2]
+		galleryName = pathParts[len(pathParts)-1]
+	}
+
+	apiURL := fmt.Sprintf("https://www.sexart.com/api/gallery?name=%s&date=%s", galleryName, galleryDate)
+	logger.Infof("[SexArt] Fetching detail API: %s", apiURL)
+
+	client := GetHTTPClient(apiURL)
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch SexArt gallery API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("SexArt gallery API returned status %d", resp.StatusCode)
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read SexArt response: %w", err)
+	}
+
+	var galleryDetail struct {
+		Name          string  `json:"name"`
+		Description   string  `json:"description"`
+		RatingAverage float64 `json:"ratingAverage"`
+		PublishedAt   string  `json:"publishedAt"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &galleryDetail); err != nil {
+		logger.Errorf("[SexArt] Failed to parse detail JSON: %v", err)
+		return nil, fmt.Errorf("failed to parse detail JSON")
+	}
+
+	metadata := &GalleryMetadata{
+		Provider:    "SexArt",
+		SourceURL:   urlStr,
+		Description: galleryDetail.Description,
+		Rating:      galleryDetail.RatingAverage,
+	}
+
+	if galleryDetail.PublishedAt != "" {
+		if parsed, err := time.Parse("2006-01-02T15:04:05.000Z", galleryDetail.PublishedAt); err == nil {
+			metadata.ReleaseDate = parsed
+		}
+	}
+
+	logger.Infof("Scraped SexArt gallery: %s (Rating: %.2f)", metadata.Description[:min(50, len(metadata.Description))], metadata.Rating)
+	return metadata, nil
+}
+
+// scrapeLifeEroticGallery scrapes full metadata from a LifeErotic gallery page
+func scrapeLifeEroticGallery(urlStr, uuid string) (*GalleryMetadata, error) {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid source URL: %w", err)
+	}
+
+	pathParts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(pathParts) < 2 {
+		return nil, fmt.Errorf("invalid LifeErotic URL format, cannot extract date/name")
+	}
+
+	var galleryDate, galleryName string
+	for i, part := range pathParts {
+		if part == "gallery" && i+2 < len(pathParts) {
+			galleryDate = pathParts[i+1]
+			galleryName = pathParts[i+2]
+			break
+		}
+	}
+
+	if galleryDate == "" && len(pathParts) >= 2 {
+		galleryDate = pathParts[len(pathParts)-2]
+		galleryName = pathParts[len(pathParts)-1]
+	}
+
+	apiURL := fmt.Sprintf("https://www.thelifeerotic.com/api/gallery?name=%s&date=%s", galleryName, galleryDate)
+	logger.Infof("[LifeErotic] Fetching detail API: %s", apiURL)
+
+	client := GetHTTPClient(apiURL)
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch LifeErotic gallery API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("LifeErotic gallery API returned status %d", resp.StatusCode)
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read LifeErotic response: %w", err)
+	}
+
+	var galleryDetail struct {
+		Name          string  `json:"name"`
+		Description   string  `json:"description"`
+		RatingAverage float64 `json:"ratingAverage"`
+		PublishedAt   string  `json:"publishedAt"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &galleryDetail); err != nil {
+		logger.Errorf("[LifeErotic] Failed to parse detail JSON: %v", err)
+		return nil, fmt.Errorf("failed to parse detail JSON")
+	}
+
+	metadata := &GalleryMetadata{
+		Provider:    "LifeErotic",
+		SourceURL:   urlStr,
+		Description: galleryDetail.Description,
+		Rating:      galleryDetail.RatingAverage,
+	}
+
+	if galleryDetail.PublishedAt != "" {
+		if parsed, err := time.Parse("2006-01-02T15:04:05.000Z", galleryDetail.PublishedAt); err == nil {
+			metadata.ReleaseDate = parsed
+		}
+	}
+
+	logger.Infof("Scraped LifeErotic gallery: %s (Rating: %.2f)", metadata.Description[:min(50, len(metadata.Description))], metadata.Rating)
 	return metadata, nil
 }
 
@@ -712,7 +1020,7 @@ func searchPlayboyPlus(query string) ([]GallerySearchResult, error) {
 	// Algolia API info from their public site
 	appID := "TSMKFA364Q"
 	// Note: This key is short-lived and extracted from window.env on playboyplus.com
-	apiKey := "MWU2MzkyY2ZhNzdhZDA1MzFjNDFjNTRhYjczYTM2MDNlNTQ5Yzc0NGE2MzYzYWVkZTQyYzJiYWNhYzU0ZDhkN3ZhbGlkVW50aWw9MTc2OTU2MTU1NSZyZXN0cmljdEluZGljZXM9YWxsJTJBJmZpbHRlcnM9c2VnbWVudCUzQXBsYXlib3lwbHVz"
+	apiKey := "Mzc0ZWExYWJiMGIzMWNmYTFhYWEyZjg1Y2VjY2NlOTFiMDA4OWZlMzU3NzBkZWYzZDYzMmE3MWNhZTY5MGI2NHZhbGlkVW50aWw9MTc3MjIyODc5NyZyZXN0cmljdEluZGljZXM9YWxsJTJBJmZpbHRlcnM9c2VnbWVudCUzQXBsYXlib3lwbHVz"
 	indexName := "all_photosets"
 
 	apiURL := fmt.Sprintf("https://%s-dsn.algolia.net/1/indexes/%s/query", appID, indexName)
@@ -772,6 +1080,153 @@ func searchPlayboyPlus(query string) ([]GallerySearchResult, error) {
 		})
 	}
 
+	return results, nil
+}
+
+// searchPlayboyPlusByModel searches PlayboyPlus for galleries by model name
+// First searches for the model, then gets their galleries
+func searchPlayboyPlusByModel(modelName string) ([]GallerySearchResult, error) {
+	appID := "TSMKFA364Q"
+	apiKey := "Mzc0ZWExYWJiMGIzMWNmYTFhYWEyZjg1Y2VjY2NlOTFiMDA4OWZlMzU3NzBkZWYzZDYzMmE3MWNhZTY5MGI2NHZhbGlkVW50aWw9MTc3MjIyODc5NyZyZXN0cmljdEluZGljZXM9YWxsJTJBJmZpbHRlcnM9c2VnbWVudCUzQXBsYXlib3lwbHVz"
+
+	// Step 1: Search for the model in all_actors index
+	actorsURL := fmt.Sprintf("https://%s-dsn.algolia.net/1/indexes/all_actors/query", appID)
+
+	actorsParams := map[string]interface{}{
+		"params": fmt.Sprintf("query=%s&hitsPerPage=10", url.QueryEscape(modelName)),
+	}
+
+	actorsBody, err := json.Marshal(actorsParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal actors query: %w", err)
+	}
+
+	logger.Infof("[PlayboyPlus] Step 1 - Searching actors URL: %s", actorsURL)
+	logger.Infof("[PlayboyPlus] Step 1 - Request body: %s", string(actorsBody))
+
+	client := GetHTTPClient(actorsURL)
+	req, _ := http.NewRequest("POST", actorsURL, strings.NewReader(string(actorsBody)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Algolia-Application-Id", appID)
+	req.Header.Set("X-Algolia-API-Key", apiKey)
+	req.Header.Set("Referer", "https://www.playboyplus.com/")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search PlayboyPlus actors: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	logger.Infof("[PlayboyPlus] Step 1 - Response status: %d", resp.StatusCode)
+	logger.Infof("[PlayboyPlus] Step 1 - Response body: %s", string(bodyBytes))
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("PlayboyPlus actors search returned status %d", resp.StatusCode)
+	}
+
+	var actorsResp struct {
+		Hits []struct {
+			ObjectID string `json:"objectID"`
+			Name     string `json:"name"`
+			URLName string `json:"urlName"`
+		} `json:"hits"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &actorsResp); err != nil {
+		return nil, fmt.Errorf("failed to decode PlayboyPlus actors response: %w", err)
+	}
+
+	logger.Infof("[PlayboyPlus] Step 1 - Found %d actor hits", len(actorsResp.Hits))
+	for i, actor := range actorsResp.Hits {
+		logger.Infof("[PlayboyPlus] Step 1 - Actor %d: Name=%s, ID=%s, URLName=%s", i, actor.Name, actor.ObjectID, actor.URLName)
+	}
+
+	// Find exact match
+	var actorID string
+	for _, actor := range actorsResp.Hits {
+		// Case-insensitive exact match
+		if strings.EqualFold(actor.Name, modelName) {
+			actorID = actor.ObjectID
+			logger.Infof("[PlayboyPlus] Found exact model match: %s (ID: %s)", actor.Name, actorID)
+			break
+		}
+	}
+
+	if actorID == "" {
+		logger.Infof("[PlayboyPlus] No exact model match found for: %s", modelName)
+		return nil, nil
+	}
+
+	// Step 2: Search for galleries by this actor using the format the website uses
+	galleriesURL := fmt.Sprintf("https://%s-dsn.algolia.net/1/indexes/all_photosets/query", appID)
+
+	// Use the same format the website uses - facetFilters with nested arrays
+	galleriesParams := map[string]interface{}{
+		"params": fmt.Sprintf("hitsPerPage=50&facetFilters=[[\\\"actors.id:%s\\\"]]", actorID),
+	}
+
+	galleriesBody, err := json.Marshal(galleriesParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal galleries query: %w", err)
+	}
+
+	logger.Infof("[PlayboyPlus] Step 2 - Searching galleries URL: %s", galleriesURL)
+	logger.Infof("[PlayboyPlus] Step 2 - Request body: %s", string(galleriesBody))
+
+	req2, _ := http.NewRequest("POST", galleriesURL, strings.NewReader(string(galleriesBody)))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("X-Algolia-Application-Id", appID)
+	req2.Header.Set("X-Algolia-API-Key", apiKey)
+	req2.Header.Set("Referer", "https://www.playboyplus.com/")
+
+	resp2, err := client.Do(req2)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search PlayboyPlus galleries: %w", err)
+	}
+	defer resp2.Body.Close()
+
+	bodyBytes2, _ := io.ReadAll(resp2.Body)
+	logger.Infof("[PlayboyPlus] Step 2 - Response status: %d", resp2.StatusCode)
+	logger.Infof("[PlayboyPlus] Step 2 - Response body: %s", string(bodyBytes2))
+
+	if resp2.StatusCode != 200 {
+		return nil, fmt.Errorf("PlayboyPlus galleries search returned status %d", resp2.StatusCode)
+	}
+
+	var galleriesResp struct {
+		Hits []struct {
+			ObjectID    string `json:"objectID"`
+			Title       string `json:"title"`
+			URLTitle    string `json:"urlTitle"`
+			ReleaseDate string `json:"release_date"`
+			Thumbnails  struct {
+				Standard string `json:"standard"`
+			} `json:"thumbnails"`
+		} `json:"hits"`
+	}
+
+	if err := json.Unmarshal(bodyBytes2, &galleriesResp); err != nil {
+		return nil, fmt.Errorf("failed to decode PlayboyPlus galleries response: %w", err)
+	}
+
+	logger.Infof("[PlayboyPlus] Step 2 - Found %d gallery hits", len(galleriesResp.Hits))
+
+	var results []GallerySearchResult
+	for _, hit := range galleriesResp.Hits {
+		logger.Infof("[PlayboyPlus] Step 2 - Gallery: Title=%s, ID=%s", hit.Title, hit.ObjectID)
+		results = append(results, GallerySearchResult{
+			Provider:    "PlayboyPlus",
+			Title:       hit.Title,
+			URL:         fmt.Sprintf("https://www.playboyplus.com/en/update/%s/%s", hit.URLTitle, hit.ObjectID),
+			Thumbnail:   hit.Thumbnails.Standard,
+			ReleaseDate: hit.ReleaseDate,
+			SourceID:    hit.ObjectID,
+		})
+	}
+
+	logger.Infof("[PlayboyPlus] Found %d galleries for model %s", len(results), modelName)
 	return results, nil
 }
 
@@ -838,7 +1293,7 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 		}
 	case "playboyplus":
 		for _, term := range searchTerms {
-			results, err := searchPlayboyPlus(term)
+			results, err := searchPlayboyPlusByModel(term)
 			if err != nil {
 				logger.Warnf("PlayboyPlus search failed for term %s: %v", term, err)
 				continue
@@ -850,6 +1305,24 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 			results, err := searchVixen(term)
 			if err != nil {
 				logger.Warnf("Vixen search failed for term %s: %v", term, err)
+				continue
+			}
+			allResults = append(allResults, results...)
+		}
+	case "sexart":
+		for _, term := range searchTerms {
+			results, err := searchSexArt(term)
+			if err != nil {
+				logger.Warnf("SexArt search failed for term %s: %v", term, err)
+				continue
+			}
+			allResults = append(allResults, results...)
+		}
+	case "lifeerotic":
+		for _, term := range searchTerms {
+			results, err := searchLifeErotic(term)
+			if err != nil {
+				logger.Warnf("LifeErotic search failed for term %s: %v", term, err)
 				continue
 			}
 			allResults = append(allResults, results...)
@@ -867,7 +1340,12 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 		}
 		if !seen[key] {
 			seen[key] = true
-			uniqueResults = append(uniqueResults, r)
+			// Filter out non-gallery content
+			if isGalleryResult(r) {
+				uniqueResults = append(uniqueResults, r)
+			} else {
+				logger.Debugf("Filtered out non-gallery result: %s (%s)", r.Title, r.URL)
+			}
 		}
 	}
 
@@ -943,6 +1421,43 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 		MissingGalleries: missingGalleries,
 		UnsureGalleries:  unsureGalleries,
 	}, nil
+}
+
+// isGalleryResult checks if a search result is an actual gallery and not a video/clip or profile page
+func isGalleryResult(result GallerySearchResult) bool {
+	lowerURL := strings.ToLower(result.URL)
+	lowerTitle := strings.ToLower(result.Title)
+
+	// Filter out video/clip content
+	videoKeywords := []string{"/videos/", "/clips/", "/video/", "/clip/", "video", "scene"}
+	for _, keyword := range videoKeywords {
+		if strings.Contains(lowerURL, keyword) || strings.Contains(lowerTitle, keyword) {
+			return false
+		}
+	}
+
+	// Filter out profile/model pages - these typically don't have gallery-like URLs
+	profileKeywords := []string{"/model/", "/models/", "/performer/", "/performers/", "/actor/", "/actors/", "/profile/"}
+	for _, keyword := range profileKeywords {
+		// Only filter if it's just a model profile, not a gallery under a model
+		// e.g., /model/libby/ is a profile, but /model/libby/gallery/... is a gallery
+		if strings.Contains(lowerURL, keyword) {
+			// Check if this is actually a gallery page (has /gallery/ in the path)
+			if !strings.Contains(lowerURL, "/gallery/") {
+				return false
+			}
+		}
+	}
+
+	// Filter out pages that are clearly not galleries (tag pages, search pages, etc.)
+	excludePatterns := []string{"/tags/", "/categories/", "/search", "/browse"}
+	for _, pattern := range excludePatterns {
+		if strings.Contains(lowerURL, pattern) {
+			return false
+		}
+	}
+
+	return true
 }
 
 func normalizeGalleryName(name string) string {

@@ -239,8 +239,14 @@ function GalleryDetail() {
             provider = 'PlayboyPlus'
         } else if (lowerUrl.includes('vixen.com')) {
             provider = 'Vixen'
+        } else if (lowerUrl.includes('sexart.com')) {
+            provider = 'SexArt'
+        } else if (lowerUrl.includes('thelifeerotic.com')) {
+            provider = 'LifeErotic'
         } else if (lowerUrl.includes('metart.com')) {
             provider = 'MetArt'
+        } else if (lowerUrl.includes('metartx.com')) {
+            provider = 'MetartX'
         }
 
         handleScrapeMetadata(manualUrl, provider, null)

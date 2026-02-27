@@ -89,40 +89,45 @@ func GetGalleries(c *gin.Context) {
 		var count int64
 		database.DB.Model(&models.Image{}).Where("gallery_id = ?", galleries[i].ID).Count(&count)
 
-		// Load first image for thumbnail
-		var images []models.Image
-		if err := database.DB.Where("gallery_id = ?", galleries[i].ID).Order("created_at ASC").Limit(1).Find(&images).Error; err == nil && len(images) > 0 {
-			firstImage := images[0]
-			// Populate path
-			sourceName := "uncategorized"
-			if galleries[i].Source != nil {
-				sourceName = galleries[i].Source.Name
-			}
-			sanitizedSource := services.SanitizeDirectoryName(sourceName)
-			firstImage.WebPath = fmt.Sprintf("/images/%s", filepath.ToSlash(firstImage.Filename))
+		// Check for provider thumbnail first
+		hasProviderThumbnail := galleries[i].ProviderThumbnail != ""
 
-			// Construct thumbnail path
-			thumbPath := firstImage.Filename
-			if firstImage.Type == "video" {
-				// Replace extension with .jpg for video thumbnails
-				ext := filepath.Ext(thumbPath)
-				thumbPath = strings.TrimSuffix(thumbPath, ext) + ".jpg"
-			}
+		// Load first image for thumbnail (only if no provider thumbnail)
+		if !hasProviderThumbnail {
+			var images []models.Image
+			if err := database.DB.Where("gallery_id = ?", galleries[i].ID).Order("created_at ASC").Limit(1).Find(&images).Error; err == nil && len(images) > 0 {
+				firstImage := images[0]
+				// Populate path
+				sourceName := "uncategorized"
+				if galleries[i].Source != nil {
+					sourceName = galleries[i].Source.Name
+				}
+				sanitizedSource := services.SanitizeDirectoryName(sourceName)
+				firstImage.WebPath = fmt.Sprintf("/images/%s", filepath.ToSlash(firstImage.Filename))
 
-			// Inject "thumbnails" into the path
-			// Assumption: Filename is like "Source/file.ext"
-			// We want "/images/Source/thumbnails/file.ext"
-			parts := strings.Split(filepath.ToSlash(thumbPath), "/")
-			if len(parts) > 1 {
-				// Insert "thumbnails" before the filename
-				parts = append(parts[:len(parts)-1], append([]string{"thumbnails"}, parts[len(parts)-1:]...)...)
-				firstImage.ThumbnailPath = "/images/" + strings.Join(parts, "/")
-			} else {
-				// Fallback
-				firstImage.ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, filepath.Base(thumbPath))
-			}
+				// Construct thumbnail path
+				thumbPath := firstImage.Filename
+				if firstImage.Type == "video" {
+					// Replace extension with .jpg for video thumbnails
+					ext := filepath.Ext(thumbPath)
+					thumbPath = strings.TrimSuffix(thumbPath, ext) + ".jpg"
+				}
 
-			galleries[i].Images = []models.Image{firstImage}
+				// Inject "thumbnails" into the path
+				// Assumption: Filename is like "Source/file.ext"
+				// We want "/images/Source/thumbnails/file.ext"
+				parts := strings.Split(filepath.ToSlash(thumbPath), "/")
+				if len(parts) > 1 {
+					// Insert "thumbnails" before the filename
+					parts = append(parts[:len(parts)-1], append([]string{"thumbnails"}, parts[len(parts)-1:]...)...)
+					firstImage.ThumbnailPath = "/images/" + strings.Join(parts, "/")
+				} else {
+					// Fallback
+					firstImage.ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, filepath.Base(thumbPath))
+				}
+
+				galleries[i].Images = []models.Image{firstImage}
+			}
 		}
 
 		galleryResponses[i] = GalleryResponse{

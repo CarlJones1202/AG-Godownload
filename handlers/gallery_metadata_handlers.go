@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"gallery_api/database"
+	"gallery_api/logger"
 	"gallery_api/models"
 	"gallery_api/services"
 	"net/http"
@@ -73,6 +74,18 @@ func ScrapeGalleryMetadata(c *gin.Context) {
 	gallery.Description = metadata.Description
 	gallery.Rating = metadata.Rating
 	gallery.ReleaseDate = metadata.ReleaseDate
+	gallery.SourceURL = req.SourceURL
+
+	// Download and save provider thumbnail if available
+	if metadata.ThumbnailURL != "" {
+		localPath, err := services.DownloadProviderThumbnail(metadata.ThumbnailURL)
+		if err != nil {
+			logger.Warnf("Failed to download provider thumbnail for gallery %d: %v", gallery.ID, err)
+		} else {
+			gallery.ProviderThumbnail = localPath
+			gallery.ProviderThumbnailURL = metadata.ThumbnailURL
+		}
+	}
 
 	if err := database.DB.Save(&gallery).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update gallery"})

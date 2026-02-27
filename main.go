@@ -36,6 +36,11 @@ func main() {
 	go func() {
 		// WireGuard test removed as it is now redundant with API integration
 
+		logger.Info("Starting migration for missing provider thumbnails...")
+		if err := services.MigrateMissingProviderThumbnails(); err != nil {
+			logger.Error("Provider thumbnail migration failed:", err)
+		}
+
 		logger.Info("Starting background verification of downloaded images...")
 		if err := services.RemoveDuplicateImages(); err != nil {
 			logger.Error("Duplicate image removal failed:", err)
@@ -71,6 +76,8 @@ func main() {
 	services.StartCrawlerWorker()
 	services.StartAITagWorker()
 	services.StartWebSocketHub()
+	services.StartScanWorker()
+	services.StartDailyScanScheduler()
 	logger.Info("Background workers started")
 
 	r := gin.Default()
@@ -120,6 +127,17 @@ func main() {
 	r.POST("/people/:id/exclude-video/:imageId", handlers.ExcludeVideoFromPerson)
 	r.GET("/people/:id/exclusions", handlers.GetPersonExclusions)
 	r.DELETE("/people/:id/exclusions/:exclusionId", handlers.RemoveExclusion)
+
+	// Provider alias routes
+	r.GET("/people/:id/provider-aliases", handlers.GetProviderAliases)
+	r.POST("/people/:id/provider-aliases", handlers.CreateProviderAlias)
+	r.DELETE("/people/:id/provider-aliases/:aliasId", handlers.DeleteProviderAlias)
+
+	// Person scan routes
+	r.POST("/people/:id/scan", handlers.TriggerPersonScan)
+	r.GET("/people/:id/scans", handlers.GetPersonScanResults)
+	r.POST("/people/:id/link-found-gallery", handlers.LinkFoundGallery)
+	r.POST("/people/:id/link-unsure-gallery", handlers.LinkUnsureGallery)
 
 	// Old StashDB routes (kept for backward compatibility)
 	r.GET("/stashdb/search", handlers.SearchStashDB)

@@ -199,3 +199,81 @@ func MigrateImagesToNewStructure() error {
 
 	return nil
 }
+
+// MigrateMissingProviderThumbnails downloads missing provider thumbnails for existing galleries
+func MigrateMissingProviderThumbnails() error {
+	logger.Info("Starting migration for missing provider thumbnails...")
+
+	var galleries []models.Gallery
+	if err := database.DB.Where("provider != '' AND source_url != ''").
+		Where("provider_thumbnail = '' OR provider_thumbnail_url = ''").
+		Find(&galleries).Error; err != nil {
+		return fmt.Errorf("failed to load galleries: %w", err)
+	}
+
+	logger.Infof("Found %d galleries with provider but missing thumbnail", len(galleries))
+
+	downloaded := 0
+	failed := 0
+
+	for _, gallery := range galleries {
+		// Re-scrape metadata to get thumbnail URL
+		metadata, err := ScrapeGalleryMetadata(gallery.SourceURL, gallery.Provider, "")
+		if err != nil {
+			logger.Warnf("Failed to scrape metadata for gallery %d: %v", gallery.ID, err)
+			failed++
+			continue
+		}
+
+		if metadata.ThumbnailURL == "" {
+			logger.Debugf("No thumbnail URL found for gallery %d", gallery.ID)
+			continue
+		}
+
+		localPath, err := DownloadProviderThumbnail(metadata.ThumbnailURL)
+		if err != nil {
+			logger.Warnf("Failed to download thumbnail for gallery %d: %v", gallery.ID, err)
+			failed++
+			continue
+		}
+
+		gallery.ProviderThumbnail = localPath
+		gallery.ProviderThumbnailURL = metadata.ThumbnailURL
+
+		if err := database.DB.Save(&gallery).Error; err != nil {
+			logger.Warnf("Failed to save gallery %d: %v", gallery.ID, err)
+			failed++
+			continue
+		}
+
+		downloaded++
+	}
+
+	// Also check for galleries where thumbnail file is missing
+	var galleriesWithThumb []models.Gallery
+	if err := database.DB.Where("provider_thumbnail != ''").Find(&galleriesWithThumb).Error; err != nil {
+		return fmt.Errorf("failed to load galleries with thumbnails: %w", err)
+	}
+
+	missingFiles := 0
+	for _, gallery := range galleriesWithThumb {
+		if _, err := os.Stat(gallery.ProviderThumbnail); os.IsNotExist(err) {
+			// File missing, try to re-download
+			if gallery.ProviderThumbnailURL != "" {
+				localPath, err := DownloadProviderThumbnail(gallery.ProviderThumbnailURL)
+				if err != nil {
+					logger.Warnf("Failed to re-download thumbnail for gallery %d: %v", gallery.ID, err)
+					missingFiles++
+					continue
+				}
+				gallery.ProviderThumbnail = localPath
+				database.DB.Save(&gallery)
+			}
+		}
+	}
+
+	logger.Infof("Provider thumbnail migration complete: %d downloaded, %d failed, %d files missing",
+		downloaded, failed, missingFiles)
+
+	return nil
+}

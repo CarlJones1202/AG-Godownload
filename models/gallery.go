@@ -18,9 +18,11 @@ type Gallery struct {
 	People    []*Person      `json:"people,omitempty" gorm:"many2many:person_galleries;"`
 
 	// New metadata fields for gallery scraping
-	Description string    `json:"description"`
-	Provider    string    `json:"provider"` // e.g., "Playboy", "Metart"
-	SourceURL   string    `json:"source_url"`
-	Rating      float64   `json:"rating"`
-	ReleaseDate time.Time `json:"release_date"`
+	Description          string    `json:"description"`
+	Provider             string    `json:"provider"` // e.g., "Playboy", "Metart"
+	SourceURL            string    `json:"source_url"`
+	ProviderThumbnail    string    `json:"provider_thumbnail"`     // Local path to downloaded thumbnail
+	ProviderThumbnailURL string    `json:"provider_thumbnail_url"` // Original URL for re-download
+	Rating               float64   `json:"rating"`
+	ReleaseDate          time.Time `json:"release_date"`
 }

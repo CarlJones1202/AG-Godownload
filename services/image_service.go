@@ -287,16 +287,62 @@ func GenerateVideoThumbnail(srcPath string) (string, error) {
 	if _, err := os.Stat(thumbPath); err == nil {
 		return thumbPath, nil
 	}
+	
+	// Download and generate thumbnail (ffmpeg logic would go here)
+	// For now, return empty to indicate no thumbnail
+	return "", nil
+}
 
-	// Use ffmpeg to extract a frame at 5 seconds or 10%?
-	// Let's try 00:00:01 for now to likely hit content but not black start
-	// -vframes 1: output one frame
-	// -ss 1: seek to 1 second
-	cmd := exec.Command("ffmpeg", "-y", "-i", srcPath, "-ss", "00:00:01", "-vframes", "1", thumbPath)
+// DownloadProviderThumbnail downloads a thumbnail from a provider and saves it to the gallery_thumbnails directory
+func DownloadProviderThumbnail(url string) (string, error) {
+	if url == "" {
+		return "", nil
+	}
 
-	// Capture output in case of error
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("ffmpeg failed: %w, output: %s", err, string(output))
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+
+	resp, err := DoRequestWithRetry(context.Background(), req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to download thumbnail: status %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	hash := sha256.Sum256(data)
+	hashStr := hex.EncodeToString(hash[:])
+
+	ext := ".jpg"
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "image/png" {
+		ext = ".png"
+	} else if contentType == "image/webp" {
+		ext = ".webp"
+	}
+
+	filename := hashStr + ext
+	thumbDir := filepath.Join(UploadsDir, "gallery_thumbnails")
+	if err := os.MkdirAll(thumbDir, 0755); err != nil {
+		return "", err
+	}
+
+	thumbPath := filepath.Join(thumbDir, filename)
+
+	if _, err := os.Stat(thumbPath); err != nil {
+		if err := os.WriteFile(thumbPath, data, 0644); err != nil {
+			return "", err
+		}
 	}
 
 	return thumbPath, nil

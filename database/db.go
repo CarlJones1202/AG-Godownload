@@ -30,6 +30,8 @@ func Migrate() {
 		&models.Person{},
 		&models.PersonIdentifier{},
 		&models.PersonExclusion{},
+		&models.PersonProviderAlias{},
+		&models.PersonScanQueue{},
 		&models.Tag{},
 	)
 	if err != nil {

@@ -2,12 +2,15 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import './PersonDetail.css'
 import './PersonDetail_identifiers.css'
+import './PersonDetail_provider_aliases.css'
 import './AutoTag.css'
 import PersonStats from './PersonStats'
 import AutoTagModal from './AutoTagModal'
 import SourceScanModal from './SourceScanModal'
 import GalleryCard from './GalleryCard'
 import SortControls from './SortControls'
+import PersonProviderAliases from './PersonProviderAliases'
+import PersonMissingGalleries from './PersonMissingGalleries'
 
 function PersonDetail() {
     const { id } = useParams()
@@ -478,6 +481,20 @@ function PersonDetail() {
                             ))}
                         </div>
                     )}
+
+                    {/* Provider Aliases */}
+                    <PersonProviderAliases 
+                        personId={parseInt(id)} 
+                        aliases={person.aliases}
+                        personName={person.name}
+                        onUpdate={fetchPerson}
+                    />
+
+                    {/* Missing Galleries */}
+                    <PersonMissingGalleries 
+                        personId={parseInt(id)} 
+                        onScanComplete={fetchPerson}
+                    />
 
                     {isEditing ? (
                         <div className="edit-form-panel">

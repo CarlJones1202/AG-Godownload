@@ -1,0 +1,268 @@
+/* Provider Aliases - Clean Minimal Design */
+.provider-aliases-section {
+    margin-top: 2rem;
+    margin-bottom: 2rem;
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.provider-aliases-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.provider-aliases-header h3 {
+    margin: 0;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Inline add form */
+.provider-alias-add-form {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.provider-alias-add-form select,
+.provider-alias-add-form input {
+    padding: 0.4rem 0.6rem;
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border-primary);
+    border-radius: var(--radius-md);
+    color: var(--color-text-primary);
+    font-size: 0.85rem;
+}
+
+.provider-alias-add-form select {
+    min-width: 100px;
+}
+
+.provider-alias-add-form input {
+    flex: 1;
+    min-width: 120px;
+}
+
+/* Chips list - just inline items, no backgrounds */
+.provider-aliases-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: flex-start;
+}
+
+/* Individual chip - no background, no border */
+.provider-alias-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+}
+
+.provider-badge {
+    display: inline;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--color-text-secondary) !important;
+    text-transform: capitalize;
+    background: none !important;
+    padding: 0 !important;
+    white-space: nowrap;
+}
+
+.alias-text {
+    color: var(--color-text-primary);
+    font-family: monospace;
+    display: inline;
+}
+
+/* Remove button - hidden by default, shows on hover */
+.remove-alias {
+    display: inline;
+    background: transparent !important;
+    border: none !important;
+    color: var(--color-text-tertiary);
+    cursor: pointer;
+    font-size: 0.9rem;
+    padding: 0 !important;
+    margin: 0 !important;
+    margin-left: 0.25rem;
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s;
+    outline: none;
+    box-shadow: none !important;
+}
+
+.provider-alias-chip:hover .remove-alias {
+    opacity: 1;
+}
+
+.remove-alias:hover {
+    color: var(--color-accent-danger);
+}
+
+/* Empty state */
+.provider-aliases-empty {
+    color: var(--color-text-tertiary);
+    font-size: 0.85rem;
+    font-style: italic;
+}
+
+/* Loading */
+.provider-aliases-loading {
+    color: var(--color-text-tertiary);
+    font-size: 0.85rem;
+}
+
+/* Missing Galleries Section */
+.scan-result {
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.scan-result:last-child {
+    border-bottom: none;
+}
+
+.scan-result-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.scan-meta {
+    font-size: 0.8rem;
+    color: var(--color-text-tertiary);
+}
+
+.scan-date {
+    font-size: 0.75rem;
+    color: var(--color-text-tertiary);
+    margin-left: auto;
+}
+
+.missing-galleries h4,
+.unsure-galleries h4 {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    margin: 0.5rem 0 0.25rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.unsure-galleries h4 {
+    color: var(--color-text-tertiary);
+}
+
+.gallery-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.gallery-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.5rem;
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    font-size: 0.8rem;
+    color: var(--color-text-primary);
+    transition: background 0.15s;
+}
+
+.gallery-link:hover {
+    background: var(--color-bg-tertiary);
+}
+
+.gallery-thumb {
+    width: 32px;
+    height: 24px;
+    object-fit: cover;
+    border-radius: 2px;
+}
+
+.gallery-title {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gallery-link-wrapper {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.add-gallery-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+
+.gallery-link-wrapper:hover .add-gallery-btn {
+    opacity: 1;
+}
+
+.add-gallery-btn:hover {
+    background: var(--color-accent-success, #22c55e);
+    color: white;
+}
+
+.add-gallery-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.link-gallery-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+
+.gallery-link-wrapper:hover .link-gallery-btn {
+    opacity: 1;
+}
+
+.link-gallery-btn:hover {
+    background: var(--color-accent-info, #3b82f6);
+    color: white;
+}
+
+.link-gallery-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}

@@ -476,7 +476,7 @@ func ScanPersonFromSource(c *gin.Context) {
 	alias := c.Query("alias")
 
 	if provider == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "source query parameter is required (MetArt, Playboy, PlayboyPlus, or Vixen)"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source query parameter is required (MetArt, MetartX, Playboy, PlayboyPlus, Vixen, SexArt, or LifeErotic)"})
 		return
 	}
 
