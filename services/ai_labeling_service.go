@@ -67,8 +67,20 @@ func LabelImage(imageID uint) error {
 	scriptPath := filepath.Join(cwd, "scripts", "ai_tagger.py")
 	absImagePath, _ := filepath.Abs(imagePath)
 
-	// Check if python is available
-	cmd := exec.Command("python", scriptPath, "--image", absImagePath)
+	// Find a python executable. On Windows machines the "python" command
+	// may be unavailable; try common alternatives (python3, py).
+	var pythonExec string
+	for _, candidate := range []string{"python", "python3", "py"} {
+		if p, err := exec.LookPath(candidate); err == nil {
+			pythonExec = p
+			break
+		}
+	}
+	if pythonExec == "" {
+		return fmt.Errorf("python executable not found. Install Python or enable App Execution Aliases. Tried: python, python3, py")
+	}
+
+	cmd := exec.Command(pythonExec, scriptPath, "--image", absImagePath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("python script execution failed: %v, output: %s", err, string(output))

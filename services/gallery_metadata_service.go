@@ -121,6 +121,22 @@ func SearchGalleryMatches(galleryName string, people []string) ([]GallerySearchR
 		results = append(results, mplResults...)
 	}
 
+	// Search VivThomas
+	vivResults, err := searchVivThomas(searchQuery)
+	if err != nil {
+		logger.Warnf("VivThomas search failed: %v", err)
+	} else {
+		results = append(results, vivResults...)
+	}
+
+	// Search WowGirls
+	wowResults, err := searchWowGirls(searchQuery)
+	if err != nil {
+		logger.Warnf("WowGirls search failed: %v", err)
+	} else {
+		results = append(results, wowResults...)
+	}
+
 	if len(results) == 0 {
 		return nil, fmt.Errorf("no matching galleries found")
 	}
@@ -152,6 +168,8 @@ func ScrapeGalleryMetadata(sourceURL string, provider string, sourceID string) (
 		return scrapeEternalDesireGallery(sourceURL, sourceID)
 	case "mplstudios":
 		return scrapeMPLStudiosGallery(sourceURL, sourceID)
+	case "vivthomas":
+		return scrapeVivThomasGallery(sourceURL, sourceID)
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", provider)
 	}
@@ -551,11 +569,15 @@ func scrapeMetArtGallery(urlStr, uuid string) (*GalleryMetadata, error) {
 
 	// Parse JSON
 	var galleryDetail struct {
-		Name          string  `json:"name"`
-		Description   string  `json:"description"`
-		RatingAverage float64 `json:"ratingAverage"`
-		PublishedAt   string  `json:"publishedAt"`
-		CoverImageURL string  `json:"coverImageUrl"`
+		Name                string  `json:"name"`
+		Description         string  `json:"description"`
+		RatingAverage       float64 `json:"ratingAverage"`
+		PublishedAt         string  `json:"publishedAt"`
+		CoverImageURL       string  `json:"coverImageUrl"`
+		CoverImagePath      string  `json:"coverImagePath"`
+		CoverCleanImagePath string  `json:"coverCleanImagePath"`
+		Cover               string  `json:"cover"`
+		CoverImage          string  `json:"coverImage"`
 	}
 
 	if err := json.Unmarshal(bodyBytes, &galleryDetail); err != nil {
@@ -570,12 +592,22 @@ func scrapeMetArtGallery(urlStr, uuid string) (*GalleryMetadata, error) {
 		Rating:      galleryDetail.RatingAverage,
 	}
 
-	// Try to get thumbnail from API response or construct from path
-	if galleryDetail.CoverImageURL != "" {
-		metadata.ThumbnailURL = "https://www.metart.com" + galleryDetail.CoverImageURL
+	// Prefer explicit cover image fields from the API — different API versions use
+	// slightly different field names. Fall back to the constructed /photo/ URL only
+	// if none of the known fields are present.
+	if galleryDetail.CoverCleanImagePath != "" {
+		metadata.ThumbnailURL = toAbsoluteMetArtURL(galleryDetail.CoverCleanImagePath)
+	} else if galleryDetail.CoverImagePath != "" {
+		metadata.ThumbnailURL = toAbsoluteMetArtURL(galleryDetail.CoverImagePath)
+	} else if galleryDetail.CoverImageURL != "" {
+		metadata.ThumbnailURL = toAbsoluteMetArtURL(galleryDetail.CoverImageURL)
+	} else if galleryDetail.CoverImage != "" {
+		metadata.ThumbnailURL = toAbsoluteMetArtURL(galleryDetail.CoverImage)
+	} else if galleryDetail.Cover != "" {
+		metadata.ThumbnailURL = toAbsoluteMetArtURL(galleryDetail.Cover)
 	} else {
-		// Construct thumbnail URL from gallery name
-		metadata.ThumbnailURL = fmt.Sprintf("https://www.metart.com/photo/%s/0/0.jpg", strings.ToLower(galleryName))
+		// Construct thumbnail URL from gallery name (preserve original casing)
+		metadata.ThumbnailURL = fmt.Sprintf("https://www.metart.com/photo/%s/0/0.jpg", galleryName)
 	}
 
 	// Parse date
@@ -587,6 +619,18 @@ func scrapeMetArtGallery(urlStr, uuid string) (*GalleryMetadata, error) {
 
 	logger.Infof("Scraped MetArt gallery: %s (Rating: %.2f)", metadata.Description[:min(50, len(metadata.Description))], metadata.Rating)
 	return metadata, nil
+}
+
+// toAbsoluteMetArtURL ensures the returned thumbnail URL is absolute and uses the metart.com domain.
+func toAbsoluteMetArtURL(path string) string {
+	if strings.HasPrefix(path, "http") {
+		return path
+	}
+	// Some API fields may start with "/" or be a relative path without leading slash
+	if strings.HasPrefix(path, "/") {
+		return "https://www.metart.com" + path
+	}
+	return "https://www.metart.com/" + path
 }
 
 // scrapeMetartXGallery scrapes full metadata from a MetartX gallery page
@@ -876,6 +920,253 @@ func searchEternalDesire(query string) ([]GallerySearchResult, error) {
 	return results, nil
 }
 
+// searchVivThomas searches VivThomas for matching galleries using a simple site search and HTML parsing
+func searchVivThomas(query string) ([]GallerySearchResult, error) {
+	candidates := []string{
+		fmt.Sprintf("https://www.vivthomas.com/?s=%s", url.QueryEscape(query)),
+	}
+
+	var results []GallerySearchResult
+	for idx, apiURL := range candidates {
+		logger.Infof("[VivThomas] Searching candidate %d -> %s", idx, apiURL)
+		client := GetHTTPClient(apiURL)
+		resp, err := client.Get(apiURL)
+		if err != nil {
+			logger.Warnf("[VivThomas] candidate failed: %s -> %v", apiURL, err)
+			continue
+		}
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode != 200 {
+			logger.Warnf("[VivThomas] candidate returned status %d", resp.StatusCode)
+			continue
+		}
+
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(bodyBytes)))
+		if err != nil {
+			logger.Warnf("[VivThomas] failed to parse HTML from %s: %v", apiURL, err)
+			continue
+		}
+
+		// Look for anchors that appear to point to galleries/sets
+		doc.Find("a").Each(func(i int, s *goquery.Selection) {
+			if i >= 50 {
+				return
+			}
+			href, _ := s.Attr("href")
+			text := strings.TrimSpace(s.Text())
+			if href == "" {
+				return
+			}
+			lower := strings.ToLower(href)
+			// heuristics for VivThomas gallery URLs
+			if strings.Contains(lower, "/gallery/") || strings.Contains(lower, "/photo-") || strings.Contains(lower, "/series/") || strings.Contains(lower, "/set/") || strings.Contains(lower, "/update/") {
+				if !strings.HasPrefix(href, "http") {
+					if strings.HasPrefix(href, "/") {
+						href = "https://www.vivthomas.com" + href
+					} else {
+						href = "https://www.vivthomas.com/" + href
+					}
+				}
+				thumb := ""
+				if img := s.Find("img"); img.Length() > 0 {
+					if src, ok := img.Attr("src"); ok {
+						thumb = src
+					}
+				}
+				if text == "" {
+					// try to get title from img alt
+					if img := s.Find("img"); img.Length() > 0 {
+						if alt, ok := img.Attr("alt"); ok {
+							text = strings.TrimSpace(alt)
+						}
+					}
+				}
+				if text == "" {
+					text = href
+				}
+				results = append(results, GallerySearchResult{Provider: "VivThomas", Title: text, URL: href, Thumbnail: thumb})
+			}
+		})
+
+		if len(results) > 0 {
+			logger.Infof("[VivThomas] found %d results via HTML parsing", len(results))
+			return results, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no results from VivThomas search")
+}
+
+// searchWowGirls searches WowGirls for matching galleries using simple HTML search
+func searchWowGirls(query string) ([]GallerySearchResult, error) {
+	candidates := []string{
+		fmt.Sprintf("https://www.wowgirls.com/?s=%s", url.QueryEscape(query)),
+	}
+
+	var results []GallerySearchResult
+	for idx, apiURL := range candidates {
+		logger.Infof("[WowGirls] Searching candidate %d -> %s", idx, apiURL)
+		client := GetHTTPClient(apiURL)
+		resp, err := client.Get(apiURL)
+		if err != nil {
+			logger.Warnf("[WowGirls] candidate failed: %s -> %v", apiURL, err)
+			continue
+		}
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode != 200 {
+			logger.Warnf("[WowGirls] candidate returned status %d", resp.StatusCode)
+			continue
+		}
+
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(bodyBytes)))
+		if err != nil {
+			logger.Warnf("[WowGirls] failed to parse HTML from %s: %v", apiURL, err)
+			continue
+		}
+
+		doc.Find("a").Each(func(i int, s *goquery.Selection) {
+			if i >= 50 {
+				return
+			}
+			href, _ := s.Attr("href")
+			text := strings.TrimSpace(s.Text())
+			if href == "" {
+				return
+			}
+			lower := strings.ToLower(href)
+			if strings.Contains(lower, "/gallery/") || strings.Contains(lower, "/photos/") || strings.Contains(lower, "/set/") || strings.Contains(lower, "/update/") {
+				if !strings.HasPrefix(href, "http") {
+					if strings.HasPrefix(href, "/") {
+						href = "https://www.wowgirls.com" + href
+					} else {
+						href = "https://www.wowgirls.com/" + href
+					}
+				}
+				thumb := ""
+				if img := s.Find("img"); img.Length() > 0 {
+					if src, ok := img.Attr("src"); ok {
+						thumb = src
+					}
+				}
+				if text == "" {
+					if img := s.Find("img"); img.Length() > 0 {
+						if alt, ok := img.Attr("alt"); ok {
+							text = strings.TrimSpace(alt)
+						}
+					}
+				}
+				if text == "" {
+					text = href
+				}
+				results = append(results, GallerySearchResult{Provider: "WowGirls", Title: text, URL: href, Thumbnail: thumb})
+			}
+		})
+
+		if len(results) > 0 {
+			logger.Infof("[WowGirls] found %d results via HTML parsing", len(results))
+			return results, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no results from WowGirls search")
+}
+
+// scrapeWowGirlsGallery scrapes metadata from a WowGirls gallery page
+func scrapeWowGirlsGallery(urlStr, uuid string) (*GalleryMetadata, error) {
+	client := GetHTTPClient(urlStr)
+	resp, err := client.Get(urlStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch WowGirls gallery: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("WowGirls returned status %d", resp.StatusCode)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse WowGirls gallery: %w", err)
+	}
+
+	metadata := &GalleryMetadata{Provider: "WowGirls", SourceURL: urlStr}
+	if title, ok := doc.Find("meta[property='og:title']").Attr("content"); ok {
+		metadata.Description = title
+	} else {
+		metadata.Description = strings.TrimSpace(doc.Find("h1, .entry-title").First().Text())
+	}
+	if desc, ok := doc.Find("meta[property='og:description']").Attr("content"); ok {
+		metadata.Description = desc
+	}
+	if thumb, ok := doc.Find("meta[property='og:image']").Attr("content"); ok {
+		metadata.ThumbnailURL = thumb
+	}
+	dateText := strings.TrimSpace(doc.Find("time, .posted-on, .entry-date").First().Text())
+	if dateText != "" {
+		for _, layout := range []string{"January 2, 2006", "Jan 2, 2006", "2006-01-02", "02/01/2006"} {
+			if parsed, err := time.Parse(layout, dateText); err == nil {
+				metadata.ReleaseDate = parsed
+				break
+			}
+		}
+	}
+	metadata.Rating = 0
+	return metadata, nil
+}
+
+// scrapeVivThomasGallery scrapes metadata from a VivThomas gallery page
+func scrapeVivThomasGallery(urlStr, uuid string) (*GalleryMetadata, error) {
+	client := GetHTTPClient(urlStr)
+	resp, err := client.Get(urlStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch VivThomas gallery: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("VivThomas returned status %d", resp.StatusCode)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse VivThomas gallery: %w", err)
+	}
+
+	metadata := &GalleryMetadata{Provider: "VivThomas", SourceURL: urlStr}
+
+	if title, ok := doc.Find("meta[property='og:title']").Attr("content"); ok {
+		metadata.Description = title
+	} else {
+		metadata.Description = strings.TrimSpace(doc.Find("h1, .entry-title").First().Text())
+	}
+
+	if desc, ok := doc.Find("meta[property='og:description']").Attr("content"); ok {
+		metadata.Description = desc
+	}
+
+	if thumb, ok := doc.Find("meta[property='og:image']").Attr("content"); ok {
+		metadata.ThumbnailURL = thumb
+	}
+
+	// Try to parse date
+	dateText := strings.TrimSpace(doc.Find("time, .posted-on, .entry-date").First().Text())
+	if dateText != "" {
+		for _, layout := range []string{"January 2, 2006", "Jan 2, 2006", "2006-01-02", "02/01/2006"} {
+			if parsed, err := time.Parse(layout, dateText); err == nil {
+				metadata.ReleaseDate = parsed
+				break
+			}
+		}
+	}
+
+	metadata.Rating = 0
+	return metadata, nil
+}
+
 // scrapeEternalDesireGallery scrapes full metadata from an EternalDesire gallery page
 func scrapeEternalDesireGallery(urlStr, uuid string) (*GalleryMetadata, error) {
 	u, err := url.Parse(urlStr)
@@ -1012,6 +1303,37 @@ func searchMPLStudios(query string) ([]GallerySearchResult, error) {
 			// Try to parse JSON (it's typically an array of arrays)
 			var root interface{}
 			if err := json.Unmarshal(bodyBytes, &root); err == nil {
+				// This endpoint frequently returns gallery search results in root[1]
+				// Parse galleries directly from the searchFor response first (gallery search)
+				if rootArr, ok := root.([]interface{}); ok && len(rootArr) > 1 {
+					if galleryGroups, ok := rootArr[1].([]interface{}); ok && len(galleryGroups) > 0 {
+						if firstGroup, ok := galleryGroups[0].([]interface{}); ok {
+							for gi, entry := range firstGroup {
+								if entArr, ok := entry.([]interface{}); ok && len(entArr) > 2 {
+									titleRaw := fmt.Sprintf("%v", entArr[2])
+									urlRaw := fmt.Sprintf("%v", entArr[1])
+									thumbRaw := fmt.Sprintf("%v", entArr[0])
+									titleClean := stripHTML(titleRaw)
+									urlClean := urlRaw
+									if !strings.HasPrefix(urlClean, "http") {
+										if strings.HasPrefix(urlClean, "/") {
+											urlClean = "https://www.mplstudios.com" + urlClean
+										} else {
+											urlClean = "https://www.mplstudios.com/" + urlClean
+										}
+									}
+									results = append(results, GallerySearchResult{Provider: "MPLStudios", Title: titleClean, URL: urlClean, Thumbnail: thumbRaw})
+									logger.Debugf("[MPLStudios] parsed gallery candidate from searchFor %d: title=%s url=%s", gi, titleClean, urlClean)
+								}
+							}
+							if len(results) > 0 {
+								logger.Infof("[MPLStudios] parsed %d galleries directly from searchFor response", len(results))
+								return results, nil
+							}
+						}
+					}
+				}
+
 				if href, name, ok := findBestPersonFromSearchFor(root, query); ok {
 					logger.Infof("[MPLStudios] searchFor matched person '%s' -> %s", name, href)
 					// Build full person URL if necessary
@@ -1118,7 +1440,37 @@ func searchMPLStudios(query string) ([]GallerySearchResult, error) {
 						logger.Warnf("[MPLStudios] no galleries found on person page %s", href)
 					}
 				} else {
-					logger.Debugf("[MPLStudios] searchFor did not find a person match for '%s'", query)
+					logger.Debugf("[MPLStudios] searchFor did not find a person match for '%s'; attempting to parse galleries directly from searchFor response", query)
+					// The searchFor response can include galleries in the second element
+					if rootArr, ok := root.([]interface{}); ok && len(rootArr) > 1 {
+						if galleryGroups, ok := rootArr[1].([]interface{}); ok && len(galleryGroups) > 0 {
+							if firstGroup, ok := galleryGroups[0].([]interface{}); ok {
+								for gi, entry := range firstGroup {
+									if entArr, ok := entry.([]interface{}); ok && len(entArr) > 2 {
+										titleRaw := fmt.Sprintf("%v", entArr[2])
+										urlRaw := fmt.Sprintf("%v", entArr[1])
+										thumbRaw := fmt.Sprintf("%v", entArr[0])
+										titleClean := stripHTML(titleRaw)
+										urlClean := urlRaw
+										if !strings.HasPrefix(urlClean, "http") {
+											if strings.HasPrefix(urlClean, "/") {
+												urlClean = "https://www.mplstudios.com" + urlClean
+											} else {
+												urlClean = "https://www.mplstudios.com/" + urlClean
+											}
+										}
+										results = append(results, GallerySearchResult{Provider: "MPLStudios", Title: titleClean, URL: urlClean, Thumbnail: thumbRaw})
+										logger.Debugf("[MPLStudios] parsed gallery candidate from searchFor %d: title=%s url=%s", gi, titleClean, urlClean)
+									}
+								}
+								if len(results) > 0 {
+									logger.Infof("[MPLStudios] parsed %d galleries directly from searchFor response", len(results))
+									return results, nil
+								}
+							}
+						}
+					}
+					logger.Debugf("[MPLStudios] no direct galleries found in searchFor response for '%s'", query)
 				}
 			} else {
 				logger.Debugf("[MPLStudios] searchFor response not JSON: %v", err)
@@ -2135,6 +2487,24 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 			results, err := searchMPLStudios(term)
 			if err != nil {
 				logger.Warnf("MPLStudios search failed for term %s: %v", term, err)
+				continue
+			}
+			allResults = append(allResults, results...)
+		}
+	case "vivthomas":
+		for _, term := range searchTerms {
+			results, err := searchVivThomas(term)
+			if err != nil {
+				logger.Warnf("VivThomas search failed for term %s: %v", term, err)
+				continue
+			}
+			allResults = append(allResults, results...)
+		}
+	case "wowgirls":
+		for _, term := range searchTerms {
+			results, err := searchWowGirls(term)
+			if err != nil {
+				logger.Warnf("WowGirls search failed for term %s: %v", term, err)
 				continue
 			}
 			allResults = append(allResults, results...)

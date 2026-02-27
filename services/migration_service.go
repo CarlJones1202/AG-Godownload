@@ -7,8 +7,10 @@ import (
 	"gallery_api/database"
 	"gallery_api/logger"
 	"gallery_api/models"
+	"github.com/disintegration/imaging"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // MigrateImagesToNewStructure migrates existing images from flat structure to source-based subdirectories
@@ -276,4 +278,102 @@ func MigrateMissingProviderThumbnails() error {
 		downloaded, failed, missingFiles)
 
 	return nil
+}
+
+// ValidateProviderThumbnails ensures provider thumbnail files exist and are valid images.
+// It attempts to re-download missing or invalid thumbnails using the stored ProviderThumbnailURL.
+func ValidateProviderThumbnails() (int, int, error) {
+	logger.Info("Validating provider thumbnails...")
+
+	var galleries []models.Gallery
+	if err := database.DB.Where("provider_thumbnail != ''").Find(&galleries).Error; err != nil {
+		return 0, 0, fmt.Errorf("failed to load galleries with provider thumbnails: %w", err)
+	}
+
+	valid := 0
+	fixed := 0
+
+	for _, g := range galleries {
+		path := g.ProviderThumbnail
+		ok := false
+
+		if path != "" {
+			if _, err := os.Stat(path); err == nil {
+				// Try opening to validate image
+				if _, err := imaging.Open(path); err == nil {
+					ok = true
+				} else {
+					logger.Debugf("Provider thumbnail invalid image for gallery %d: %v", g.ID, err)
+					// remove invalid file
+					_ = os.Remove(path)
+				}
+			} else {
+				logger.Debugf("Provider thumbnail missing on disk for gallery %d: %s", g.ID, path)
+			}
+		}
+
+		if !ok {
+			// Attempt to re-download from stored URL if available
+			if g.ProviderThumbnailURL != "" {
+				logger.Infof("Re-downloading provider thumbnail for gallery %d from %s", g.ID, g.ProviderThumbnailURL)
+				localPath, err := DownloadProviderThumbnail(g.ProviderThumbnailURL)
+				if err == nil {
+					// validate
+					if _, err := imaging.Open(localPath); err == nil {
+						g.ProviderThumbnail = localPath
+						// update stored URL in case it changed
+						g.ProviderThumbnailURL = g.ProviderThumbnailURL
+						if err := database.DB.Save(&g).Error; err != nil {
+							logger.Warnf("Failed to save re-downloaded thumbnail path for gallery %d: %v", g.ID, err)
+						}
+						fixed++
+						continue
+					}
+					// remove invalid file
+					_ = os.Remove(localPath)
+				} else {
+					logger.Warnf("Failed to re-download provider thumbnail for gallery %d: %v", g.ID, err)
+				}
+
+				// If the stored URL failed and the provider is MetArt, try to re-scrape metadata
+				// and use the API-provided media path which points to an actual image.
+				if strings.EqualFold(g.Provider, "MetArt") || strings.EqualFold(g.Provider, "Metart") {
+					logger.Infof("Attempting MetArt API fallback for gallery %d", g.ID)
+					if meta, serr := ScrapeGalleryMetadata(g.SourceURL, g.Provider, ""); serr == nil {
+						if meta.ThumbnailURL != "" && meta.ThumbnailURL != g.ProviderThumbnailURL {
+							logger.Infof("MetArt fallback thumbnail URL for gallery %d -> %s", g.ID, meta.ThumbnailURL)
+							localPath2, derr := DownloadProviderThumbnail(meta.ThumbnailURL)
+							if derr == nil {
+								if _, err := imaging.Open(localPath2); err == nil {
+									g.ProviderThumbnail = localPath2
+									g.ProviderThumbnailURL = meta.ThumbnailURL
+									if err := database.DB.Save(&g).Error; err != nil {
+										logger.Warnf("Failed to save MetArt fallback thumbnail for gallery %d: %v", g.ID, err)
+									}
+									fixed++
+									continue
+								}
+								_ = os.Remove(localPath2)
+							} else {
+								logger.Warnf("Failed to download MetArt fallback thumbnail for gallery %d: %v", g.ID, derr)
+							}
+						}
+					} else {
+						logger.Debugf("MetArt API scrape failed for gallery %d: %v", g.ID, serr)
+					}
+				}
+			}
+
+			// If we reach here, we couldn't validate or re-download — clear DB path
+			g.ProviderThumbnail = ""
+			if err := database.DB.Save(&g).Error; err != nil {
+				logger.Warnf("Failed to clear invalid provider thumbnail for gallery %d: %v", g.ID, err)
+			}
+		} else {
+			valid++
+		}
+	}
+
+	logger.Infof("Provider thumbnail validation complete: %d valid, %d fixed/updated", valid, fixed)
+	return valid, fixed, nil
 }

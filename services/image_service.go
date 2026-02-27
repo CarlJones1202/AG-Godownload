@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	urlpkg "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -298,21 +299,37 @@ func DownloadProviderThumbnail(url string) (string, error) {
 	if url == "" {
 		return "", nil
 	}
+	logger.Debugf("Downloading provider thumbnail: %s", url)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return "", err
 	}
+	// Set conservative browser headers to reduce chance of blocking
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Connection", "keep-alive")
+
+	// Use the page origin as referer when possible (some providers require it)
+	if u, perr := urlpkg.Parse(url); perr == nil {
+		origin := u.Scheme + "://" + u.Host
+		req.Header.Set("Referer", origin)
+	}
 
 	resp, err := DoRequestWithRetry(context.Background(), req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to download thumbnail: status %d", resp.StatusCode)
+		// capture small snippet for debugging
+		snippet := ""
+		limited := io.LimitReader(resp.Body, 1024)
+		if b, rerr := io.ReadAll(limited); rerr == nil {
+			snippet = string(b)
+		}
+		return "", fmt.Errorf("failed to download thumbnail: status %d; snippet=%s", resp.StatusCode, snippet)
 	}
 
 	data, err := io.ReadAll(resp.Body)
@@ -325,9 +342,9 @@ func DownloadProviderThumbnail(url string) (string, error) {
 
 	ext := ".jpg"
 	contentType := resp.Header.Get("Content-Type")
-	if contentType == "image/png" {
+	if strings.HasPrefix(contentType, "image/png") {
 		ext = ".png"
-	} else if contentType == "image/webp" {
+	} else if strings.HasPrefix(contentType, "image/webp") {
 		ext = ".webp"
 	}
 

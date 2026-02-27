@@ -46,6 +46,13 @@ func main() {
 			logger.Error("Provider thumbnail migration failed:", err)
 		}
 
+		// Validate existing provider thumbnails on startup and attempt fixes
+		if valid, fixed, err := services.ValidateProviderThumbnails(); err != nil {
+			logger.Error("Provider thumbnail validation failed:", err)
+		} else {
+			logger.Infof("Provider thumbnail validation: %d valid, %d fixed/updated", valid, fixed)
+		}
+
 		logger.Info("Starting background verification of downloaded images...")
 		if err := services.RemoveDuplicateImages(); err != nil {
 			logger.Error("Duplicate image removal failed:", err)

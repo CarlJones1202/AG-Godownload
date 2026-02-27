@@ -264,6 +264,10 @@ function GalleryDetail() {
             provider = 'EternalDesire'
         } else if (lowerUrl.includes('mplstudios.com') || lowerUrl.includes('mplstudios')) {
             provider = 'MPLStudios'
+        } else if (lowerUrl.includes('vivthomas.com') || lowerUrl.includes('vivthomas')) {
+            provider = 'VivThomas'
+        } else if (lowerUrl.includes('wowgirls.com') || lowerUrl.includes('wowgirls')) {
+            provider = 'WowGirls'
         } else if (lowerUrl.includes('metart.com')) {
             provider = 'MetArt'
         } else if (lowerUrl.includes('metartx.com')) {

@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import './PersonDetail_provider_aliases.css'
 
-const KNOWN_PROVIDERS = ['metart', 'metartx', 'playboy', 'playboyplus', 'vixen', 'sexart', 'lifeerotic', 'eternaldesire', 'mplstudios']
+const KNOWN_PROVIDERS = ['metart', 'metartx', 'playboy', 'playboyplus', 'vixen', 'sexart', 'lifeerotic', 'eternaldesire', 'mplstudios', 'vivthomas', 'wowgirls']
 
 function PersonProviderAliases({ personId, aliases: personAliases, personName, onUpdate }) {
   const [providerAliases, setProviderAliases] = useState([])
