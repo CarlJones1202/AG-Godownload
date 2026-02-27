@@ -22,6 +22,11 @@ func main() {
 	database.Migrate()
 	database.MigrateData()
 
+	// Clean up duplicate scan results from previous runs
+	if err := services.CleanupDuplicateScans(); err != nil {
+		logger.Warnf("Failed to cleanup duplicate scans: %v", err)
+	}
+
 	// Ensure uploads directory exists
 	if err := services.EnsureUploadsDir(); err != nil {
 		logger.Fatal("Failed to create uploads directory:", err)
@@ -138,6 +143,7 @@ func main() {
 	r.GET("/people/:id/scans", handlers.GetPersonScanResults)
 	r.POST("/people/:id/link-found-gallery", handlers.LinkFoundGallery)
 	r.POST("/people/:id/link-unsure-gallery", handlers.LinkUnsureGallery)
+	r.POST("/people/:id/exclude-scan-result", handlers.ExcludeScanResult)
 
 	// Old StashDB routes (kept for backward compatibility)
 	r.GET("/stashdb/search", handlers.SearchStashDB)

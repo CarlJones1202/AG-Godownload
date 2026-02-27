@@ -245,3 +245,55 @@ func LinkUnsureGallery(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gallery)
 }
+
+type ExcludeScanResultRequest struct {
+	Provider  string `json:"provider" binding:"required"`
+	SourceID  string `json:"source_id" binding:"required"`
+	SourceURL string `json:"source_url"`
+	Title     string `json:"title"`
+	Reason    string `json:"reason"`
+}
+
+// ExcludeScanResult marks a scan result as not relevant to this person
+// This prevents the same gallery from appearing in future scans
+func ExcludeScanResult(c *gin.Context) {
+	idStr := c.Param("id")
+	personID, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid person ID"})
+		return
+	}
+
+	var req ExcludeScanResultRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Verify person exists
+	var person models.Person
+	if err := database.DB.First(&person, personID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Person not found"})
+		return
+	}
+
+	// Create exclusion record
+	exclusion := models.ScanResultExclusion{
+		PersonID:  uint(personID),
+		Provider:  req.Provider,
+		SourceID:  req.SourceID,
+		SourceURL: req.SourceURL,
+		Title:     req.Title,
+		Reason:    req.Reason,
+	}
+
+	if err := database.DB.Create(&exclusion).Error; err != nil {
+		logger.Errorf("Failed to create scan result exclusion: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to exclude scan result"})
+		return
+	}
+
+	logger.Infof("Excluded scan result: person=%d, provider=%s, sourceID=%s", personID, req.Provider, req.SourceID)
+	c.JSON(http.StatusOK, exclusion)
+}
+

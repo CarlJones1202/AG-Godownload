@@ -103,6 +103,14 @@ func SearchGalleryMatches(galleryName string, people []string) ([]GallerySearchR
 		results = append(results, lifeeroticResults...)
 	}
 
+	// Search EternalDesire
+	eternaldesireResults, err := searchEternalDesire(searchQuery)
+	if err != nil {
+		logger.Warnf("EternalDesire search failed: %v", err)
+	} else {
+		results = append(results, eternaldesireResults...)
+	}
+
 	if len(results) == 0 {
 		return nil, fmt.Errorf("no matching galleries found")
 	}
@@ -130,6 +138,8 @@ func ScrapeGalleryMetadata(sourceURL string, provider string, sourceID string) (
 		return scrapeSexArtGallery(sourceURL, sourceID)
 	case "lifeerotic":
 		return scrapeLifeEroticGallery(sourceURL, sourceID)
+	case "eternaldesire":
+		return scrapeEternalDesireGallery(sourceURL, sourceID)
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", provider)
 	}
@@ -789,6 +799,145 @@ func scrapeLifeEroticGallery(urlStr, uuid string) (*GalleryMetadata, error) {
 	return metadata, nil
 }
 
+// searchEternalDesire searches EternalDesire for matching galleries using their internal API
+func searchEternalDesire(query string) ([]GallerySearchResult, error) {
+	apiURL := fmt.Sprintf("https://www.eternaldesire.com/api/search-results?searchPhrase=%s&page=1&pageSize=30&sortBy=latest-gallery", url.QueryEscape(query))
+	logger.Infof("[EternalDesire] Searching API: %s", apiURL)
+
+	client := GetHTTPClient(apiURL)
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search EternalDesire API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("EternalDesire API returned status %d", resp.StatusCode)
+	}
+
+	var apiResp struct {
+		Items []struct {
+			Item struct {
+				Name        string `json:"name"`
+				Path        string `json:"path"`
+				PublishedAt string `json:"publishedAt"`
+				Thumbnail   string `json:"thumbnailCoverPath"`
+				Models      []struct {
+					Name string `json:"name"`
+				} `json:"models"`
+			} `json:"item"`
+		} `json:"items"`
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if err := json.Unmarshal(bodyBytes, &apiResp); err != nil {
+		logger.Errorf("[EternalDesire] Failed to parse JSON: %v", err)
+		return nil, fmt.Errorf("failed to parse API JSON")
+	}
+
+	var results []GallerySearchResult
+	for _, entry := range apiResp.Items {
+		item := entry.Item
+
+		galleryURL := "https://www.eternaldesire.com" + item.Path
+		thumbURL := "https://www.eternaldesire.com" + item.Thumbnail
+
+		dateStr := item.PublishedAt
+		if len(dateStr) > 10 {
+			dateStr = dateStr[:10]
+		}
+
+		results = append(results, GallerySearchResult{
+			Provider:    "EternalDesire",
+			Title:       item.Name,
+			URL:         galleryURL,
+			Thumbnail:   thumbURL,
+			ReleaseDate: dateStr,
+		})
+	}
+
+	logger.Infof("[EternalDesire] Found %d results via API", len(results))
+	return results, nil
+}
+
+// scrapeEternalDesireGallery scrapes full metadata from an EternalDesire gallery page
+func scrapeEternalDesireGallery(urlStr, uuid string) (*GalleryMetadata, error) {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid source URL: %w", err)
+	}
+
+	pathParts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(pathParts) < 2 {
+		return nil, fmt.Errorf("invalid EternalDesire URL format, cannot extract date/name")
+	}
+
+	var galleryDate, galleryName string
+	for i, part := range pathParts {
+		if part == "gallery" && i+2 < len(pathParts) {
+			galleryDate = pathParts[i+1]
+			galleryName = pathParts[i+2]
+			break
+		}
+	}
+
+	if galleryDate == "" && len(pathParts) >= 2 {
+		galleryDate = pathParts[len(pathParts)-2]
+		galleryName = pathParts[len(pathParts)-1]
+	}
+
+	apiURL := fmt.Sprintf("https://www.eternaldesire.com/api/gallery?name=%s&date=%s", galleryName, galleryDate)
+	logger.Infof("[EternalDesire] Fetching detail API: %s", apiURL)
+
+	client := GetHTTPClient(apiURL)
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch EternalDesire gallery API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("EternalDesire gallery API returned status %d", resp.StatusCode)
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read EternalDesire response: %w", err)
+	}
+
+	var galleryDetail struct {
+		Name          string  `json:"name"`
+		Description   string  `json:"description"`
+		RatingAverage float64 `json:"ratingAverage"`
+		PublishedAt   string  `json:"publishedAt"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &galleryDetail); err != nil {
+		logger.Errorf("[EternalDesire] Failed to parse detail JSON: %v", err)
+		return nil, fmt.Errorf("failed to parse detail JSON")
+	}
+
+	metadata := &GalleryMetadata{
+		Provider:    "EternalDesire",
+		SourceURL:   urlStr,
+		Description: galleryDetail.Description,
+		Rating:      galleryDetail.RatingAverage,
+	}
+
+	if galleryDetail.PublishedAt != "" {
+		if parsed, err := time.Parse("2006-01-02T15:04:05.000Z", galleryDetail.PublishedAt); err == nil {
+			metadata.ReleaseDate = parsed
+		}
+	}
+
+	logger.Infof("Scraped EternalDesire gallery: %s (Rating: %.2f)", metadata.Description[:min(50, len(metadata.Description))], metadata.Rating)
+	return metadata, nil
+}
+
 // scrapePlayboyGallery scrapes full metadata from a Playboy gallery page
 func scrapePlayboyGallery(url string) (*GalleryMetadata, error) {
 	client := GetHTTPClient(url)
@@ -1020,7 +1169,7 @@ func searchPlayboyPlus(query string) ([]GallerySearchResult, error) {
 	// Algolia API info from their public site
 	appID := "TSMKFA364Q"
 	// Note: This key is short-lived and extracted from window.env on playboyplus.com
-	apiKey := "Mzc0ZWExYWJiMGIzMWNmYTFhYWEyZjg1Y2VjY2NlOTFiMDA4OWZlMzU3NzBkZWYzZDYzMmE3MWNhZTY5MGI2NHZhbGlkVW50aWw9MTc3MjIyODc5NyZyZXN0cmljdEluZGljZXM9YWxsJTJBJmZpbHRlcnM9c2VnbWVudCUzQXBsYXlib3lwbHVz"
+	apiKey := "MDJmMzNkZTQ5YzY1NGFkOGY5NDU1OTU5M2Y4ZGFhNDdiZDM4N2QwZjY1ZWNmODkyOWRlNzE0NjRlNTVmYzNhNnZhbGlkVW50aWw9MTc3MjIzNjk3OCZyZXN0cmljdEluZGljZXM9YWxsJTJBJmZpbHRlcnM9c2VnbWVudCUzQXBsYXlib3lwbHVz"
 	indexName := "all_photosets"
 
 	apiURL := fmt.Sprintf("https://%s-dsn.algolia.net/1/indexes/%s/query", appID, indexName)
@@ -1087,7 +1236,7 @@ func searchPlayboyPlus(query string) ([]GallerySearchResult, error) {
 // First searches for the model, then gets their galleries
 func searchPlayboyPlusByModel(modelName string) ([]GallerySearchResult, error) {
 	appID := "TSMKFA364Q"
-	apiKey := "Mzc0ZWExYWJiMGIzMWNmYTFhYWEyZjg1Y2VjY2NlOTFiMDA4OWZlMzU3NzBkZWYzZDYzMmE3MWNhZTY5MGI2NHZhbGlkVW50aWw9MTc3MjIyODc5NyZyZXN0cmljdEluZGljZXM9YWxsJTJBJmZpbHRlcnM9c2VnbWVudCUzQXBsYXlib3lwbHVz"
+	apiKey := "MDJmMzNkZTQ5YzY1NGFkOGY5NDU1OTU5M2Y4ZGFhNDdiZDM4N2QwZjY1ZWNmODkyOWRlNzE0NjRlNTVmYzNhNnZhbGlkVW50aWw9MTc3MjIzNjk3OCZyZXN0cmljdEluZGljZXM9YWxsJTJBJmZpbHRlcnM9c2VnbWVudCUzQXBsYXlib3lwbHVz"
 
 	// Step 1: Search for the model in all_actors index
 	actorsURL := fmt.Sprintf("https://%s-dsn.algolia.net/1/indexes/all_actors/query", appID)
@@ -1100,9 +1249,6 @@ func searchPlayboyPlusByModel(modelName string) ([]GallerySearchResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal actors query: %w", err)
 	}
-
-	logger.Infof("[PlayboyPlus] Step 1 - Searching actors URL: %s", actorsURL)
-	logger.Infof("[PlayboyPlus] Step 1 - Request body: %s", string(actorsBody))
 
 	client := GetHTTPClient(actorsURL)
 	req, _ := http.NewRequest("POST", actorsURL, strings.NewReader(string(actorsBody)))
@@ -1118,12 +1264,13 @@ func searchPlayboyPlusByModel(modelName string) ([]GallerySearchResult, error) {
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, _ := io.ReadAll(resp.Body)
-	logger.Infof("[PlayboyPlus] Step 1 - Response status: %d", resp.StatusCode)
-	logger.Infof("[PlayboyPlus] Step 1 - Response body: %s", string(bodyBytes))
-
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("PlayboyPlus actors search returned status %d", resp.StatusCode)
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read actors response: %w", err)
 	}
 
 	var actorsResp struct {
@@ -1138,24 +1285,17 @@ func searchPlayboyPlusByModel(modelName string) ([]GallerySearchResult, error) {
 		return nil, fmt.Errorf("failed to decode PlayboyPlus actors response: %w", err)
 	}
 
-	logger.Infof("[PlayboyPlus] Step 1 - Found %d actor hits", len(actorsResp.Hits))
-	for i, actor := range actorsResp.Hits {
-		logger.Infof("[PlayboyPlus] Step 1 - Actor %d: Name=%s, ID=%s, URLName=%s", i, actor.Name, actor.ObjectID, actor.URLName)
-	}
-
 	// Find exact match
 	var actorID string
 	for _, actor := range actorsResp.Hits {
 		// Case-insensitive exact match
 		if strings.EqualFold(actor.Name, modelName) {
 			actorID = actor.ObjectID
-			logger.Infof("[PlayboyPlus] Found exact model match: %s (ID: %s)", actor.Name, actorID)
 			break
 		}
 	}
 
 	if actorID == "" {
-		logger.Infof("[PlayboyPlus] No exact model match found for: %s", modelName)
 		return nil, nil
 	}
 
@@ -1172,9 +1312,6 @@ func searchPlayboyPlusByModel(modelName string) ([]GallerySearchResult, error) {
 		return nil, fmt.Errorf("failed to marshal galleries query: %w", err)
 	}
 
-	logger.Infof("[PlayboyPlus] Step 2 - Searching galleries URL: %s", galleriesURL)
-	logger.Infof("[PlayboyPlus] Step 2 - Request body: %s", string(galleriesBody))
-
 	req2, _ := http.NewRequest("POST", galleriesURL, strings.NewReader(string(galleriesBody)))
 	req2.Header.Set("Content-Type", "application/json")
 	req2.Header.Set("X-Algolia-Application-Id", appID)
@@ -1187,9 +1324,10 @@ func searchPlayboyPlusByModel(modelName string) ([]GallerySearchResult, error) {
 	}
 	defer resp2.Body.Close()
 
-	bodyBytes2, _ := io.ReadAll(resp2.Body)
-	logger.Infof("[PlayboyPlus] Step 2 - Response status: %d", resp2.StatusCode)
-	logger.Infof("[PlayboyPlus] Step 2 - Response body: %s", string(bodyBytes2))
+	bodyBytes2, err := io.ReadAll(resp2.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read galleries response: %w", err)
+	}
 
 	if resp2.StatusCode != 200 {
 		return nil, fmt.Errorf("PlayboyPlus galleries search returned status %d", resp2.StatusCode)
@@ -1211,11 +1349,8 @@ func searchPlayboyPlusByModel(modelName string) ([]GallerySearchResult, error) {
 		return nil, fmt.Errorf("failed to decode PlayboyPlus galleries response: %w", err)
 	}
 
-	logger.Infof("[PlayboyPlus] Step 2 - Found %d gallery hits", len(galleriesResp.Hits))
-
 	var results []GallerySearchResult
 	for _, hit := range galleriesResp.Hits {
-		logger.Infof("[PlayboyPlus] Step 2 - Gallery: Title=%s, ID=%s", hit.Title, hit.ObjectID)
 		results = append(results, GallerySearchResult{
 			Provider:    "PlayboyPlus",
 			Title:       hit.Title,
@@ -1226,7 +1361,6 @@ func searchPlayboyPlusByModel(modelName string) ([]GallerySearchResult, error) {
 		})
 	}
 
-	logger.Infof("[PlayboyPlus] Found %d galleries for model %s", len(results), modelName)
 	return results, nil
 }
 
@@ -1327,6 +1461,15 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 			}
 			allResults = append(allResults, results...)
 		}
+	case "eternaldesire":
+		for _, term := range searchTerms {
+			results, err := searchEternalDesire(term)
+			if err != nil {
+				logger.Warnf("EternalDesire search failed for term %s: %v", term, err)
+				continue
+			}
+			allResults = append(allResults, results...)
+		}
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", provider)
 	}
@@ -1396,10 +1539,38 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 		}
 	}
 
+	// Query exclusions for this person and provider
+	var exclusions []models.ScanResultExclusion
+	if err := database.DB.Where("person_id = ? AND provider = ?", personID, provider).Find(&exclusions).Error; err != nil {
+		logger.Warnf("Failed to query exclusions for person %d, provider %s: %v", personID, provider, err)
+		// Continue anyway - exclusions are a nice-to-have filter
+		exclusions = []models.ScanResultExclusion{}
+	}
+
+	// Build set of excluded SourceIDs for fast lookup
+	excludedSourceIDs := make(map[string]bool)
+	for _, exclusion := range exclusions {
+		if exclusion.SourceID != "" {
+			excludedSourceIDs[exclusion.SourceID] = true
+		}
+	}
+
 	var missingGalleries []GallerySearchResult
 	var unsureGalleries []GallerySearchResult
 
 	for _, rs := range resultsWithStatus {
+		// Skip if this result matches an exclusion
+		if rs.result.SourceID != "" && excludedSourceIDs[rs.result.SourceID] {
+			logger.Debugf("Skipping excluded gallery: %s (SourceID: %s)", rs.result.Title, rs.result.SourceID)
+			// Decrement counts since we're filtering this out
+			if rs.status == statusExisting {
+				existingCount--
+			} else if rs.status == statusUnsure {
+				unsureCount--
+			}
+			continue
+		}
+
 		if rs.status == statusMissing {
 			missingGalleries = append(missingGalleries, rs.result)
 		} else if rs.status == statusUnsure {
@@ -1487,7 +1658,7 @@ func scrapePlayboyPlusGallery(urlStr string) (*GalleryMetadata, error) {
 
 	// Query Algolia for this specific object
 	appID := "TSMKFA364Q"
-	apiKey := "MWU2MzkyY2ZhNzdhZDA1MzFjNDFjNTRhYjczYTM2MDNlNTQ5Yzc0NGE2MzYzYWVkZTQyYzJiYWNhYzU0ZDhkN3ZhbGlkVW50aWw9MTc2OTU2MTU1NSZyZXN0cmljdEluZGljZXM9YWxsJTJBJmZpbHRlcnM9c2VnbWVudCUzQXBsYXlib3lwbHVz"
+	apiKey := "MDJmMzNkZTQ5YzY1NGFkOGY5NDU1OTU5M2Y4ZGFhNDdiZDM4N2QwZjY1ZWNmODkyOWRlNzE0NjRlNTVmYzNhNnZhbGlkVW50aWw9MTc3MjIzNjk3OCZyZXN0cmljdEluZGljZXM9YWxsJTJBJmZpbHRlcnM9c2VnbWVudCUzQXBsYXlib3lwbHVz"
 	indexName := "all_photosets"
 
 	apiURL := fmt.Sprintf("https://%s-dsn.algolia.net/1/indexes/%s/%s", appID, indexName, objectID)

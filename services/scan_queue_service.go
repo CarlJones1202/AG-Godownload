@@ -216,3 +216,60 @@ func StartDailyScanScheduler() {
 	c.Start()
 	logger.Info("Daily scan scheduler started (runs at 3 AM)")
 }
+
+// CleanupDuplicateScans removes duplicate scan results for the same person+provider combination
+// Keeps only the most recent completed scan and removes any pending/processing ones
+func CleanupDuplicateScans() error {
+	logger.Info("Cleaning up duplicate scan results...")
+
+	var allScans []models.PersonScanQueue
+	if err := database.DB.Find(&allScans).Error; err != nil {
+		return fmt.Errorf("failed to fetch scans: %w", err)
+	}
+
+	// Group scans by (person_id, provider)
+	type scanKey struct {
+		personID uint
+		provider string
+	}
+	scansByKey := make(map[scanKey][]models.PersonScanQueue)
+
+	for _, scan := range allScans {
+		key := scanKey{personID: scan.PersonID, provider: scan.Provider}
+		scansByKey[key] = append(scansByKey[key], scan)
+	}
+
+	deletedCount := 0
+
+	// For each (person_id, provider) pair, keep only the most recent scan
+	for _, scans := range scansByKey {
+		if len(scans) <= 1 {
+			continue // No duplicates for this pair
+		}
+
+		// Sort by created_at descending to find the most recent
+		// Note: GORM returns results sorted by default, but let's be explicit
+		var mostRecent *models.PersonScanQueue
+		for i := range scans {
+			if mostRecent == nil || scans[i].CreatedAt.After(mostRecent.CreatedAt) {
+				mostRecent = &scans[i]
+			}
+		}
+
+		// Delete all other scans
+		for i := range scans {
+			if scans[i].ID != mostRecent.ID {
+				if err := database.DB.Delete(&scans[i]).Error; err != nil {
+					logger.Warnf("Failed to delete duplicate scan %d: %v", scans[i].ID, err)
+				} else {
+					deletedCount++
+					logger.Debugf("Deleted duplicate scan %d (person=%d, provider=%s, kept scan %d)",
+						scans[i].ID, scans[i].PersonID, scans[i].Provider, mostRecent.ID)
+				}
+			}
+		}
+	}
+
+	logger.Infof("Cleanup complete: deleted %d duplicate scans", deletedCount)
+	return nil
+}

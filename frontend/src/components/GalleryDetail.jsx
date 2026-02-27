@@ -243,6 +243,8 @@ function GalleryDetail() {
             provider = 'SexArt'
         } else if (lowerUrl.includes('thelifeerotic.com')) {
             provider = 'LifeErotic'
+        } else if (lowerUrl.includes('eternaldesire.com')) {
+            provider = 'EternalDesire'
         } else if (lowerUrl.includes('metart.com')) {
             provider = 'MetArt'
         } else if (lowerUrl.includes('metartx.com')) {

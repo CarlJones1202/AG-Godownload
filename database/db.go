@@ -32,6 +32,7 @@ func Migrate() {
 		&models.PersonExclusion{},
 		&models.PersonProviderAlias{},
 		&models.PersonScanQueue{},
+		&models.ScanResultExclusion{},
 		&models.Tag{},
 	)
 	if err != nil {

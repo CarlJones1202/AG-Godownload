@@ -4,6 +4,9 @@
     margin-bottom: 2rem;
     padding: 1rem 0;
     border-bottom: 1px solid var(--color-border-subtle);
+    display: flex;
+    flex-direction: column;
+    width: 100%;
 }
 
 .provider-aliases-header {
@@ -31,6 +34,13 @@
 .provider-aliases-loading {
     color: var(--color-text-tertiary);
     font-size: 0.85rem;
+}
+
+.provider-aliases-list {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 1rem !important;
+    width: 100% !important;
 }
 
 .scan-result {
@@ -93,9 +103,10 @@
 
 .gallery-cards-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, 100px);
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
     gap: var(--spacing-sm);
-    justify-content: flex-start;
+    width: 100%;
+    overflow: visible;
 }
 
 /* Missing Gallery Card */
@@ -124,6 +135,7 @@
     position: relative;
     display: flex;
     flex-direction: column;
+    width: 100%;
 }
 
 .unsure-gallery-card {
@@ -144,6 +156,14 @@
 .unsure-gallery-card:hover {
     border-color: var(--color-border-primary);
     box-shadow: var(--shadow-sm);
+}
+
+/* Missing Gallery Card Wrapper */
+.missing-gallery-card-wrapper {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
 }
 
 .gallery-thumbnail {
@@ -231,6 +251,46 @@
 }
 
 .link-gallery-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Reject Button for Missing and Unsure Galleries */
+.reject-gallery-btn {
+    position: absolute;
+    bottom: 0.25rem;
+    left: 0.25rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-secondary);
+    color: var(--color-text-secondary);
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    opacity: 0;
+    transition: all var(--transition-fast);
+    border: 1px solid var(--color-border-subtle);
+    box-shadow: var(--shadow-sm);
+}
+
+.missing-gallery-card-wrapper:hover .reject-gallery-btn,
+.unsure-gallery-card-wrapper:hover .reject-gallery-btn {
+    opacity: 1;
+}
+
+.reject-gallery-btn:hover {
+    background: var(--color-accent-danger, #ef4444);
+    color: white;
+    border-color: var(--color-accent-danger, #ef4444);
+}
+
+.reject-gallery-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
 }

@@ -232,7 +232,6 @@
     color: inherit;
     display: flex;
     flex-direction: column;
-    height: 100%;
 }
 
 .gallery-card:hover {
@@ -297,7 +296,6 @@
 
 .gallery-info {
     padding: var(--spacing-md);
-    flex: 1;
     display: flex;
     flex-direction: column;
 }

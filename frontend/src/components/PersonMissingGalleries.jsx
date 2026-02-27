@@ -6,6 +6,7 @@ function PersonMissingGalleries({ personId, onScanComplete }) {
   const [loading, setLoading] = useState(true)
   const [scanning, setScanning] = useState(false)
   const [adding, setAdding] = useState({}) // track which galleries are being added
+  const [excluding, setExcluding] = useState({}) // track which galleries are being excluded
 
   const fetchScans = async () => {
     try {
@@ -45,6 +46,28 @@ function PersonMissingGalleries({ personId, onScanComplete }) {
   const linkUnsureGallery = async (gallery, provider, scanId) => {
     const key = `${provider}-unsure-${gallery.url}`
     setAdding(prev => ({ ...prev, [key]: true }))
+    
+    // Optimistically remove the gallery from the unsure list
+    setScans(prevScans =>
+      prevScans.map(scan => {
+        if (scan.id === scanId) {
+          const results = scan.results || {}
+          const unsureGalleries = results.unsure_galleries || []
+          return {
+            ...scan,
+            results: {
+              ...results,
+              unsure_count: unsureGalleries.length - 1,
+              unsure_galleries: unsureGalleries.filter(
+                g => g.url !== gallery.url
+              )
+            }
+          }
+        }
+        return scan
+      })
+    )
+
     try {
       const res = await fetch(`/api/people/${personId}/link-unsure-gallery`, {
         method: 'POST',
@@ -55,16 +78,74 @@ function PersonMissingGalleries({ personId, onScanComplete }) {
           source_url: gallery.url
         })
       })
-      if (res.ok) {
-        // Refresh scans to get updated state after linking
-        await fetchScans()
-        // Notify parent that something changed
-        if (onScanComplete) onScanComplete()
+      if (!res.ok) {
+        console.error('Failed to link gallery')
       }
     } catch (err) {
       console.error('Failed to link gallery:', err)
     } finally {
       setAdding(prev => ({ ...prev, [key]: false }))
+    }
+  }
+
+  const excludeScanResult = async (gallery, provider, scanId, isUnsure) => {
+    const key = `${provider}-${isUnsure ? 'unsure' : 'missing'}-${gallery.url}`
+    setExcluding(prev => ({ ...prev, [key]: true }))
+    
+    // Optimistically remove the gallery from the list
+    setScans(prevScans =>
+      prevScans.map(scan => {
+        if (scan.id === scanId) {
+          const results = scan.results || {}
+          if (isUnsure) {
+            const unsureGalleries = results.unsure_galleries || []
+            return {
+              ...scan,
+              results: {
+                ...results,
+                unsure_count: unsureGalleries.length - 1,
+                unsure_galleries: unsureGalleries.filter(
+                  g => g.url !== gallery.url
+                )
+              }
+            }
+          } else {
+            const missingGalleries = results.missing_galleries || []
+            return {
+              ...scan,
+              results: {
+                ...results,
+                missing_count: missingGalleries.length - 1,
+                missing_galleries: missingGalleries.filter(
+                  g => g.url !== gallery.url
+                )
+              }
+            }
+          }
+        }
+        return scan
+      })
+    )
+
+    try {
+      const res = await fetch(`/api/people/${personId}/exclude-scan-result`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: provider,
+          source_id: gallery.source_id,
+          source_url: gallery.url,
+          title: gallery.title,
+          reason: 'rejected_by_user'
+        })
+      })
+      if (!res.ok) {
+        console.error('Failed to exclude gallery')
+      }
+    } catch (err) {
+      console.error('Failed to exclude gallery:', err)
+    } finally {
+      setExcluding(prev => ({ ...prev, [key]: false }))
     }
   }
 
@@ -114,26 +195,41 @@ function PersonMissingGalleries({ personId, onScanComplete }) {
                   <div className="missing-galleries">
                     <h4>Missing ({missing.length})</h4>
                     <div className="gallery-cards-grid">
-                      {missing.map((g, i) => (
-                        <a 
-                          key={i}
-                          href={g.url} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="missing-gallery-card"
-                        >
-                          <div className="gallery-thumbnail">
-                            {g.thumbnail ? (
-                              <img src={g.thumbnail} alt={g.title} />
-                            ) : (
-                              <div className="no-image">No Thumbnail</div>
-                            )}
+                      {missing.map((g, i) => {
+                        const key = `${scan.provider}-missing-${g.url}`
+                        return (
+                          <div
+                            key={i}
+                            className="missing-gallery-card-wrapper"
+                          >
+                            <a 
+                              href={g.url} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="missing-gallery-card"
+                            >
+                              <div className="gallery-thumbnail">
+                                {g.thumbnail ? (
+                                  <img src={g.thumbnail} alt={g.title} />
+                                ) : (
+                                  <div className="no-image">No Thumbnail</div>
+                                )}
+                              </div>
+                              <div className="gallery-info">
+                                <h3>{g.title}</h3>
+                              </div>
+                            </a>
+                            <button 
+                              className="reject-gallery-btn"
+                              onClick={() => excludeScanResult(g, scan.provider, scan.id, false)}
+                              disabled={excluding[key]}
+                              title="Reject this result"
+                            >
+                              {excluding[key] ? '...' : '✕'}
+                            </button>
                           </div>
-                          <div className="gallery-info">
-                            <h3>{g.title}</h3>
-                          </div>
-                        </a>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
                 )}
@@ -143,7 +239,8 @@ function PersonMissingGalleries({ personId, onScanComplete }) {
                     <h4>Unsure ({unsure.length})</h4>
                     <div className="gallery-cards-grid">
                       {unsure.map((g, i) => {
-                        const key = `${scan.provider}-unsure-${g.url}`
+                        const linkKey = `${scan.provider}-unsure-${g.url}`
+                        const rejectKey = `${scan.provider}-unsure-reject-${g.url}`
                         return (
                           <div 
                             key={i}
@@ -169,10 +266,18 @@ function PersonMissingGalleries({ personId, onScanComplete }) {
                             <button 
                               className="link-gallery-btn"
                               onClick={() => linkUnsureGallery(g, scan.provider, scan.id)}
-                              disabled={adding[key]}
+                              disabled={adding[linkKey]}
                               title="Link to this person"
                             >
-                              {adding[key] ? '...' : '→'}
+                              {adding[linkKey] ? '...' : '→'}
+                            </button>
+                            <button 
+                              className="reject-gallery-btn"
+                              onClick={() => excludeScanResult(g, scan.provider, scan.id, true)}
+                              disabled={excluding[rejectKey]}
+                              title="Reject this result"
+                            >
+                              {excluding[rejectKey] ? '...' : '✕'}
                             </button>
                           </div>
                         )
