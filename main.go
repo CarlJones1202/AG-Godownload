@@ -37,22 +37,21 @@ func main() {
 	// 	logger.Warn("Image migration had errors:", err)
 	// }
 
-	// Run startup verification
+	// Run startup verification tasks concurrently
 	go func() {
-		// WireGuard test removed as it is now redundant with API integration
-
 		logger.Info("Starting migration for missing provider thumbnails...")
 		if err := services.MigrateMissingProviderThumbnails(); err != nil {
 			logger.Error("Provider thumbnail migration failed:", err)
 		}
 
-		// Validate existing provider thumbnails on startup and attempt fixes
 		if valid, fixed, err := services.ValidateProviderThumbnails(); err != nil {
 			logger.Error("Provider thumbnail validation failed:", err)
 		} else {
 			logger.Infof("Provider thumbnail validation: %d valid, %d fixed/updated", valid, fixed)
 		}
+	}()
 
+	go func() {
 		logger.Info("Starting background verification of downloaded images...")
 		if err := services.RemoveDuplicateImages(); err != nil {
 			logger.Error("Duplicate image removal failed:", err)
@@ -63,19 +62,25 @@ func main() {
 		} else {
 			logger.Info("Background verification completed successfully")
 		}
+	}()
 
+	go func() {
 		logger.Info("Starting scanning for missing video metadata...")
 		if err := services.ScanMissingMetadata(database.DB, false); err != nil {
 			logger.Error("Video metadata scan failed:", err)
 		} else {
 			logger.Info("Video metadata scan completed successfully")
 		}
+	}()
 
+	go func() {
 		logger.Info("Starting background verification of person images...")
 		if err := services.VerifyPersonImages(); err != nil {
 			logger.Error("Person image verification failed:", err)
 		}
+	}()
 
+	go func() {
 		logger.Info("Starting background verification of videos...")
 		if err := services.VerifyDownloadedVideos(); err != nil {
 			logger.Error("Video verification failed:", err)
@@ -151,6 +156,9 @@ func main() {
 	r.POST("/people/:id/link-found-gallery", handlers.LinkFoundGallery)
 	r.POST("/people/:id/link-unsure-gallery", handlers.LinkUnsureGallery)
 	r.POST("/people/:id/exclude-scan-result", handlers.ExcludeScanResult)
+
+	// Admin: all missing galleries across all people
+	r.GET("/admin/missing-galleries", handlers.GetAllMissingGalleries)
 
 	// Old StashDB routes (kept for backward compatibility)
 	r.GET("/stashdb/search", handlers.SearchStashDB)

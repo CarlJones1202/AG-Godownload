@@ -1,0 +1,212 @@
+.admin-missing-galleries {
+  padding: 1.5rem;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.admin-header {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.admin-header h2 {
+  margin: 0 0 1rem 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.admin-filters {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.admin-search {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  min-width: 240px;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+.admin-search:focus {
+  outline: none;
+  border-color: var(--color-accent-primary);
+  box-shadow: var(--focus-ring);
+}
+
+.admin-select {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.admin-select:focus {
+  outline: none;
+  border-color: var(--color-accent-primary);
+}
+
+.admin-count {
+  padding: 0.35rem 0.75rem;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.admin-loading,
+.admin-empty {
+  text-align: center;
+  padding: 4rem 2rem;
+  color: var(--color-text-tertiary);
+  font-size: 0.9rem;
+}
+
+.admin-person-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.admin-person-section {
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-lg);
+  padding: 1rem;
+}
+
+.admin-person-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.admin-person-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.admin-person-link {
+  background: none;
+  border: none;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-accent-primary);
+  cursor: pointer;
+  padding: 0;
+}
+
+.admin-person-link:hover {
+  text-decoration: underline;
+}
+
+.admin-provider-tag {
+  padding: 0.15rem 0.5rem;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.admin-alias-tag {
+  padding: 0.15rem 0.5rem;
+  background: #fef3c7;
+  color: #92400e;
+  border-radius: var(--radius-sm);
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.admin-person-stats {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+}
+
+.stat-found {
+  color: var(--color-accent-success);
+  font-weight: 500;
+}
+
+.stat-missing {
+  color: var(--color-accent-danger);
+  font-weight: 500;
+}
+
+.gallery-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 180px));
+  gap: var(--spacing-sm);
+  width: 100%;
+  justify-content: start;
+  align-items: start;
+}
+
+.gallery-card-grid-item {
+  position: relative;
+  width: 100%;
+}
+
+.admin-view-person-btn {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  font-size: 0.9rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), background var(--transition-fast);
+}
+
+.gallery-card-grid-item:hover .admin-view-person-btn {
+  opacity: 1;
+}
+
+.admin-view-person-btn:hover {
+  background: var(--color-accent-primary);
+}
+
+@media (max-width: 768px) {
+  .admin-filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .admin-search {
+    min-width: 100%;
+  }
+  
+  .admin-header {
+    margin-bottom: 1rem;
+  }
+  
+  .admin-person-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+}

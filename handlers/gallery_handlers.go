@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"gallery_api/database"
+	"gallery_api/logger"
 	"gallery_api/models"
 	"gallery_api/services"
 	"net/http"
@@ -24,6 +25,18 @@ func CreateGallery(c *gin.Context) {
 	if err := database.DB.Create(&gallery).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create gallery"})
 		return
+	}
+
+	// Try to auto-link to people based on source name
+	autoLinkPeopleToGallery(gallery.Name, gallery.ID)
+
+	// Check if this gallery matches any missing galleries from person scans
+	if gallery.Provider != "" && gallery.SourceURL != "" {
+		if linkedIDs, err := services.CheckAndLinkFoundGallery(gallery.SourceURL, gallery.Name, gallery.Provider); err != nil {
+			logger.Warnf("Failed to check for missing gallery matches: %v", err)
+		} else if len(linkedIDs) > 0 {
+			logger.Infof("Gallery %s auto-linked to %d people via missing gallery check", gallery.Name, len(linkedIDs))
+		}
 	}
 
 	c.JSON(http.StatusCreated, gallery)

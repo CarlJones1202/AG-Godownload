@@ -273,3 +273,113 @@ func CleanupDuplicateScans() error {
 	logger.Infof("Cleanup complete: deleted %d duplicate scans", deletedCount)
 	return nil
 }
+
+// CheckAndLinkFoundGallery checks if a newly downloaded gallery matches any missing galleries
+// from person scans, and if so, links it to the appropriate person
+func CheckAndLinkFoundGallery(galleryURL string, galleryName string, provider string) ([]uint, error) {
+	if galleryURL == "" {
+		return nil, nil
+	}
+
+	// Find all completed scans that have this provider
+	var scans []models.PersonScanQueue
+	if err := database.DB.Where("status = ? AND provider = ?", models.ScanStatusCompleted, provider).
+		Find(&scans).Error; err != nil {
+		return nil, err
+	}
+
+	linkedPersonIDs := make([]uint, 0)
+
+	for _, scan := range scans {
+		if scan.Results == "" {
+			continue
+		}
+
+		var results map[string]interface{}
+		if err := json.Unmarshal([]byte(scan.Results), &results); err != nil {
+			continue
+		}
+
+		missingGalleries, ok := results["missing_galleries"].([]interface{})
+		if !ok {
+			continue
+		}
+
+		matched := false
+		for _, g := range missingGalleries {
+			gMap, ok := g.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			missingURL, _ := gMap["url"].(string)
+			if missingURL == galleryURL {
+				matched = true
+				break
+			}
+		}
+
+		if matched {
+			// Get the person
+			var person models.Person
+			if err := database.DB.First(&person, scan.PersonID).Error; err != nil {
+				continue
+			}
+
+			// Find existing gallery by URL
+			var gallery models.Gallery
+			findByURL := database.DB.Where("source_url = ?", galleryURL).First(&gallery)
+			if findByURL.Error != nil {
+				// Gallery doesn't exist in DB yet - create it
+				gallery = models.Gallery{
+					Name:      galleryName,
+					Provider:  provider,
+					SourceURL: galleryURL,
+				}
+				if err := database.DB.Create(&gallery).Error; err != nil {
+					logger.Warnf("Failed to create gallery for linking: %v", err)
+					continue
+				}
+			}
+
+			// Check if already linked to this person using direct table query
+			var exists int64
+			database.DB.Table("person_galleries").
+				Where("person_id = ? AND gallery_id = ?", person.ID, gallery.ID).
+				Count(&exists)
+			if exists > 0 {
+				// Already linked, just create exclusion
+				exclusion := models.ScanResultExclusion{
+					PersonID:  scan.PersonID,
+					Provider:  provider,
+					SourceURL: galleryURL,
+					Title:     galleryName,
+					Reason:    "auto-linked",
+				}
+				database.DB.Create(&exclusion)
+				continue
+			}
+
+			// Link gallery to person using GORM association
+			if err := database.DB.Model(&person).Association("Galleries").Append(&gallery).Error; err != nil {
+				logger.Warnf("Failed to link gallery %d to person %d: %v", gallery.ID, person.ID, err)
+				continue
+			}
+
+			// Create exclusion to prevent this from showing as missing again
+			exclusion := models.ScanResultExclusion{
+				PersonID:  scan.PersonID,
+				Provider:  provider,
+				SourceURL: galleryURL,
+				Title:     galleryName,
+				Reason:    "auto-linked",
+			}
+			database.DB.Create(&exclusion)
+
+			linkedPersonIDs = append(linkedPersonIDs, person.ID)
+			logger.Infof("Auto-linked gallery %s to person %s (ID: %d)", galleryURL, person.Name, person.ID)
+		}
+	}
+
+	return linkedPersonIDs, nil
+}

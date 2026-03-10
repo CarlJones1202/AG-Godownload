@@ -184,6 +184,7 @@ func CrawlSource(sourceID uint) error {
 	// Use atomic counters for progress tracking
 	var downloadedCount int32
 	var processedCount int32
+	var lastDBUpdate int32
 
 	selection.Each(func(i int, s *goquery.Selection) {
 		// Find images inside this div - look for <a> tags containing <img>
@@ -213,12 +214,22 @@ func CrawlSource(sourceID uint) error {
 					if totalImageLinks > 0 {
 						progress := int((float64(newProcessed) / float64(totalImageLinks)) * 100)
 						downloaded := atomic.LoadInt32(&downloadedCount)
-						// Update DB periodically or on completion
-						database.DB.Model(&source).Updates(map[string]interface{}{
-							"downloaded_items":  downloaded,
-							"download_progress": progress,
-						})
 						UpdateCrawlerProgress(source.ID, progress, int(downloaded), totalImageLinks)
+
+						// Only update DB every 10 images or when complete
+						shouldUpdateDB := newProcessed == int32(totalImageLinks) // Always update on completion
+						if !shouldUpdateDB {
+							currentUpdate := atomic.LoadInt32(&lastDBUpdate)
+							if newProcessed-currentUpdate >= 10 {
+								atomic.CompareAndSwapInt32(&lastDBUpdate, currentUpdate, newProcessed)
+								shouldUpdateDB = true
+							}
+						}
+						if shouldUpdateDB {
+							// Use raw SQL to bypass soft delete check for faster updates
+							database.DB.Exec("UPDATE sources SET download_progress = ?, downloaded_items = ? WHERE id = ?",
+								progress, downloaded, source.ID)
+						}
 					}
 				}()
 
@@ -424,6 +435,16 @@ func CrawlSource(sourceID uint) error {
 		"downloaded_items":  0,
 		"total_items":       0,
 	})
+
+	// Auto-link gallery to people if it matches missing galleries from scans
+	if gallery.SourceURL != "" {
+		if linkedIDs, err := CheckAndLinkFoundGallery(gallery.SourceURL, gallery.Name, gallery.Provider); err != nil {
+			logger.Warnf("Failed to check for missing gallery matches: %v", err)
+		} else if len(linkedIDs) > 0 {
+			logger.Infof("Gallery %s auto-linked to %d people", gallery.Name, len(linkedIDs))
+		}
+	}
+
 	return nil
 }
 

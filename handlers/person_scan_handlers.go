@@ -296,3 +296,99 @@ func ExcludeScanResult(c *gin.Context) {
 	logger.Infof("Excluded scan result: person=%d, provider=%s, sourceID=%s", personID, req.Provider, req.SourceID)
 	c.JSON(http.StatusOK, exclusion)
 }
+
+type AllMissingGalleriesResponse struct {
+	PersonID    uint   `json:"person_id"`
+	PersonName  string `json:"person_name"`
+	Provider    string `json:"provider"`
+	Alias       string `json:"alias"`
+	GalleryURL  string `json:"gallery_url"`
+	GalleryName string `json:"gallery_name"`
+	Thumbnail   string `json:"thumbnail"`
+	FoundCount  int    `json:"found_count"`
+	MissingCount int   `json:"missing_count"`
+}
+
+func GetAllMissingGalleries(c *gin.Context) {
+	var scans []models.PersonScanQueue
+	if err := database.DB.Where("status = ?", models.ScanStatusCompleted).
+		Order("created_at DESC").
+		Find(&scans).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch scan results"})
+		return
+	}
+
+	type personKey struct {
+		personID uint
+		provider string
+	}
+	latestScans := make(map[personKey]*models.PersonScanQueue)
+
+	for i := range scans {
+		key := personKey{personID: scans[i].PersonID, provider: scans[i].Provider}
+		if _, exists := latestScans[key]; !exists {
+			latestScans[key] = &scans[i]
+		}
+	}
+
+	var response []AllMissingGalleriesResponse
+
+	for _, scan := range latestScans {
+		if scan.Results == "" {
+			continue
+		}
+
+		var results map[string]interface{}
+		if err := json.Unmarshal([]byte(scan.Results), &results); err != nil {
+			continue
+		}
+
+		missingGalleries, ok := results["missing_galleries"].([]interface{})
+		if !ok || len(missingGalleries) == 0 {
+			continue
+		}
+
+		personName := "Unknown Person"
+		var person models.Person
+		if err := database.DB.First(&person, scan.PersonID).Error; err == nil {
+			personName = person.Name
+		}
+
+		foundCount, _ := results["found_count"].(float64)
+		missingCount, _ := results["missing_count"].(float64)
+
+		for _, g := range missingGalleries {
+			gMap, ok := g.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			url, _ := gMap["url"].(string)
+			title, _ := gMap["title"].(string)
+			thumbnail, _ := gMap["thumbnail"].(string)
+
+			if url == "" {
+				continue
+			}
+
+			// Fallback for missing title
+			if title == "" {
+				title = "Untitled"
+			}
+
+			response = append(response, AllMissingGalleriesResponse{
+				PersonID:     scan.PersonID,
+				PersonName:   personName,
+				Provider:     scan.Provider,
+				Alias:        scan.Alias,
+				GalleryURL:   url,
+				GalleryName:  title,
+				Thumbnail:    thumbnail,
+				FoundCount:   int(foundCount),
+				MissingCount: int(missingCount),
+			})
+		}
+	}
+
+	c.JSON(http.StatusOK, response)
+}

@@ -9,6 +9,7 @@ import PersonList from './components/PersonList'
 import PersonDetail from './components/PersonDetail'
 import SearchBar from './components/SearchBar'
 import GalleryDetail from './components/GalleryDetail'
+import AdminMissingGalleries from './components/AdminMissingGalleries'
 
 function App() {
     const location = useLocation()
@@ -364,6 +365,12 @@ function App() {
                     >
                         People
                     </NavLink>
+                    <NavLink
+                        to="/admin/missing-galleries"
+                        className={({ isActive }) => isActive ? 'active' : ''}
+                    >
+                        Admin
+                    </NavLink>
                 </nav>
             </header>
 
@@ -462,6 +469,7 @@ function App() {
                             />
                         } />
                         <Route path="/people/:id" element={<PersonDetail />} />
+                        <Route path="/admin/missing-galleries" element={<AdminMissingGalleries />} />
                     </Routes>
                 )}
             </main>
