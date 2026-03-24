@@ -386,13 +386,19 @@ func CheckAndLinkFoundGallery(galleryURL string, galleryName string, provider st
 
 // CheckAndLinkMissingGalleriesByName checks if a newly added gallery matches any missing galleries
 // from person scans by name (across ALL providers), and if so, links it and marks as unsure
-func CheckAndLinkMissingGalleriesByName(galleryName string, linkedPersonIDs []uint) ([]uint, error) {
+func CheckAndLinkMissingGalleriesByName(galleryID uint, galleryName string, linkedPersonIDs []uint) ([]uint, error) {
 	if galleryName == "" || len(linkedPersonIDs) == 0 {
 		return nil, nil
 	}
 
 	normalizedName := normalizeGalleryName(galleryName)
 	if normalizedName == "" {
+		return nil, nil
+	}
+
+	var gallery models.Gallery
+	if err := database.DB.First(&gallery, galleryID).Error; err != nil {
+		logger.Warnf("Gallery not found: %d", galleryID)
 		return nil, nil
 	}
 
@@ -447,16 +453,16 @@ func CheckAndLinkMissingGalleriesByName(galleryName string, linkedPersonIDs []ui
 			missingURL, _ := matchedGallery["url"].(string)
 			missingTitle, _ := matchedGallery["title"].(string)
 
-			gallery := models.Gallery{
-				Name:      galleryName,
-				Provider:  scan.Provider,
-				SourceURL: missingURL,
-			}
-			if err := database.DB.Create(&gallery).Error; err != nil {
-				logger.Warnf("Failed to create gallery for unsure linking: %v", err)
+			// Check if already linked to this person
+			var exists int64
+			database.DB.Table("person_galleries").
+				Where("person_id = ? AND gallery_id = ?", person.ID, gallery.ID).
+				Count(&exists)
+			if exists > 0 {
 				continue
 			}
 
+			// Link the existing gallery to the person
 			if err := database.DB.Model(&person).Association("Galleries").Append(&gallery).Error; err != nil {
 				logger.Warnf("Failed to link unsure gallery %d to person %d: %v", gallery.ID, person.ID, err)
 				continue

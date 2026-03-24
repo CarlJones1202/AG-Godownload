@@ -184,7 +184,51 @@ func CrawlSource(sourceID uint) error {
 	// Use atomic counters for progress tracking
 	var downloadedCount int32
 	var processedCount int32
-	var lastDBUpdate int32
+
+	// Batch progress updates to reduce DB contention
+	type progressUpdate struct {
+		sourceID   uint
+		progress   int
+		downloaded int
+		totalItems int
+		isComplete bool
+	}
+
+	progressChan := make(chan progressUpdate, 100)
+	var wgProgress sync.WaitGroup
+	wgProgress.Add(1)
+
+	// Background goroutine to batch and flush progress updates
+	go func() {
+		defer wgProgress.Done()
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		latestProgress := make(map[uint]progressUpdate)
+		flush := func() {
+			if len(latestProgress) == 0 {
+				return
+			}
+			for _, update := range latestProgress {
+				database.DB.Exec("UPDATE sources SET download_progress = ?, downloaded_items = ? WHERE id = ?",
+					update.progress, update.downloaded, update.sourceID)
+			}
+			latestProgress = make(map[uint]progressUpdate)
+		}
+
+		for {
+			select {
+			case update := <-progressChan:
+				latestProgress[update.sourceID] = update
+				if update.isComplete {
+					flush()
+					return
+				}
+			case <-ticker.C:
+				flush()
+			}
+		}
+	}()
 
 	selection.Each(func(i int, s *goquery.Selection) {
 		// Find images inside this div - look for <a> tags containing <img>
@@ -216,19 +260,17 @@ func CrawlSource(sourceID uint) error {
 						downloaded := atomic.LoadInt32(&downloadedCount)
 						UpdateCrawlerProgress(source.ID, progress, int(downloaded), totalImageLinks)
 
-						// Only update DB every 10 images or when complete
-						shouldUpdateDB := newProcessed == int32(totalImageLinks) // Always update on completion
-						if !shouldUpdateDB {
-							currentUpdate := atomic.LoadInt32(&lastDBUpdate)
-							if newProcessed-currentUpdate >= 10 {
-								atomic.CompareAndSwapInt32(&lastDBUpdate, currentUpdate, newProcessed)
-								shouldUpdateDB = true
-							}
-						}
-						if shouldUpdateDB {
-							// Use raw SQL to bypass soft delete check for faster updates
-							database.DB.Exec("UPDATE sources SET download_progress = ?, downloaded_items = ? WHERE id = ?",
-								progress, downloaded, source.ID)
+						// Send progress update to batched background handler
+						isComplete := newProcessed == int32(totalImageLinks)
+						select {
+						case progressChan <- progressUpdate{
+							sourceID:   source.ID,
+							progress:   progress,
+							downloaded: int(downloaded),
+							isComplete: isComplete,
+						}:
+						default:
+							// Channel full, skip update
 						}
 					}
 				}()
@@ -370,6 +412,9 @@ func CrawlSource(sourceID uint) error {
 
 	// Wait for all downloads to complete
 	wg.Wait()
+
+	// Wait for progress updater to finish
+	wgProgress.Wait()
 
 	// Batch insert all images
 	if len(imagesToInsert) > 0 {

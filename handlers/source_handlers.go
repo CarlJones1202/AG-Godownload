@@ -51,7 +51,7 @@ func CreateSource(c *gin.Context) {
 
 	// Check if this gallery matches any missing galleries by name (across all providers)
 	if len(linkedPersonIDs) > 0 {
-		if _, err := services.CheckAndLinkMissingGalleriesByName(source.Name, linkedPersonIDs); err != nil {
+		if _, err := services.CheckAndLinkMissingGalleriesByName(gallery.ID, source.Name, linkedPersonIDs); err != nil {
 			logger.Warnf("Failed to check for missing gallery matches: %v", err)
 		}
 	}

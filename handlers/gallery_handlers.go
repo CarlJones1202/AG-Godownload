@@ -32,7 +32,7 @@ func CreateGallery(c *gin.Context) {
 
 	// Check if this gallery matches any missing galleries by name (across all providers)
 	if len(linkedPersonIDs) > 0 {
-		if _, err := services.CheckAndLinkMissingGalleriesByName(gallery.Name, linkedPersonIDs); err != nil {
+		if _, err := services.CheckAndLinkMissingGalleriesByName(gallery.ID, gallery.Name, linkedPersonIDs); err != nil {
 			logger.Warnf("Failed to check for missing gallery matches by name: %v", err)
 		}
 	}
