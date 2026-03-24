@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"gallery_api/database"
+	"gallery_api/logger"
 	"gallery_api/models"
 	"gallery_api/services"
 	"net/http"
@@ -46,7 +47,14 @@ func CreateSource(c *gin.Context) {
 	}
 
 	// Try to auto-link to people based on source name
-	autoLinkPeopleToGallery(source.Name, gallery.ID)
+	linkedPersonIDs := autoLinkPeopleToGallery(source.Name, gallery.ID)
+
+	// Check if this gallery matches any missing galleries by name (across all providers)
+	if len(linkedPersonIDs) > 0 {
+		if _, err := services.CheckAndLinkMissingGalleriesByName(source.Name, linkedPersonIDs); err != nil {
+			logger.Warnf("Failed to check for missing gallery matches: %v", err)
+		}
+	}
 
 	// Queue for crawling
 	services.AddToCrawlerQueue(source.ID)
@@ -212,9 +220,10 @@ func GetDownloadStatus(c *gin.Context) {
 }
 
 // autoLinkPeopleToGallery attempts to link people to a gallery based on name matching
-func autoLinkPeopleToGallery(sourceName string, galleryID uint) {
+// Returns the list of person IDs that were linked
+func autoLinkPeopleToGallery(sourceName string, galleryID uint) []uint {
 	if sourceName == "" {
-		return
+		return nil
 	}
 
 	// Search for people with matching names (case-insensitive partial match)
@@ -223,18 +232,20 @@ func autoLinkPeopleToGallery(sourceName string, galleryID uint) {
 	database.DB.Where("LOWER(name) LIKE ?", strings.ToLower(searchPattern)).Find(&people)
 
 	if len(people) == 0 {
-		return
+		return nil
 	}
 
 	// Get the gallery
 	var gallery models.Gallery
 	if err := database.DB.First(&gallery, galleryID).Error; err != nil {
-		return
+		return nil
 	}
 
 	// Find matching people and link them
 	var matchedGalleries []*models.Gallery
 	matchedGalleries = append(matchedGalleries, &gallery)
+
+	var linkedPersonIDs []uint
 
 	for i := range people {
 		person := &people[i]
@@ -245,6 +256,9 @@ func autoLinkPeopleToGallery(sourceName string, galleryID uint) {
 		if strings.Contains(personNameLower, sourceNameLower) || strings.Contains(sourceNameLower, personNameLower) {
 			// Use GORM's Association to append to existing galleries
 			database.DB.Model(person).Association("Galleries").Append(&gallery)
+			linkedPersonIDs = append(linkedPersonIDs, person.ID)
 		}
 	}
+
+	return linkedPersonIDs
 }

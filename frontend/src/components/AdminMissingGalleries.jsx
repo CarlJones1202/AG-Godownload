@@ -1,20 +1,43 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ScanResultCard from './ScanResultCard'
 import './AdminMissingGalleries.css'
+
+function ContextMenu({ x, y, onClose, children }) {
+  const menuRef = useRef(null)
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        onClose()
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [onClose])
+
+  return (
+    <div className="context-menu" ref={menuRef} style={{ left: x, top: y }}>
+      {children}
+    </div>
+  )
+}
 
 function AdminMissingGalleries() {
   const [missingGalleries, setMissingGalleries] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('')
   const [providerFilter, setProviderFilter] = useState('all')
+  const [sortBy, setSortBy] = useState('name')
+  const [selectedPerson, setSelectedPerson] = useState('all')
   const [linking, setLinking] = useState({})
   const [excluding, setExcluding] = useState({})
+  const [contextMenu, setContextMenu] = useState(null)
   const navigate = useNavigate()
 
-  const fetchMissingGalleries = async () => {
+  const fetchMissingGalleries = async (sort) => {
     try {
-      const res = await fetch('/api/admin/missing-galleries')
+      const res = await fetch(`/api/admin/missing-galleries?sort=${sort}`)
       const data = await res.json()
       setMissingGalleries(data || [])
     } catch (err) {
@@ -25,8 +48,9 @@ function AdminMissingGalleries() {
   }
 
   useEffect(() => {
-    fetchMissingGalleries()
-  }, [])
+    setLoading(true)
+    fetchMissingGalleries(sortBy)
+  }, [sortBy])
 
   const linkGallery = async (gallery) => {
     const key = gallery.gallery_url
@@ -79,18 +103,48 @@ function AdminMissingGalleries() {
     }
   }
 
+  const searchOnViperGirls = (gallery) => {
+    const personName = encodeURIComponent(`"${gallery.person_name}"`)
+    const albumName = encodeURIComponent(`"${gallery.gallery_name}"`)
+    const url = `https://vipergirls.to/search.php?do=process&searchthreadid=&s=&securitytoken=guest&searchfromtype=vBForum%3APost&do=process&contenttypeid=1&query=${personName}+${albumName}&titleonly=0&searchuser=&starteronly=0&tag=&forumchoice%5B%5D=235&childforums=1&replyless=0&replylimit=&searchdate=0&beforeafter=after&sortby=dateline&order=descending&showposts=0&dosearch=Search+Now`
+    window.open(url, '_blank')
+  }
+
+  const handleContextMenu = (e, gallery) => {
+    e.preventDefault()
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      gallery
+    })
+  }
+
   const goToPerson = (personId) => {
     navigate(`/people/${personId}`)
   }
 
   const providers = [...new Set(missingGalleries.map(g => g.provider))]
 
+  const uniquePersons = []
+  const personMap = new Map()
+  missingGalleries.forEach(g => {
+    if (!personMap.has(g.person_id)) {
+      personMap.set(g.person_id, {
+        personId: g.person_id,
+        personName: g.person_name
+      })
+    }
+  })
+  personMap.forEach(p => uniquePersons.push(p))
+  uniquePersons.sort((a, b) => a.personName.localeCompare(b.personName))
+
   const filteredGalleries = missingGalleries.filter(g => {
     const matchesSearch = filter === '' || 
       g.person_name.toLowerCase().includes(filter.toLowerCase()) ||
       g.gallery_name.toLowerCase().includes(filter.toLowerCase())
     const matchesProvider = providerFilter === 'all' || g.provider === providerFilter
-    return matchesSearch && matchesProvider
+    const matchesPerson = selectedPerson === 'all' || g.person_id === selectedPerson
+    return matchesSearch && matchesProvider && matchesPerson
   })
 
   const groupedByPerson = filteredGalleries.reduce((acc, g) => {
@@ -116,6 +170,26 @@ function AdminMissingGalleries() {
     <div className="admin-missing-galleries">
       <div className="admin-header">
         <h2>Missing Galleries</h2>
+        <div className="person-tabs">
+          <button
+            className={`person-tab ${selectedPerson === 'all' ? 'active' : ''}`}
+            onClick={() => setSelectedPerson('all')}
+          >
+            All <span className="tab-count">{missingGalleries.length}</span>
+          </button>
+          {uniquePersons.map(p => {
+            const count = missingGalleries.filter(g => g.person_id === p.personId).length
+            return (
+              <button
+                key={p.personId}
+                className={`person-tab ${selectedPerson === p.personId ? 'active' : ''}`}
+                onClick={() => setSelectedPerson(p.personId)}
+              >
+                {p.personName} <span className="tab-count">{count}</span>
+              </button>
+            )
+          })}
+        </div>
         <div className="admin-filters">
           <input
             type="text"
@@ -133,6 +207,14 @@ function AdminMissingGalleries() {
             {providers.map(p => (
               <option key={p} value={p}>{p}</option>
             ))}
+          </select>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            className="admin-select"
+          >
+            <option value="name">Sort by Name</option>
+            <option value="date">Sort by Most Recent</option>
           </select>
           <span className="admin-count">
             {filteredGalleries.length} galleries
@@ -169,21 +251,37 @@ function AdminMissingGalleries() {
               
               <div className="gallery-cards-grid">
                 {group.galleries.map((gallery, idx) => (
-                  <div key={`${gallery.gallery_url}-${idx}`} className="gallery-card-grid-item">
+                  <div 
+                    key={`${gallery.gallery_url}-${idx}`} 
+                    className="gallery-card-grid-item"
+                    onContextMenu={(e) => handleContextMenu(e, gallery)}
+                  >
                     <ScanResultCard
                       gallery={{
                         url: gallery.gallery_url,
                         title: gallery.gallery_name,
                         thumbnail: gallery.thumbnail,
-                        provider: gallery.provider
+                        provider: gallery.provider,
+                        release_date: gallery.release_date
                       }}
                       provider={gallery.provider}
-                      onLink={() => linkGallery(gallery)}
-                      onReject={() => excludeGallery(gallery)}
-                      isLinking={linking[gallery.gallery_url]}
-                      isExcluding={excluding[gallery.gallery_url]}
                       titleLines={2}
                     />
+                    <button 
+                      className="context-menu-trigger"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        setContextMenu({
+                          x: rect.left,
+                          y: rect.bottom + 4,
+                          gallery
+                        })
+                      }}
+                      title="More options"
+                    >
+                      ⋮
+                    </button>
                     <button 
                       className="admin-view-person-btn"
                       onClick={() => goToPerson(gallery.person_id)}
@@ -197,6 +295,44 @@ function AdminMissingGalleries() {
             </div>
           ))}
         </div>
+      )}
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
+        >
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              searchOnViperGirls(contextMenu.gallery)
+              setContextMenu(null)
+            }}
+          >
+            🔍 Search on ViperGirls
+          </button>
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              linkGallery(contextMenu.gallery)
+              setContextMenu(null)
+            }}
+            disabled={linking[contextMenu.gallery.gallery_url]}
+          >
+            {linking[contextMenu.gallery.gallery_url] ? '...' : '→'} Link to Person
+          </button>
+          <button
+            className="context-menu-item danger"
+            onClick={() => {
+              excludeGallery(contextMenu.gallery)
+              setContextMenu(null)
+            }}
+            disabled={excluding[contextMenu.gallery.gallery_url]}
+          >
+            {excluding[contextMenu.gallery.gallery_url] ? '...' : '✕'} Reject
+          </button>
+        </ContextMenu>
       )}
     </div>
   )

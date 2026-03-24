@@ -39,6 +39,34 @@ func Migrate() {
 		logger.Fatal("Failed to migrate database:", err)
 	}
 	logger.Info("Database migrated successfully")
+
+	addPersonGalleriesIndex()
+}
+
+func addPersonGalleriesIndex() {
+	err := DB.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_person_galleries_person_gallery 
+		ON person_galleries(person_id, gallery_id)
+	`).Error
+	if err != nil {
+		logger.Warn("Failed to add person_galleries index:", err)
+		return
+	}
+	logger.Info("Added composite index on person_galleries(person_id, gallery_id)")
+
+	addImageIndexes()
+}
+
+func addImageIndexes() {
+	err := DB.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_images_type_deleted_created 
+		ON images(type, deleted_at, created_at)
+	`).Error
+	if err != nil {
+		logger.Warn("Failed to add images index:", err)
+		return
+	}
+	logger.Info("Added composite index on images(type, deleted_at, created_at)")
 }
 
 func MigrateData() {

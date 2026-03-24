@@ -7,6 +7,7 @@ import (
 	"gallery_api/models"
 	"gallery_api/services"
 	"net/http"
+	"sort"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -248,7 +249,7 @@ func LinkUnsureGallery(c *gin.Context) {
 
 type ExcludeScanResultRequest struct {
 	Provider  string `json:"provider" binding:"required"`
-	SourceID  string `json:"source_id" binding:"required"`
+	SourceID  string `json:"source_id"`
 	SourceURL string `json:"source_url"`
 	Title     string `json:"title"`
 	Reason    string `json:"reason"`
@@ -298,18 +299,21 @@ func ExcludeScanResult(c *gin.Context) {
 }
 
 type AllMissingGalleriesResponse struct {
-	PersonID    uint   `json:"person_id"`
-	PersonName  string `json:"person_name"`
-	Provider    string `json:"provider"`
-	Alias       string `json:"alias"`
-	GalleryURL  string `json:"gallery_url"`
-	GalleryName string `json:"gallery_name"`
-	Thumbnail   string `json:"thumbnail"`
-	FoundCount  int    `json:"found_count"`
-	MissingCount int   `json:"missing_count"`
+	PersonID     uint   `json:"person_id"`
+	PersonName   string `json:"person_name"`
+	Provider     string `json:"provider"`
+	Alias        string `json:"alias"`
+	GalleryURL   string `json:"gallery_url"`
+	GalleryName  string `json:"gallery_name"`
+	Thumbnail    string `json:"thumbnail"`
+	FoundCount   int    `json:"found_count"`
+	MissingCount int    `json:"missing_count"`
+	ReleaseDate  string `json:"release_date"`
 }
 
 func GetAllMissingGalleries(c *gin.Context) {
+	sortBy := c.DefaultQuery("sort", "name")
+
 	var scans []models.PersonScanQueue
 	if err := database.DB.Where("status = ?", models.ScanStatusCompleted).
 		Order("created_at DESC").
@@ -366,12 +370,12 @@ func GetAllMissingGalleries(c *gin.Context) {
 			url, _ := gMap["url"].(string)
 			title, _ := gMap["title"].(string)
 			thumbnail, _ := gMap["thumbnail"].(string)
+			releaseDate, _ := gMap["release_date"].(string)
 
 			if url == "" {
 				continue
 			}
 
-			// Fallback for missing title
 			if title == "" {
 				title = "Untitled"
 			}
@@ -386,8 +390,29 @@ func GetAllMissingGalleries(c *gin.Context) {
 				Thumbnail:    thumbnail,
 				FoundCount:   int(foundCount),
 				MissingCount: int(missingCount),
+				ReleaseDate:  releaseDate,
 			})
 		}
+	}
+
+	switch sortBy {
+	case "date":
+		sort.Slice(response, func(i, j int) bool {
+			if response[i].ReleaseDate == "" && response[j].ReleaseDate == "" {
+				return response[i].PersonName < response[j].PersonName
+			}
+			if response[i].ReleaseDate == "" {
+				return false
+			}
+			if response[j].ReleaseDate == "" {
+				return true
+			}
+			return response[i].ReleaseDate > response[j].ReleaseDate
+		})
+	default:
+		sort.Slice(response, func(i, j int) bool {
+			return response[i].PersonName < response[j].PersonName
+		})
 	}
 
 	c.JSON(http.StatusOK, response)

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import './AutoTag.css'
 
-const SOURCES = ['MetArt', 'MetartX', 'Playboy', 'PlayboyPlus', 'Vixen', 'SexArt', 'LifeErotic', 'EternalDesire', 'MPLStudios', 'VivThomas', 'WowGirls']
+const SOURCES = ['MetArt', 'MetartX', 'Playboy', 'PlayboyPlus', 'Vixen', 'SexArt', 'LifeErotic', 'EternalDesire', 'MPLStudios', 'VivThomas', 'WowGirls', 'RylskyArt']
 
 function SourceScanModal({ show, onClose, personId, personName, personAliases, onScanComplete }) {
     const [selectedSource, setSelectedSource] = useState('MetArt')

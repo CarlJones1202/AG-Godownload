@@ -268,6 +268,8 @@ function GalleryDetail() {
             provider = 'VivThomas'
         } else if (lowerUrl.includes('wowgirls.com') || lowerUrl.includes('wowgirls')) {
             provider = 'WowGirls'
+        } else if (lowerUrl.includes('rylskyart.com') || lowerUrl.includes('rylskyart')) {
+            provider = 'RylskyArt'
         } else if (lowerUrl.includes('metart.com')) {
             provider = 'MetArt'
         } else if (lowerUrl.includes('metartx.com')) {

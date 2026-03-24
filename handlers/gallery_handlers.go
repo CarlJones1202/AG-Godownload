@@ -28,9 +28,16 @@ func CreateGallery(c *gin.Context) {
 	}
 
 	// Try to auto-link to people based on source name
-	autoLinkPeopleToGallery(gallery.Name, gallery.ID)
+	linkedPersonIDs := autoLinkPeopleToGallery(gallery.Name, gallery.ID)
 
-	// Check if this gallery matches any missing galleries from person scans
+	// Check if this gallery matches any missing galleries by name (across all providers)
+	if len(linkedPersonIDs) > 0 {
+		if _, err := services.CheckAndLinkMissingGalleriesByName(gallery.Name, linkedPersonIDs); err != nil {
+			logger.Warnf("Failed to check for missing gallery matches by name: %v", err)
+		}
+	}
+
+	// Check if this gallery matches any missing galleries from person scans (by URL)
 	if gallery.Provider != "" && gallery.SourceURL != "" {
 		if linkedIDs, err := services.CheckAndLinkFoundGallery(gallery.SourceURL, gallery.Name, gallery.Provider); err != nil {
 			logger.Warnf("Failed to check for missing gallery matches: %v", err)

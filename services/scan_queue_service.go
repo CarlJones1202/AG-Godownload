@@ -383,3 +383,122 @@ func CheckAndLinkFoundGallery(galleryURL string, galleryName string, provider st
 
 	return linkedPersonIDs, nil
 }
+
+// CheckAndLinkMissingGalleriesByName checks if a newly added gallery matches any missing galleries
+// from person scans by name (across ALL providers), and if so, links it and marks as unsure
+func CheckAndLinkMissingGalleriesByName(galleryName string, linkedPersonIDs []uint) ([]uint, error) {
+	if galleryName == "" || len(linkedPersonIDs) == 0 {
+		return nil, nil
+	}
+
+	normalizedName := normalizeGalleryName(galleryName)
+	if normalizedName == "" {
+		return nil, nil
+	}
+
+	linkedCount := 0
+
+	for _, personID := range linkedPersonIDs {
+		var person models.Person
+		if err := database.DB.First(&person, personID).Error; err != nil {
+			continue
+		}
+
+		var scans []models.PersonScanQueue
+		if err := database.DB.Where("person_id = ? AND status = ?", personID, models.ScanStatusCompleted).
+			Find(&scans).Error; err != nil {
+			continue
+		}
+
+		for _, scan := range scans {
+			if scan.Results == "" {
+				continue
+			}
+
+			var results map[string]interface{}
+			if err := json.Unmarshal([]byte(scan.Results), &results); err != nil {
+				continue
+			}
+
+			missingGalleries, ok := results["missing_galleries"].([]interface{})
+			if !ok {
+				continue
+			}
+
+			matchedIndex := -1
+			for i, g := range missingGalleries {
+				gMap, ok := g.(map[string]interface{})
+				if !ok {
+					continue
+				}
+
+				missingTitle, _ := gMap["title"].(string)
+				if normalizeGalleryName(missingTitle) == normalizedName {
+					matchedIndex = i
+					break
+				}
+			}
+
+			if matchedIndex < 0 {
+				continue
+			}
+
+			matchedGallery := missingGalleries[matchedIndex].(map[string]interface{})
+			missingURL, _ := matchedGallery["url"].(string)
+			missingTitle, _ := matchedGallery["title"].(string)
+
+			gallery := models.Gallery{
+				Name:      galleryName,
+				Provider:  scan.Provider,
+				SourceURL: missingURL,
+			}
+			if err := database.DB.Create(&gallery).Error; err != nil {
+				logger.Warnf("Failed to create gallery for unsure linking: %v", err)
+				continue
+			}
+
+			if err := database.DB.Model(&person).Association("Galleries").Append(&gallery).Error; err != nil {
+				logger.Warnf("Failed to link unsure gallery %d to person %d: %v", gallery.ID, person.ID, err)
+				continue
+			}
+
+			exclusion := models.ScanResultExclusion{
+				PersonID:  personID,
+				Provider:  scan.Provider,
+				SourceURL: missingURL,
+				Title:     missingTitle,
+				Reason:    "auto-linked unsure",
+			}
+			database.DB.Create(&exclusion)
+
+			linkedCount++
+			logger.Infof("Auto-linked unsure gallery %s to person %s (provider: %s)", galleryName, person.Name, scan.Provider)
+
+			go func(pID uint, prov string) {
+				var providerAlias models.PersonProviderAlias
+				if err := database.DB.Where("person_id = ? AND provider = ?", pID, prov).
+					First(&providerAlias).Error; err == nil {
+					if result, err := ScanSourceForPerson(pID, prov, providerAlias.Alias); err == nil {
+						var latestScan models.PersonScanQueue
+						if err := database.DB.Where("person_id = ? AND provider = ?", pID, prov).
+							Order("created_at DESC").First(&latestScan).Error; err == nil {
+							resultsJSON, _ := json.Marshal(map[string]interface{}{
+								"found_count":       result.FoundCount,
+								"existing_count":    result.ExistingCount,
+								"unsure_count":      result.UnsureCount,
+								"missing_count":     result.MissingCount,
+								"missing_galleries": result.MissingGalleries,
+								"unsure_galleries":  result.UnsureGalleries,
+							})
+							latestScan.Results = string(resultsJSON)
+							database.DB.Save(&latestScan)
+						}
+					}
+				}
+			}(personID, scan.Provider)
+		}
+	}
+
+	linkedPersonIDs = linkedPersonIDs[:linkedCount]
+	return linkedPersonIDs, nil
+}

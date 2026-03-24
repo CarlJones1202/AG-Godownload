@@ -163,12 +163,13 @@ func VerifyDownloadedImages() error {
 				}
 				tx := database.DB.Begin()
 				for _, res := range buffer {
-					if err := tx.Model(&models.Image{ID: res.ID}).
+					if err := tx.Unscoped().Model(&models.Image{}).
+						Where("id = ?", res.ID).
 						Updates(map[string]interface{}{
 							"filename":        res.RelPath,
 							"dominant_colors": res.DominantColors,
 						}).Error; err != nil {
-						logger.Errorf("Failed to update image %d in batch: %v", res.ID, err)
+						logger.Errorf("Failed to update image %d: %v", res.ID, err)
 					} else {
 						atomic.AddInt32(&recoveredCount, 1)
 						IncVerificationRecovered()

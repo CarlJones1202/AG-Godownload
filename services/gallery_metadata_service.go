@@ -137,6 +137,14 @@ func SearchGalleryMatches(galleryName string, people []string) ([]GallerySearchR
 		results = append(results, wowResults...)
 	}
 
+	// Search RylskyArt
+	rylskyartResults, err := searchRylskyArt(searchQuery)
+	if err != nil {
+		logger.Warnf("RylskyArt search failed: %v", err)
+	} else {
+		results = append(results, rylskyartResults...)
+	}
+
 	if len(results) == 0 {
 		return nil, fmt.Errorf("no matching galleries found")
 	}
@@ -170,6 +178,10 @@ func ScrapeGalleryMetadata(sourceURL string, provider string, sourceID string) (
 		return scrapeMPLStudiosGallery(sourceURL, sourceID)
 	case "vivthomas":
 		return scrapeVivThomasGallery(sourceURL, sourceID)
+	case "wowgirls":
+		return scrapeWowGirlsGallery(sourceURL, sourceID)
+	case "rylskyart":
+		return scrapeRylskyArtGallery(sourceURL, sourceID)
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", provider)
 	}
@@ -454,6 +466,75 @@ func searchLifeErotic(query string) ([]GallerySearchResult, error) {
 	}
 
 	logger.Infof("[LifeErotic] Found %d results via API", len(results))
+	return results, nil
+}
+
+// searchRylskyArt searches RylskyArt for matching galleries using their internal API
+func searchRylskyArt(query string) ([]GallerySearchResult, error) {
+	apiURL := fmt.Sprintf("https://www.rylskyart.com/api/search-results?searchPhrase=%s&page=1&pageSize=30&sortBy=latest-gallery", url.QueryEscape(query))
+	logger.Infof("[RylskyArt] Searching API: %s", apiURL)
+
+	client := GetHTTPClient(apiURL)
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search RylskyArt API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("RylskyArt API returned status %d", resp.StatusCode)
+	}
+
+	var apiResp struct {
+		Items []struct {
+			Item struct {
+				Name        string `json:"name"`
+				Path        string `json:"path"`
+				PublishedAt string `json:"publishedAt"`
+				Thumbnail   string `json:"thumbnailCoverPath"`
+				Models      []struct {
+					Name string `json:"name"`
+				} `json:"models"`
+			} `json:"item"`
+		} `json:"items"`
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if err := json.Unmarshal(bodyBytes, &apiResp); err != nil {
+		logger.Errorf("[RylskyArt] Failed to parse JSON: %v", err)
+		return nil, fmt.Errorf("failed to parse API JSON")
+	}
+
+	var results []GallerySearchResult
+	for _, entry := range apiResp.Items {
+		item := entry.Item
+
+		if !strings.Contains(strings.ToLower(item.Path), "/gallery/") {
+			continue
+		}
+
+		galleryURL := "https://www.rylskyart.com" + item.Path
+		thumbURL := "https://www.rylskyart.com" + item.Thumbnail
+
+		dateStr := item.PublishedAt
+		if len(dateStr) > 10 {
+			dateStr = dateStr[:10]
+		}
+
+		results = append(results, GallerySearchResult{
+			Provider:    "RylskyArt",
+			Title:       item.Name,
+			URL:         galleryURL,
+			Thumbnail:   thumbURL,
+			ReleaseDate: dateStr,
+		})
+	}
+
+	logger.Infof("[RylskyArt] Found %d results via API", len(results))
 	return results, nil
 }
 
@@ -1164,6 +1245,85 @@ func scrapeVivThomasGallery(urlStr, uuid string) (*GalleryMetadata, error) {
 	}
 
 	metadata.Rating = 0
+	return metadata, nil
+}
+
+// scrapeRylskyArtGallery scrapes full metadata from a RylskyArt gallery using their API
+func scrapeRylskyArtGallery(urlStr, uuid string) (*GalleryMetadata, error) {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid source URL: %w", err)
+	}
+
+	pathParts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(pathParts) < 2 {
+		return nil, fmt.Errorf("invalid RylskyArt URL format, cannot extract date/name")
+	}
+
+	var galleryDate, galleryName string
+	for i, part := range pathParts {
+		if part == "gallery" && i+2 < len(pathParts) {
+			galleryDate = pathParts[i+1]
+			galleryName = pathParts[i+2]
+			break
+		}
+	}
+
+	if galleryDate == "" && len(pathParts) >= 2 {
+		galleryDate = pathParts[len(pathParts)-2]
+		galleryName = pathParts[len(pathParts)-1]
+	}
+
+	apiURL := fmt.Sprintf("https://www.rylskyart.com/api/gallery?name=%s&date=%s", galleryName, galleryDate)
+	logger.Infof("[RylskyArt] Fetching detail API: %s", apiURL)
+
+	client := GetHTTPClient(apiURL)
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch RylskyArt gallery API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("RylskyArt gallery API returned status %d", resp.StatusCode)
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read RylskyArt response: %w", err)
+	}
+
+	var galleryDetail struct {
+		Name          string  `json:"name"`
+		Description   string  `json:"metaDescription"`
+		RatingAverage float64 `json:"ratingAverage"`
+		PublishedAt   string  `json:"publishedAt"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &galleryDetail); err != nil {
+		logger.Errorf("[RylskyArt] Failed to parse detail JSON: %v", err)
+		return nil, fmt.Errorf("failed to parse detail JSON")
+	}
+
+	metadata := &GalleryMetadata{
+		Provider:    "RylskyArt",
+		SourceURL:   urlStr,
+		Description: galleryDetail.Description,
+	}
+
+	if galleryDetail.RatingAverage > 0 {
+		metadata.Rating = galleryDetail.RatingAverage
+	}
+
+	if dateStr := galleryDetail.PublishedAt; dateStr != "" {
+		if len(dateStr) > 10 {
+			dateStr = dateStr[:10]
+		}
+		if parsed, err := time.Parse("2006-01-02", dateStr); err == nil {
+			metadata.ReleaseDate = parsed
+		}
+	}
+
 	return metadata, nil
 }
 
@@ -2509,6 +2669,15 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 			}
 			allResults = append(allResults, results...)
 		}
+	case "rylskyart":
+		for _, term := range searchTerms {
+			results, err := searchRylskyArt(term)
+			if err != nil {
+				logger.Warnf("RylskyArt search failed for term %s: %v", term, err)
+				continue
+			}
+			allResults = append(allResults, results...)
+		}
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", provider)
 	}
@@ -2586,11 +2755,15 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 		exclusions = []models.ScanResultExclusion{}
 	}
 
-	// Build set of excluded SourceIDs for fast lookup
+	// Build set of excluded SourceIDs and SourceURLs for fast lookup
 	excludedSourceIDs := make(map[string]bool)
+	excludedSourceURLs := make(map[string]bool)
 	for _, exclusion := range exclusions {
 		if exclusion.SourceID != "" {
 			excludedSourceIDs[exclusion.SourceID] = true
+		}
+		if exclusion.SourceURL != "" {
+			excludedSourceURLs[exclusion.SourceURL] = true
 		}
 	}
 
@@ -2598,9 +2771,11 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 	var unsureGalleries []GallerySearchResult
 
 	for _, rs := range resultsWithStatus {
-		// Skip if this result matches an exclusion
-		if rs.result.SourceID != "" && excludedSourceIDs[rs.result.SourceID] {
-			logger.Debugf("Skipping excluded gallery: %s (SourceID: %s)", rs.result.Title, rs.result.SourceID)
+		// Skip if this result matches an exclusion by SourceID or SourceURL
+		isExcluded := (rs.result.SourceID != "" && excludedSourceIDs[rs.result.SourceID]) ||
+			(rs.result.URL != "" && excludedSourceURLs[rs.result.URL])
+		if isExcluded {
+			logger.Debugf("Skipping excluded gallery: %s (SourceID: %s, URL: %s)", rs.result.Title, rs.result.SourceID, rs.result.URL)
 			// Decrement counts since we're filtering this out
 			if rs.status == statusExisting {
 				existingCount--
