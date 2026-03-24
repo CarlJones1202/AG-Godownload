@@ -251,6 +251,19 @@
     border-radius: var(--radius-md);
     font-size: 0.85rem;
     border: 1px solid #333;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.tag.link {
+    cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+.tag.link:hover {
+    background: var(--color-accent-primary);
+    border-color: var(--color-accent-primary);
+    color: white;
 }
 
 .tag-ghost {

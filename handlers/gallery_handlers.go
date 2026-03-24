@@ -112,8 +112,13 @@ func GetGalleries(c *gin.Context) {
 		// Check for provider thumbnail first
 		hasProviderThumbnail := galleries[i].ProviderThumbnail != ""
 
-		// Load first image for thumbnail (only if no provider thumbnail)
-		if !hasProviderThumbnail {
+		// Handle provider thumbnail - convert to web-accessible path
+		if hasProviderThumbnail {
+			filename := filepath.Base(galleries[i].ProviderThumbnail)
+			galleries[i].Images = []models.Image{{
+				ThumbnailPath: "/images/gallery_thumbnails/" + filename,
+			}}
+		} else {
 			var images []models.Image
 			if err := database.DB.Where("gallery_id = ?", galleries[i].ID).Order("created_at ASC").Limit(1).Find(&images).Error; err == nil && len(images) > 0 {
 				firstImage := images[0]

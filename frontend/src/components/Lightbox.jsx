@@ -197,13 +197,24 @@ function Lightbox({ image, images = [], onClose, onNext, onPrev, currentIndex = 
                         <div className="tags-list">
                             {image.galleries && image.galleries.length > 0 ? (
                                 image.galleries.map(g => (
-                                    <span key={g.id} className="tag">{g.name}</span>
+                                    <a key={g.id} href={`/galleries/${g.id}`} className="tag link">{g.name}</a>
                                 ))
                             ) : (
                                 <span className="tag-ghost">{image.gallery?.name || 'Unlinked'}</span>
                             )}
                         </div>
                     </div>
+
+                    {image.people && image.people.length > 0 && (
+                        <div className="metadata-item">
+                            <label>People</label>
+                            <div className="tags-list">
+                                {image.people.map(person => (
+                                    <a key={person.id} href={`/people/${person.id}`} className="tag link">{person.name}</a>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     {image.dominant_colors && (() => {
                         try {

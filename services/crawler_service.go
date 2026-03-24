@@ -428,48 +428,64 @@ func CrawlSource(sourceID uint) error {
 			imagesWithoutAssoc[i].Galleries = nil
 		}
 
-		// Use CreateInBatches for safer large inserts
-		if err := database.DB.CreateInBatches(&imagesWithoutAssoc, 100).Error; err != nil {
-			logger.Errorf("Failed to batch insert images: %v", err)
+		// Use raw SQL for bulk insert instead of CreateInBatches for better performance
+		var placeholders []string
+		var args []interface{}
+
+		for _, img := range imagesWithoutAssoc {
+			placeholders = append(placeholders, "(?, ?, ?, ?, ?)")
+			args = append(args, img.GalleryID, img.Filename, img.OriginalURL, img.DownloadURL, img.DominantColors)
+		}
+
+		stmt := fmt.Sprintf(
+			"INSERT INTO images (gallery_id, filename, original_url, download_url, dominant_colors) VALUES %s",
+			strings.Join(placeholders, ","),
+		)
+
+		if err := database.DB.Exec(stmt, args...).Error; err != nil {
+			logger.Errorf("Failed to bulk insert images: %v", err)
 		} else {
-			logger.Infof("Successfully inserted %d images", len(imagesWithoutAssoc))
+			// Get the IDs of inserted images
+			var insertedIDs []uint
+			database.DB.Model(&models.Image{}).Where("gallery_id = ?", gallery.ID).Pluck("id", &insertedIDs)
 
-			// Now update the M2M associations using raw SQL for performance to avoid N+1 updates
-			var valueStrings []string
-			var valueArgs []interface{}
+			logger.Infof("Successfully inserted %d images", len(insertedIDs))
 
-			for i := range imagesWithoutAssoc {
-				for _, g := range imagesToInsert[i].Galleries {
-					valueStrings = append(valueStrings, "(?, ?)")
-					valueArgs = append(valueArgs, imagesWithoutAssoc[i].ID, g.ID)
-				}
-			}
+			// Now update the M2M associations using raw SQL for performance
+			if len(insertedIDs) > 0 {
+				var valueStrings []string
+				var valueArgs []interface{}
 
-			// Chunked insert to avoid SQLite variable limit
-			// SQLite default limit is 999 variables pre-3.32.0, significantly higher in newer versions.
-			// Each row has 2 params. 400 rows = 800 params, safe for old SQLite.
-			const chunkSize = 400
-			totalAssocs := len(valueStrings)
-			if totalAssocs > 0 {
-				for i := 0; i < totalAssocs; i += chunkSize {
-					end := i + chunkSize
-					if end > totalAssocs {
-						end = totalAssocs
-					}
-
-					chunkStrings := valueStrings[i:end]
-					// Each entry corresponds to 2 arguments (image_id, gallery_id)
-					chunkArgs := valueArgs[i*2 : end*2]
-
-					stmt := fmt.Sprintf("INSERT INTO image_galleries (image_id, gallery_id) VALUES %s",
-						strings.Join(chunkStrings, ","))
-					stmt += " ON CONFLICT DO NOTHING"
-
-					if err := database.DB.Exec(stmt, chunkArgs...).Error; err != nil {
-						logger.Warnf("Failed to batch associate images chunk: %v", err)
+				for i, imgID := range insertedIDs {
+					for _, g := range imagesToInsert[i].Galleries {
+						valueStrings = append(valueStrings, "(?, ?)")
+						valueArgs = append(valueArgs, imgID, g.ID)
 					}
 				}
-				logger.Infof("Successfully associated %d images with galleries", len(imagesWithoutAssoc))
+
+				// Chunked insert to avoid SQLite variable limit
+				const chunkSize = 400
+				totalAssocs := len(valueStrings)
+				if totalAssocs > 0 {
+					for i := 0; i < totalAssocs; i += chunkSize {
+						end := i + chunkSize
+						if end > totalAssocs {
+							end = totalAssocs
+						}
+
+						chunkStrings := valueStrings[i:end]
+						chunkArgs := valueArgs[i*2 : end*2]
+
+						assocStmt := fmt.Sprintf("INSERT INTO image_galleries (image_id, gallery_id) VALUES %s",
+							strings.Join(chunkStrings, ","))
+						assocStmt += " ON CONFLICT DO NOTHING"
+
+						if err := database.DB.Exec(assocStmt, chunkArgs...).Error; err != nil {
+							logger.Warnf("Failed to batch associate images chunk: %v", err)
+						}
+					}
+					logger.Infof("Successfully associated %d images with galleries", len(insertedIDs))
+				}
 			}
 		}
 	}
