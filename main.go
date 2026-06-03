@@ -105,6 +105,7 @@ func main() {
 	r.POST("/sources/:id/crawl", handlers.CrawlSource)
 	r.DELETE("/sources/:id", handlers.DeleteSource)
 	r.PATCH("/sources/:id/priority", handlers.UpdateSourcePriority)
+	r.POST("/sources/bulk-import", handlers.BulkImportSources)
 	r.GET("/downloads/status", handlers.GetDownloadStatus)
 	r.GET("/ws", services.HandleWebSocket)
 	// Maintenance: cleanup duplicate images
@@ -186,6 +187,7 @@ func main() {
 	r.GET("/search/color", handlers.SearchByColor)
 
 	// Static file serving
+	r.GET("/thumbnails/*filepath", handlers.ServeThumbnail)
 	r.GET("/images/*filepath", handlers.ServeImage)
 	// r.GET("/thumbnails/:filename", handlers.ServeThumbnail) // Deprecated
 	r.Static("/person-images", "./uploads/person_images")

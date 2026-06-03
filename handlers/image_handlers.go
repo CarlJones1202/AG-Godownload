@@ -109,15 +109,41 @@ func GetImages(c *gin.Context) {
 	if limit < 1 {
 		limit = 100
 	}
+
+	// Support offset-based pagination (used by the new UI) as well as page-based
 	offset := (page - 1) * limit
+	if offsetStr := c.Query("offset"); offsetStr != "" {
+		if parsedOffset, err := strconv.Atoi(offsetStr); err == nil {
+			offset = parsedOffset
+			// Recalculate page from offset for the response meta
+			page = (offset / limit) + 1
+		}
+	}
 
 	var total int64
 	query := database.DB.Model(&models.Image{})
 
-	// Type filter
+	// Gallery filter (via many-to-many join table)
+	if galleryIDStr := c.Query("gallery_id"); galleryIDStr != "" {
+		galleryID, err := strconv.Atoi(galleryIDStr)
+		if err == nil {
+			query = query.Joins("JOIN image_galleries ON image_galleries.image_id = images.id").
+				Where("image_galleries.gallery_id = ?", galleryID).
+				Distinct()
+		}
+	}
+
+	// Type filter — accept both "type" and "is_video" from the frontend
 	filterType := c.Query("type")
 	if filterType == "" {
-		filterType = "image" // Default to showing only images to preserve backward compat
+		// Check the frontend-style "is_video" param
+		if c.Query("is_video") == "true" {
+			filterType = "video"
+		} else if c.Query("is_video") == "false" {
+			filterType = "image"
+		} else {
+			filterType = "image" // Default to showing only images to preserve backward compat
+		}
 	}
 	if filterType != "all" {
 		query = query.Where("type = ?", filterType)
@@ -142,29 +168,38 @@ func GetImages(c *gin.Context) {
 		query = query.Where("dominant_colors LIKE ?", "%"+color+"%")
 	}
 
-	// Favorites filter
-	if c.Query("favorites") == "true" {
+	// Favorites filter — accept both "favorites" and "is_favorite"
+	if c.Query("favorites") == "true" || c.Query("is_favorite") == "true" {
 		query = query.Where("is_favorite = ?", true)
 	}
 
-	// Exists on disk filter - apply AFTER pagination to avoid scanning all images
+	// Exists on disk filter — accept both "exists" and "on_disk"
 	existsFilter := c.Query("exists")
+	if existsFilter == "" {
+		existsFilter = c.Query("on_disk")
+	}
 	applyExistsFilter := existsFilter != ""
 
-	// Sorting
-	sortBy := c.DefaultQuery("sort", "newest")
+	// Sorting — accept both "sort" and "sort_by"
+	sortBy := c.DefaultQuery("sort", "")
+	if sortBy == "" {
+		sortBy = c.DefaultQuery("sort_by", "newest")
+	}
 	seedStr := c.Query("seed")
+	if seedStr == "" {
+		seedStr = c.Query("random_seed")
+	}
 	seed, _ := strconv.Atoi(seedStr)
 
 	switch sortBy {
 	case "newest":
-		query = query.Order("created_at DESC")
+		query = query.Order("created_at DESC, id DESC")
 	case "oldest":
-		query = query.Order("created_at ASC")
+		query = query.Order("created_at ASC, id ASC")
 	case "largest":
-		query = query.Order("size_mb DESC")
+		query = query.Order("size_mb DESC, id DESC")
 	case "smallest":
-		query = query.Order("size_mb ASC")
+		query = query.Order("size_mb ASC, id ASC")
 	case "random":
 		query = query.Order("RANDOM()")
 	case "shuffle":
@@ -173,7 +208,7 @@ func GetImages(c *gin.Context) {
 		// We use a large prime multiplier and 2^31-1 as modulus
 		query = query.Order(fmt.Sprintf("(((id + 1) * 1103515245 + %d * 12345) %% 2147483647)", seed))
 	default:
-		query = query.Order("created_at DESC")
+		query = query.Order("created_at DESC, id DESC")
 	}
 
 	query.Count(&total)
@@ -345,9 +380,94 @@ func ServeImage(c *gin.Context) {
 	c.String(http.StatusNotFound, "Image not found")
 }
 
-// ServeThumbnail - Deprecated, handled by ServeImage with nested path
+// ServeThumbnail serves thumbnail images from the uploads/<source>/thumbnails/ directory
 func ServeThumbnail(c *gin.Context) {
-	ServeImage(c)
+	filepathParam := c.Param("filepath")
+
+	// Security: prevent path traversal
+	if strings.Contains(filepathParam, "..") {
+		c.String(http.StatusBadRequest, "Invalid filename")
+		return
+	}
+
+	// Clean the path
+	cleanPath := filepath.Clean(filepathParam)
+	cleanPath = strings.TrimPrefix(cleanPath, "/")
+	cleanPath = strings.TrimPrefix(cleanPath, "\\")
+
+	// Always normalise to .jpg extension since thumbnails are generated as JPEG
+	ext := filepath.Ext(cleanPath)
+	if ext != ".jpg" && ext != ".jpeg" {
+		cleanPath = strings.TrimSuffix(cleanPath, ext) + ".jpg"
+	}
+
+	// Verify the resolved path stays within UploadsDir
+	absUploads, _ := filepath.Abs(services.UploadsDir)
+
+	// Case 1: Path already contains a source directory (e.g., "SourceName/hash.jpg")
+	// We inject "thumbnails" before the filename: uploads/SourceName/thumbnails/hash.jpg
+	parts := strings.Split(filepath.ToSlash(cleanPath), "/")
+	if len(parts) > 1 {
+		sourceDir := strings.Join(parts[:len(parts)-1], "/")
+		filename := parts[len(parts)-1]
+		thumbPath := filepath.Join(services.UploadsDir, sourceDir, "thumbnails", filename)
+		absPath, _ := filepath.Abs(thumbPath)
+		if strings.HasPrefix(absPath, absUploads) && fileExists(thumbPath) {
+			c.File(thumbPath)
+			return
+		}
+	}
+
+	// Case 2: Plain filename — look up in DB to find the source name
+	filename := filepath.Base(cleanPath)
+	var image struct {
+		ID         uint
+		Filename   string
+		SourceName string `gorm:"column:source_name"`
+	}
+
+	err := database.DB.
+		Model(&models.Image{}).
+		Select(`images.id, images.filename, sources.name AS source_name`).
+		Joins(`JOIN image_galleries ON image_galleries.image_id = images.id`).
+		Joins(`JOIN galleries ON galleries.id = image_galleries.gallery_id`).
+		Joins(`JOIN sources ON sources.id = galleries.source_id`).
+		Where(`images.filename LIKE ? OR images.filename = ?`, "%"+filename[:len(filename)-4]+"%", strings.TrimSuffix(filename, ".jpg")).
+		First(&image).Error
+
+	if err == nil {
+		sourceDir := services.SanitizeDirectoryName(image.SourceName)
+		thumbPath := filepath.Join(services.UploadsDir, sourceDir, "thumbnails", filename)
+		absPath, _ := filepath.Abs(thumbPath)
+		if strings.HasPrefix(absPath, absUploads) && fileExists(thumbPath) {
+			c.File(thumbPath)
+			return
+		}
+	}
+
+	// Case 3: Check gallery_thumbnails directory (for provider thumbnails)
+	galleryThumbPath := filepath.Join(services.UploadsDir, "gallery_thumbnails", filename)
+	absGalleryPath, _ := filepath.Abs(galleryThumbPath)
+	if strings.HasPrefix(absGalleryPath, absUploads) && fileExists(galleryThumbPath) {
+		c.File(galleryThumbPath)
+		return
+	}
+
+	// Case 4: Brute-force search across all source directories for the thumbnail
+	entries, _ := os.ReadDir(services.UploadsDir)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		candidate := filepath.Join(services.UploadsDir, entry.Name(), "thumbnails", filename)
+		absCandidate, _ := filepath.Abs(candidate)
+		if strings.HasPrefix(absCandidate, absUploads) && fileExists(candidate) {
+			c.File(candidate)
+			return
+		}
+	}
+
+	c.String(http.StatusNotFound, "Thumbnail not found")
 }
 
 // Helper

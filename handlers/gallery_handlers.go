@@ -188,13 +188,13 @@ func GetGallery(c *gin.Context) {
 		subQuery := db.Preload("Galleries.Source")
 		switch sortBy {
 		case "newest":
-			return subQuery.Order("created_at DESC")
+			return subQuery.Order("created_at DESC, id DESC")
 		case "oldest":
-			return subQuery.Order("created_at ASC")
+			return subQuery.Order("created_at ASC, id ASC")
 		case "shuffle":
 			return subQuery.Order(fmt.Sprintf("(((id + 1) * 1103515245 + %d * 12345) %% 2147483647)", seed))
 		default:
-			return subQuery.Order("created_at DESC")
+			return subQuery.Order("created_at DESC, id DESC")
 		}
 	})
 

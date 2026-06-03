@@ -21,19 +21,42 @@ func CreateSource(c *gin.Context) {
 		return
 	}
 
-	// Check for duplicate location
-	var existing models.Source
-	if err := database.DB.Where("location = ?", source.Location).First(&existing).Error; err == nil {
-		c.JSON(http.StatusConflict, gin.H{
-			"error":           "A source with this URL already exists",
-			"existing_source": existing,
-		})
+	created, err := createSingleSource(source.Name, source.Location, source.Type, source.Priority)
+	if err != nil {
+		c.JSON(err.Code, gin.H{"error": err.Message})
 		return
 	}
 
+	c.JSON(http.StatusCreated, created)
+}
+
+type importError struct {
+	Code    int
+	Message string
+}
+
+func createSingleSource(name, location, sourceType string, priority int) (*models.Source, *importError) {
+	source := models.Source{
+		Name:     name,
+		Type:     sourceType,
+		Location: location,
+		Priority: priority,
+		Status:   "idle",
+	}
+
+	// Default type if not set
+	if source.Type == "" {
+		source.Type = "url"
+	}
+
+	// Check for duplicate location
+	var existing models.Source
+	if err := database.DB.Where("location = ?", source.Location).First(&existing).Error; err == nil {
+		return nil, &importError{http.StatusConflict, "A source with this URL already exists"}
+	}
+
 	if err := database.DB.Create(&source).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create source"})
-		return
+		return nil, &importError{http.StatusInternalServerError, "Failed to create source"}
 	}
 
 	// Automatically create a gallery for this source
@@ -42,8 +65,7 @@ func CreateSource(c *gin.Context) {
 		SourceID: &source.ID,
 	}
 	if err := database.DB.Create(&gallery).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create default gallery for source"})
-		return
+		return nil, &importError{http.StatusInternalServerError, "Failed to create default gallery for source"}
 	}
 
 	// Try to auto-link to people based on source name
@@ -59,7 +81,80 @@ func CreateSource(c *gin.Context) {
 	// Queue for crawling
 	services.AddToCrawlerQueue(source.ID)
 
-	c.JSON(http.StatusCreated, source)
+	return &source, nil
+}
+
+func BulkImportSources(c *gin.Context) {
+	var inputs []struct {
+		URL  string  `json:"url"`
+		Name *string `json:"name"`
+	}
+	if err := c.ShouldBindJSON(&inputs); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	type resultEntry struct {
+		URL     string `json:"url"`
+		Name    string `json:"name"`
+		Status  string `json:"status"`
+		SourceID *uint  `json:"source_id,omitempty"`
+		Error  string `json:"error,omitempty"`
+	}
+
+	results := make([]resultEntry, 0, len(inputs))
+	created := 0
+	duplicates := 0
+	failed := 0
+
+	for _, input := range inputs {
+		entry := resultEntry{
+			URL:  input.URL,
+			Name: "",
+		}
+
+		name := ""
+		if input.Name != nil {
+			name = *input.Name
+			entry.Name = name
+		}
+
+		createdSource, err := createSingleSource(name, input.URL, "url", 0)
+		if err != nil {
+			entry.Status = "failed"
+			if err.Code == http.StatusConflict {
+				entry.Status = "duplicate"
+				duplicates++
+			} else {
+				failed++
+			}
+			entry.Error = err.Message
+
+			// Look up the existing source for duplicate entries
+			if err.Code == http.StatusConflict {
+				var existing models.Source
+				if err := database.DB.Where("location = ?", input.URL).First(&existing).Error; err == nil {
+					entry.SourceID = &existing.ID
+				}
+			}
+		} else {
+			entry.Status = "created"
+			entry.SourceID = &createdSource.ID
+			created++
+		}
+
+		results = append(results, entry)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"results":    results,
+		"summary": gin.H{
+			"total":      len(inputs),
+			"created":    created,
+			"duplicates": duplicates,
+			"failed":     failed,
+		},
+	})
 }
 
 func CrawlSource(c *gin.Context) {
