@@ -30,6 +30,7 @@ import {
   Palette,
   Fingerprint,
   Database,
+  Trash2,
 } from 'lucide-react';
 import { CoverGrid } from '@/components/CoverGrid';
 
@@ -194,11 +195,46 @@ export function PersonDetailPage() {
     },
   });
 
+  // Mutation: link an "unsure" gallery result to this person
+  const linkUnsureMut = useMutation({
+    mutationFn: (data: { gallery_id: number; provider: string; source_url: string }) =>
+      people.linkUnsureGallery(personId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['person', personId] });
+      refetchScans();
+    },
+  });
+
+  // Mutation: exclude a scan result (provider + source_url/title)
   const excludeScanResultMut = useMutation({
-    mutationFn: (data: { result_id: number }) =>
+    mutationFn: (data: { provider: string; source_url?: string; title?: string; reason?: string }) =>
       people.excludeScanResult(personId, data),
     onSuccess: () => {
       refetchScans();
+    },
+  });
+
+  // Mutation: run auto-link galleries operation
+  const autoLinkGalleriesMut = useMutation({
+    mutationFn: () => people.autoLinkGalleries(personId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['person', personId] });
+      refetchScans();
+    },
+  });
+
+  // Person exclusions list (for showing and removing)
+  const { data: personExclusions, refetch: refetchExclusions } = useQuery({
+    queryKey: ['person-exclusions', personId],
+    queryFn: () => people.getExclusions(personId),
+    enabled: showTools,
+  });
+
+  const removeExclusionMut = useMutation({
+    mutationFn: (exclusionId: number) => people.removeExclusion(personId, exclusionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['person-exclusions', personId] });
+      refetchExclusions();
     },
   });
 
@@ -377,6 +413,11 @@ export function PersonDetailPage() {
                               </Button>
                             </div>
                           </div>
+                          <div className="mt-2 flex gap-2">
+                            <Button size="sm" variant="secondary" onClick={() => autoLinkGalleriesMut.mutate()} disabled={autoLinkGalleriesMut.isPending}>
+                              {autoLinkGalleriesMut.isPending ? 'Linking...' : 'Auto-Link Galleries'}
+                            </Button>
+                          </div>
                         </div>
 
                         <div className="bg-zinc-950/40 p-4 rounded-lg border border-zinc-800/80 space-y-4">
@@ -509,29 +550,47 @@ export function PersonDetailPage() {
                                       <div className="border-t border-zinc-800 pt-2 space-y-1.5">
                                         <p className="text-[10px] uppercase font-bold text-zinc-400">Missing galleries from scan:</p>
                                         <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                                          {missingGals.map((mg: any, idx: number) => (
-                                            <div key={idx} className="flex items-center justify-between bg-zinc-950 p-2 rounded border border-zinc-800/50">
-                                              <div className="min-w-0 flex-1 pr-2">
-                                                <p className="truncate text-zinc-300 font-medium" title={mg.title}>{mg.title}</p>
-                                                {mg.release_date && <p className="text-[9px] text-zinc-500">{mg.release_date}</p>}
-                                              </div>
-                                              <Button
-                                                size="sm"
-                                                className="h-7 px-2 text-[10px] shrink-0"
-                                                disabled={linkFoundMut.isPending}
-                                                onClick={() => {
-                                                  linkFoundMut.mutate({
-                                                    provider: scan.provider,
-                                                    source_url: mg.url,
-                                                    name: mg.title,
-                                                    thumbnail_url: mg.thumbnail,
-                                                  });
-                                                }}
-                                              >
-                                                Add
+                                      {missingGals.map((mg: any, idx: number) => (
+                                        <div key={idx} className="flex items-center justify-between bg-zinc-950 p-2 rounded border border-zinc-800/50">
+                                          <div className="min-w-0 flex-1 pr-2">
+                                            <p className="truncate text-zinc-300 font-medium" title={mg.title}>{mg.title}</p>
+                                            {mg.release_date && <p className="text-[9px] text-zinc-500">{mg.release_date}</p>}
+                                          </div>
+                                          <Button
+                                            size="sm"
+                                            className="h-7 px-2 text-[10px] shrink-0"
+                                            disabled={linkFoundMut.isPending}
+                                            onClick={() => {
+                                              linkFoundMut.mutate({
+                                                provider: scan.provider ?? '',
+                                                source_url: mg.url ?? '',
+                                                name: mg.title ?? '',
+                                                thumbnail_url: mg.thumbnail,
+                                              });
+                                            }}
+                                          >
+                                            Add
+                                          </Button>
+                                          {mg.unsure && (
+                                            <div className="ml-2 flex items-center gap-2">
+                                              <Button size="sm" className="h-7 px-2 text-[10px]" onClick={() => {
+                                                // mg is an unsure gallery result with gallery_id
+                                                if (mg.id || mg.gallery_id) {
+                                                  const gid = mg.gallery_id || mg.id;
+                                                  linkUnsureMut.mutate({ gallery_id: gid, provider: scan.provider ?? '', source_url: mg.url ?? '' });
+                                                }
+                                              }}>
+                                                Link Unsure
+                                              </Button>
+                                              <Button size="sm" variant="secondary" className="h-7 px-2 text-[10px]" onClick={() => {
+                                                excludeScanResultMut.mutate({ provider: scan.provider ?? '', source_url: mg.url ?? '', title: mg.title ?? '' });
+                                              }}>
+                                                Exclude
                                               </Button>
                                             </div>
-                                          ))}
+                                          )}
+                                        </div>
+                                      ))}
                                         </div>
                                       </div>
                                     )}
@@ -541,6 +600,29 @@ export function PersonDetailPage() {
                             </div>
                           ) : (
                             <p className="text-xs text-zinc-500 italic">No scans run yet.</p>
+                          )}
+                          {/* Exclusions list */}
+                          {personExclusions && personExclusions.length > 0 && (
+                            <div className="mt-3 border-t border-zinc-800 pt-3">
+                              <p className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Exclusions</p>
+                              <div className="space-y-2">
+                                {personExclusions.map((ex: any) => (
+                                  <div key={ex.id} className="flex items-center justify-between bg-zinc-900/80 border border-zinc-800 px-3 py-2 rounded text-sm">
+                                    <div className="text-zinc-200 text-sm">
+                                      <div className="truncate">{ex.provider} — {ex.title ?? ex.source_url}</div>
+                                      {ex.source_url && <div className="text-xs text-zinc-500">{ex.source_url}</div>}
+                                    </div>
+                                    <button
+                                      onClick={() => removeExclusionMut.mutate(ex.id)}
+                                      className="p-2 text-zinc-400 hover:text-red-400 rounded"
+                                      title="Remove exclusion"
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
                           )}
                         </div>
                       </div>

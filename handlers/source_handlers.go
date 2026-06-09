@@ -82,8 +82,12 @@ func createSingleSource(name, location, sourceType string, priority int) (*model
 		}
 	}
 
-	// Queue for crawling
-	services.AddToCrawlerQueue(source.ID)
+    // Queue for crawling (use video queue for known video sources)
+    if isVideo {
+        services.AddToVideoQueue(source.ID)
+    } else {
+        services.AddToCrawlerQueue(source.ID)
+    }
 
 	return &source, nil
 }
@@ -169,8 +173,17 @@ func CrawlSource(c *gin.Context) {
 		return
 	}
 
-	// Trigger crawl in background
-	services.AddToCrawlerQueue(uint(id))
+    // Trigger crawl in background - route to video queue if applicable
+    var src models.Source
+    if err := database.DB.Select("location").First(&src, id).Error; err == nil {
+        if services.IsVideoURL(src.Location) || services.IsVideoFile(src.Location) {
+            services.AddToVideoQueue(uint(id))
+        } else {
+            services.AddToCrawlerQueue(uint(id))
+        }
+    } else {
+        services.AddToCrawlerQueue(uint(id))
+    }
 
 	c.JSON(http.StatusAccepted, gin.H{"message": "Crawl started"})
 }

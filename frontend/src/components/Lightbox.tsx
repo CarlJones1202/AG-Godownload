@@ -5,7 +5,7 @@ import type { Image, Person } from '@/types';
 import { formatDate, parseColors, cn } from '@/lib/utils';
 import { Link } from 'react-router-dom';
 import { tagsApi, people } from '@/lib/api';
-import { Input, Button } from '@/components/UI';
+import { Input } from '@/components/UI';
 
 interface LightboxProps {
   images: { src: string; alt?: string }[];

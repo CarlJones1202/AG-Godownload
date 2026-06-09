@@ -51,6 +51,9 @@ func main() {
 		}
 	}()
 
+	// Start video worker
+	services.StartVideoWorker()
+
 	go func() {
 		logger.Info("Starting background verification of downloaded images...")
 		if err := services.RemoveDuplicateImages(); err != nil {
