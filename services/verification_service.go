@@ -162,30 +162,21 @@ func VerifyDownloadedImages() error {
 					return
 				}
 
-				var wg sync.WaitGroup
-				mu := sync.Mutex{}
-
+				tx := database.DB.Begin()
 				for _, res := range buffer {
-					wg.Add(1)
-					go func(r updateResult) {
-						defer wg.Done()
-						if err := database.DB.Unscoped().Model(&models.Image{}).
-							Where("id = ?", r.ID).
-							Updates(map[string]interface{}{
-								"filename":        r.RelPath,
-								"dominant_colors": r.DominantColors,
-							}).Error; err != nil {
-							logger.Errorf("Failed to update image %d: %v", r.ID, err)
-						} else {
-							mu.Lock()
-							atomic.AddInt32(&recoveredCount, 1)
-							IncVerificationRecovered()
-							mu.Unlock()
-						}
-					}(res)
+					if err := tx.Unscoped().Model(&models.Image{}).
+						Where("id = ?", res.ID).
+						Updates(map[string]interface{}{
+							"filename":        res.RelPath,
+							"dominant_colors": res.DominantColors,
+						}).Error; err != nil {
+						logger.Errorf("Failed to update image %d: %v", res.ID, err)
+					} else {
+						atomic.AddInt32(&recoveredCount, 1)
+						IncVerificationRecovered()
+					}
 				}
-
-				wg.Wait()
+				tx.Commit()
 				buffer = make([]updateResult, 0, batchSize)
 			}
 
@@ -339,6 +330,7 @@ func VerifyDownloadedImages() error {
 			wg.Wait()
 			close(resultChan) // Signal batch processor to finish
 			wgBatch.Wait()    // Wait for batch processor to complete writes
+			database.Checkpoint()
 		}
 
 		recovered := atomic.LoadInt32(&recoveredCount)

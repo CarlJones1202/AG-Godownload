@@ -272,7 +272,6 @@ func GetVideoMetadata(srcPath string) (*VideoMetadata, error) {
 
 // GenerateVideoThumbnail generates a thumbnail for a video file using ffmpeg
 func GenerateVideoThumbnail(srcPath string) (string, error) {
-	// Get the directory structure from source path
 	dir := filepath.Dir(srcPath)
 	thumbnailDir := filepath.Join(dir, "thumbnails")
 
@@ -280,8 +279,9 @@ func GenerateVideoThumbnail(srcPath string) (string, error) {
 		return "", err
 	}
 
-	// Use same filename as original + .jpg
-	filename := filepath.Base(srcPath) + ".jpg"
+	// Use base filename (without video extension) + .jpg
+	baseFilename := strings.TrimSuffix(filepath.Base(srcPath), filepath.Ext(srcPath))
+	filename := baseFilename + ".jpg"
 	thumbPath := filepath.Join(thumbnailDir, filename)
 
 	// Check if thumbnail already exists
@@ -289,9 +289,19 @@ func GenerateVideoThumbnail(srcPath string) (string, error) {
 		return thumbPath, nil
 	}
 
-	// Download and generate thumbnail (ffmpeg logic would go here)
-	// For now, return empty to indicate no thumbnail
-	return "", nil
+	// Get duration to pick a good seek position
+	seekTime := 10.0
+	if meta, err := GetVideoMetadata(srcPath); err == nil && meta.Duration > 0 {
+		seekTime = math.Min(10.0, meta.Duration/3.0)
+	}
+
+	seekStr := fmt.Sprintf("%.2f", seekTime)
+	cmd := exec.Command("ffmpeg", "-i", srcPath, "-ss", seekStr, "-vframes", "1", "-vf", "scale=320:-1", "-q:v", "3", "-y", thumbPath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("failed to generate video thumbnail: %w, output: %s", err, string(output))
+	}
+
+	return thumbPath, nil
 }
 
 // DownloadProviderThumbnail downloads a thumbnail from a provider and saves it to the gallery_thumbnails directory

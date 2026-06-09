@@ -124,18 +124,33 @@ func LabelImage(imageID uint) error {
 
 // ScanUntaggedImages finds images with no tags and processes them
 func ScanUntaggedImages() error {
-	var images []models.Image
-	// Find images with no associations in person_images (skip for now) or image_tags (this is what we want)
-	// simplified: find images where id not in (select image_id from image_tags)
+	// Use LEFT JOIN instead of NOT IN subquery for SQLite performance
+	// Process in chunks to limit memory usage
+	const chunkSize = 500
+	offset := 0
+	totalAdded := 0
 
-	if err := database.DB.Where("id NOT IN (SELECT image_id FROM image_tags)").Find(&images).Error; err != nil {
-		return err
+	for {
+		var images []models.Image
+		if err := database.DB.Select("id").
+			Joins("LEFT JOIN image_tags ON image_tags.image_id = images.id").
+			Where("image_tags.image_id IS NULL").
+			Order("id ASC").
+			Limit(chunkSize).Offset(offset).
+			Find(&images).Error; err != nil {
+			return err
+		}
+		if len(images) == 0 {
+			break
+		}
+
+		for _, img := range images {
+			AddToAITagQueue(img.ID)
+			totalAdded++
+		}
+		offset += chunkSize
 	}
 
-	logger.Infof("Found %d untagged images for AI labeling", len(images))
-	for _, img := range images {
-		// Add to queue (we'll define this in worker_service)
-		AddToAITagQueue(img.ID)
-	}
+	logger.Infof("Found %d untagged images for AI labeling", totalAdded)
 	return nil
 }

@@ -13,7 +13,7 @@ import {
   Textarea,
   ConfirmDialog,
 } from '@/components/UI';
-import { Plus, Play, Trash2, Upload } from 'lucide-react';
+import { Plus, Play, Trash2, Upload, ArrowUp, ArrowDown } from 'lucide-react';
 
 export function SourcesPage() {
   const queryClient = useQueryClient();
@@ -98,6 +98,14 @@ export function SourcesPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sources'] });
       setDeleteId(null);
+    },
+  });
+
+  const priorityMut = useMutation({
+    mutationFn: ({ id, priority }: { id: number; priority: number }) =>
+      sources.updatePriority(id, priority),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sources'] });
     },
   });
 
@@ -201,7 +209,25 @@ export function SourcesPage() {
                   <Badge variant={src.status === 'idle' ? 'default' : src.status === 'crawling' ? 'warning' : src.status === 'error' ? 'danger' : 'info'}>
                     {src.status || 'idle'}
                   </Badge>
-                  {src.priority > 0 && <Badge variant="info">P{src.priority}</Badge>}
+                  <div className="flex items-center gap-0.5">
+                    <Badge variant="info">P{src.priority}</Badge>
+                    <button
+                      onClick={() => priorityMut.mutate({ id: src.id, priority: Math.min(10, src.priority + 1) })}
+                      disabled={priorityMut.isPending}
+                      className="p-0.5 text-zinc-500 hover:text-zinc-200 transition-colors"
+                      title="Increase priority"
+                    >
+                      <ArrowUp size={12} />
+                    </button>
+                    <button
+                      onClick={() => priorityMut.mutate({ id: src.id, priority: Math.max(0, src.priority - 1) })}
+                      disabled={priorityMut.isPending}
+                      className="p-0.5 text-zinc-500 hover:text-zinc-200 transition-colors"
+                      title="Decrease priority"
+                    >
+                      <ArrowDown size={12} />
+                    </button>
+                  </div>
                 </div>
                 <p className="text-xs text-zinc-500 truncate mt-0.5">{src.location}</p>
                 <p className="text-xs text-zinc-600 mt-0.5">

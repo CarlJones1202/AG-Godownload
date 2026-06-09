@@ -180,6 +180,38 @@ func GetImages(c *gin.Context) {
 	}
 	applyExistsFilter := existsFilter != ""
 
+	// Count total matching images using a separate query chain to avoid
+	// GORM's Count method resetting the ORDER BY clause
+	countQuery := database.DB.Model(&models.Image{})
+	// Re-apply joins and where conditions to the count query
+	if galleryIDStr := c.Query("gallery_id"); galleryIDStr != "" {
+		if galleryID, err := strconv.Atoi(galleryIDStr); err == nil {
+			countQuery = countQuery.Joins("JOIN image_galleries ON image_galleries.image_id = images.id").
+				Where("image_galleries.gallery_id = ?", galleryID).
+				Distinct()
+		}
+	}
+	if filterType != "all" {
+		countQuery = countQuery.Where("type = ?", filterType)
+	}
+	if tagIDs := c.Query("filter_tags"); tagIDs != "" {
+		countQuery = countQuery.Joins("JOIN image_tags ON image_tags.image_id = images.id").
+			Where("image_tags.tag_id IN (?)", strings.Split(tagIDs, ",")).
+			Distinct()
+	}
+	if personID := c.Query("filter_person"); personID != "" {
+		countQuery = countQuery.Joins("JOIN person_images ON person_images.image_id = images.id").
+			Where("person_images.person_id = ?", personID).
+			Distinct()
+	}
+	if color := c.Query("filter_color"); color != "" {
+		countQuery = countQuery.Where("dominant_colors LIKE ?", "%"+color+"%")
+	}
+	if c.Query("favorites") == "true" || c.Query("is_favorite") == "true" {
+		countQuery = countQuery.Where("is_favorite = ?", true)
+	}
+	countQuery.Count(&total)
+
 	// Sorting — accept both "sort" and "sort_by"
 	sortBy := c.DefaultQuery("sort", "")
 	if sortBy == "" {
@@ -210,8 +242,6 @@ func GetImages(c *gin.Context) {
 	default:
 		query = query.Order("created_at DESC, id DESC")
 	}
-
-	query.Count(&total)
 
 	// Fetch images with pagination
 	// If exists filter is applied, we'll fetch extra and filter client-side
@@ -256,40 +286,24 @@ func GetImages(c *gin.Context) {
 	for i := range images {
 		sourceName := "uncategorized"
 
-		// For videos, check direct Source association first
-		if images[i].Type == "video" && images[i].SourceID != nil {
-			if images[i].Source != nil && images[i].Source.Name != "" {
-				sourceName = images[i].Source.Name
-			} else {
-				// Fallback: load source if not preloaded
-				var source models.Source
-				if err := database.DB.First(&source, *images[i].SourceID).Error; err == nil {
-					sourceName = source.Name
-				}
-			}
-		} else if len(images[i].Galleries) > 0 && images[i].Galleries[0].SourceID != nil {
-			// For images, use gallery source
-			if images[i].Galleries[0].Source.Name != "" {
-				sourceName = images[i].Galleries[0].Source.Name
-			} else {
-				// Fallback if not loaded (should be loaded by Preload)
-				var source models.Source
-				if err := database.DB.First(&source, *images[i].Galleries[0].SourceID).Error; err == nil {
-					sourceName = source.Name
-				}
-			}
+		if images[i].Type == "video" && images[i].SourceID != nil && images[i].Source != nil {
+			sourceName = images[i].Source.Name
+		} else if len(images[i].Galleries) > 0 && images[i].Galleries[0].Source != nil {
+			sourceName = images[i].Galleries[0].Source.Name
 		}
 
 		sanitizedSource := services.SanitizeDirectoryName(sourceName)
 		images[i].WebPath = fmt.Sprintf("/images/%s/%s", sanitizedSource, filepath.Base(images[i].Filename))
 
-		// Video thumbnails have .jpg appended to the filename
+		// Video thumbnails use base filename (without video extension) + .jpg
 		thumbnailFilename := images[i].Filename
 		if images[i].Type == "video" {
-			thumbnailFilename = images[i].Filename + ".jpg"
+			baseFilename := strings.TrimSuffix(images[i].Filename, filepath.Ext(images[i].Filename))
+			thumbnailFilename = baseFilename + ".jpg"
+
+			baseFilename = strings.TrimSuffix(filepath.Base(images[i].Filename), filepath.Ext(images[i].Filename))
 
 			// Add trickplay paths for videos
-			baseFilename := strings.TrimSuffix(filepath.Base(images[i].Filename), filepath.Ext(images[i].Filename))
 			images[i].TrickplayVTT = fmt.Sprintf("/images/%s/trickplay/%s.vtt", sanitizedSource, baseFilename)
 			images[i].TrickplaySprite = fmt.Sprintf("/images/%s/trickplay/%s_sprite.jpg", sanitizedSource, baseFilename)
 		}

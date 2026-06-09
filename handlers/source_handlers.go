@@ -59,22 +59,26 @@ func createSingleSource(name, location, sourceType string, priority int) (*model
 		return nil, &importError{http.StatusInternalServerError, "Failed to create source"}
 	}
 
-	// Automatically create a gallery for this source
-	gallery := models.Gallery{
-		Name:     source.Name,
-		SourceID: &source.ID,
-	}
-	if err := database.DB.Create(&gallery).Error; err != nil {
-		return nil, &importError{http.StatusInternalServerError, "Failed to create default gallery for source"}
-	}
+	// Only create a gallery for non-video sources (videos are stored standalone)
+	isVideo := services.IsVideoURL(source.Location) || services.IsVideoFile(source.Location)
+	if !isVideo {
+		// Automatically create a gallery for this source
+		gallery := models.Gallery{
+			Name:     source.Name,
+			SourceID: &source.ID,
+		}
+		if err := database.DB.Create(&gallery).Error; err != nil {
+			return nil, &importError{http.StatusInternalServerError, "Failed to create default gallery for source"}
+		}
 
-	// Try to auto-link to people based on source name
-	linkedPersonIDs := autoLinkPeopleToGallery(source.Name, gallery.ID)
+		// Try to auto-link to people based on source name
+		linkedPersonIDs := autoLinkPeopleToGallery(source.Name, gallery.ID)
 
-	// Check if this gallery matches any missing galleries by name (across all providers)
-	if len(linkedPersonIDs) > 0 {
-		if _, err := services.CheckAndLinkMissingGalleriesByName(gallery.ID, source.Name, linkedPersonIDs); err != nil {
-			logger.Warnf("Failed to check for missing gallery matches: %v", err)
+		// Check if this gallery matches any missing galleries by name (across all providers)
+		if len(linkedPersonIDs) > 0 {
+			if _, err := services.CheckAndLinkMissingGalleriesByName(gallery.ID, source.Name, linkedPersonIDs); err != nil {
+				logger.Warnf("Failed to check for missing gallery matches: %v", err)
+			}
 		}
 	}
 

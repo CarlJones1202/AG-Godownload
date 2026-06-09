@@ -1,8 +1,10 @@
 import type {
   AutoTagResult,
+  DashboardStats,
   DownloadStatus,
   Gallery,
   GallerySearchResult,
+  IdentifierResult,
   Image,
   PaginatedResult,
   PaginationParams,
@@ -86,10 +88,14 @@ export const galleries = {
   update: (id: number, data: Partial<Gallery>) =>
     request<Gallery>(`/galleries/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: number) => request<void>(`/galleries/${id}`, { method: 'DELETE' }),
-  searchMetadata: (id: number, query: string, provider?: string) =>
-    request<GallerySearchResult[]>(`/galleries/${id}/search-metadata${qs({ query, provider })}`),
-  scrapeMetadata: (id: number, data: { provider: string; url: string; source_id?: string }) =>
-    request<Gallery>(`/galleries/${id}/scrape-metadata`, { method: 'POST', body: JSON.stringify(data) }),
+  searchMetadata: (id: number) =>
+    request<{ results: GallerySearchResult[]; count: number }>(`/galleries/${id}/search-metadata`),
+  scrapeMetadata: (id: number, data: { provider: string; source_url: string; source_id?: string }) =>
+    request<{ message: string; gallery: Gallery; metadata: any }>(`/galleries/${id}/scrape-metadata`, { method: 'POST', body: JSON.stringify(data) }),
+  updateProvider: (id: number, data: { provider: string; source_url?: string }) =>
+    request<Gallery>(`/galleries/${id}/update-provider`, { method: 'POST', body: JSON.stringify(data) }),
+  addImage: (id: number, data: { url: string; filename?: string }) =>
+    request<Image>(`/galleries/${id}/images`, { method: 'POST', body: JSON.stringify(data) }),
   people: (id: number) =>
     request<Person[]>(`/galleries/${id}/people`),
 };
@@ -106,6 +112,7 @@ export interface ImageListParams extends PaginationParams {
   is_video?: boolean;
   on_disk?: boolean;
   random_seed?: number;
+  filter_tags?: string;
   [key: string]: unknown;
 }
 
@@ -175,11 +182,11 @@ export const people = {
     request<{ message: string }>(`/people/${id}/scan${qs({ source, alias })}`),
   getScans: (id: number) =>
     request<PersonScanResult[]>(`/people/${id}/scans`),
-  linkFoundGallery: (id: number, data: { gallery_id: number; result_id: number }) =>
-    request<{ message: string }>(`/people/${id}/link-found-gallery`, { method: 'POST', body: JSON.stringify(data) }),
-  linkUnsureGallery: (id: number, data: { gallery_id: number; result_id: number }) =>
-    request<{ message: string }>(`/people/${id}/link-unsure-gallery`, { method: 'POST', body: JSON.stringify(data) }),
-  excludeScanResult: (id: number, data: { result_id: number }) =>
+  linkFoundGallery: (id: number, data: { provider: string; source_url: string; name: string; thumbnail_url?: string }) =>
+    request<Gallery>(`/people/${id}/link-found-gallery`, { method: 'POST', body: JSON.stringify(data) }),
+  linkUnsureGallery: (id: number, data: { gallery_id: number; provider: string; source_url: string }) =>
+    request<Gallery>(`/people/${id}/link-unsure-gallery`, { method: 'POST', body: JSON.stringify(data) }),
+  excludeScanResult: (id: number, data: { provider: string; source_url?: string; title?: string; reason?: string }) =>
     request<{ message: string }>(`/people/${id}/exclude-scan-result`, { method: 'POST', body: JSON.stringify(data) }),
   getProviderAliases: (id: number) =>
     request<ProviderAlias[]>(`/people/${id}/provider-aliases`),
@@ -187,6 +194,12 @@ export const people = {
     request<ProviderAlias>(`/people/${id}/provider-aliases`, { method: 'POST', body: JSON.stringify(data) }),
   deleteProviderAlias: (personId: number, aliasId: number) =>
     request<void>(`/people/${personId}/provider-aliases/${aliasId}`, { method: 'DELETE' }),
+  linkImage: (personId: number, imageId: number) =>
+    request<{ message: string }>(`/people/${personId}/images/${imageId}`, { method: 'POST' }),
+  unlinkImage: (personId: number, imageId: number) =>
+    request<void>(`/people/${personId}/images/${imageId}`, { method: 'DELETE' }),
+  autoLinkGalleries: (personId: number) =>
+    request<{ message: string; galleries_linked: number }>(`/people/${personId}/link-galleries`, { method: 'POST' }),
   searchStashDB: (name: string) =>
     request<{ data: any[] }>(`/stashdb/search${qs({ name })}`),
   linkStashDB: (id: number, stash_id: string) =>
@@ -194,6 +207,20 @@ export const people = {
       method: 'POST',
       body: JSON.stringify({ stash_id }),
     }),
+};
+
+export const identifiers = {
+  listSources: () =>
+    request<{ sources: string[] }>('/identifiers/sources'),
+  search: (source: string, name: string) =>
+    request<{ data: IdentifierResult[] }>(`/identifiers/${source}/search${qs({ name })}`),
+};
+
+export const maintenance = {
+  cleanupDupes: (token: string) =>
+    request<{ total_images: number; deleted: number; url_duplicates: number; filename_duplicates: number; note: string }>(
+      '/cleanup-dupes', { method: 'POST', headers: { 'X-Maintenance-Token': token, 'Content-Type': 'application/json' } },
+    ),
 };
 
 export const admin = {
@@ -214,4 +241,8 @@ export const tagsApi = {
 
 export const downloadStatus = {
   get: () => request<DownloadStatus>('/downloads/status'),
+};
+
+export const stats = {
+  dashboard: () => request<DashboardStats>('/api/stats'),
 };

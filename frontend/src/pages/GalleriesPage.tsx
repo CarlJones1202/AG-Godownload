@@ -6,11 +6,14 @@ import {
   Spinner,
   EmptyState,
   Input,
+  Button,
+  Card,
+  Textarea,
   Pagination,
   ConfirmDialog,
 } from '@/components/UI';
 import { CoverGrid } from '@/components/CoverGrid';
-import { Search, Grid3X3 } from 'lucide-react';
+import { Search, Grid3X3, Plus } from 'lucide-react';
 import { usePagination } from '@/hooks/usePagination';
 
 export function GalleriesPage() {
@@ -18,6 +21,13 @@ export function GalleriesPage() {
   const [search, setSearch] = useState('');
   const { page, limit, prevPage, nextPage, resetPage } = usePagination({ limit: 50 });
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [newGallery, setNewGallery] = useState({
+    name: '',
+    source_url: '',
+    provider: '',
+    description: '',
+  });
 
   const { data: galleryList, isLoading } = useQuery({
     queryKey: ['galleries', { search, page, limit }],
@@ -34,6 +44,20 @@ export function GalleriesPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['galleries'] });
       setConfirmDeleteId(null);
+    },
+  });
+
+  const createMut = useMutation({
+    mutationFn: () => galleries.create({
+      name: newGallery.name,
+      source_url: newGallery.source_url || undefined,
+      provider: newGallery.provider || undefined,
+      description: newGallery.description || undefined,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['galleries'] });
+      setShowCreate(false);
+      setNewGallery({ name: '', source_url: '', provider: '', description: '' });
     },
   });
 
@@ -55,10 +79,52 @@ export function GalleriesPage() {
   return (
     <>
       <PageHeader title="Galleries" description="Your image gallery collection">
-        <div className="flex items-center gap-2 text-zinc-400">
-          <Grid3X3 size={18} />
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant={showCreate ? 'primary' : 'secondary'} onClick={() => setShowCreate(!showCreate)}>
+            <Plus size={14} /> Create
+          </Button>
+          <Grid3X3 size={18} className="text-zinc-400" />
         </div>
       </PageHeader>
+
+      {showCreate && (
+        <Card className="mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Input
+              label="Name"
+              placeholder="Gallery name"
+              value={newGallery.name}
+              onChange={(e) => setNewGallery({ ...newGallery, name: e.target.value })}
+            />
+            <Input
+              label="Source URL"
+              placeholder="https://example.com/gallery/123"
+              value={newGallery.source_url}
+              onChange={(e) => setNewGallery({ ...newGallery, source_url: e.target.value })}
+            />
+            <Input
+              label="Provider"
+              placeholder="e.g. MetArt"
+              value={newGallery.provider}
+              onChange={(e) => setNewGallery({ ...newGallery, provider: e.target.value })}
+            />
+          </div>
+          <Textarea
+            label="Description"
+            placeholder="Optional description"
+            value={newGallery.description}
+            onChange={(e) => setNewGallery({ ...newGallery, description: e.target.value })}
+            rows={2}
+            className="mt-3"
+          />
+          <div className="flex justify-end gap-2 mt-3">
+            <Button variant="secondary" size="sm" onClick={() => setShowCreate(false)}>Cancel</Button>
+            <Button size="sm" onClick={() => createMut.mutate()} disabled={!newGallery.name || createMut.isPending}>
+              {createMut.isPending ? 'Creating...' : 'Create Gallery'}
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {/* Search bar */}
       <div className="mb-6 relative">

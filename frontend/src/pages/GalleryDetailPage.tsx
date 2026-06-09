@@ -25,6 +25,10 @@ import {
   ExternalLink,
   FileText,
   Star,
+  Settings2,
+  Search,
+  Download,
+  Upload,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -50,6 +54,13 @@ export function GalleryDetailPage() {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState('');
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'largest' | 'smallest'>('newest');
+  const [showTools, setShowTools] = useState(false);
+  const [searchMetaQuery, setSearchMetaQuery] = useState('');
+  const [scrapeProvider, setScrapeProvider] = useState('');
+  const [scrapeUrl, setScrapeUrl] = useState('');
+  const [updateProvider, setUpdateProvider] = useState('');
+  const [updateSourceUrl, setUpdateSourceUrl] = useState('');
+  const [addImageUrl, setAddImageUrl] = useState('');
 
   const { data: gallery, isLoading: loadingGallery } = useQuery({
     queryKey: ['gallery', galleryId],
@@ -114,6 +125,39 @@ export function GalleryDetailPage() {
     mutationFn: (personId: number) => people.unlinkGallery(personId, galleryId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gallery-people', galleryId] });
+    },
+  });
+
+  const searchMetaMut = useMutation({
+    mutationFn: () => galleries.searchMetadata(galleryId),
+    onSuccess: (data) => {
+      setSearchMetaQuery(JSON.stringify(data.results, null, 2));
+    },
+  });
+
+  const scrapeMetaMut = useMutation({
+    mutationFn: () => galleries.scrapeMetadata(galleryId, { provider: scrapeProvider, source_url: scrapeUrl }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gallery', galleryId] });
+      setScrapeProvider('');
+      setScrapeUrl('');
+    },
+  });
+
+  const updateProviderMut = useMutation({
+    mutationFn: () => galleries.updateProvider(galleryId, { provider: updateProvider, source_url: updateSourceUrl || undefined }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gallery', galleryId] });
+      setUpdateProvider('');
+      setUpdateSourceUrl('');
+    },
+  });
+
+  const addImageMut = useMutation({
+    mutationFn: () => galleries.addImage(galleryId, { url: addImageUrl }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['images', { gallery_id: galleryId }] });
+      setAddImageUrl('');
     },
   });
 
@@ -446,6 +490,87 @@ export function GalleryDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Gallery Management Tools */}
+      <div className="flex items-center justify-end mb-4 px-6">
+        <Button variant="secondary" size="sm" onClick={() => setShowTools((v) => !v)}>
+          <Settings2 size={14} /> {showTools ? 'Hide Tools' : 'Tools'}
+        </Button>
+      </div>
+
+      {showTools && (
+        <div className="mx-6 mb-8 rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 space-y-6">
+          <h3 className="text-lg font-medium text-white flex items-center gap-2 border-b border-zinc-800 pb-4">
+            <Settings2 size={18} className="text-blue-400" />
+            Gallery Management Tools
+          </h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Search Metadata */}
+            <div className="bg-zinc-950/40 p-4 rounded-lg border border-zinc-800/80 space-y-3">
+              <h4 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
+                <Search size={14} /> Search Metadata
+              </h4>
+              <p className="text-xs text-zinc-500">Search provider for matching galleries based on name and linked people.</p>
+              <Button size="sm" onClick={() => searchMetaMut.mutate()} disabled={searchMetaMut.isPending}>
+                {searchMetaMut.isPending ? 'Searching...' : 'Search Providers'}
+              </Button>
+              {searchMetaQuery && (
+                <pre className="text-[10px] text-zinc-400 max-h-40 overflow-y-auto bg-zinc-950 p-2 rounded border border-zinc-800">
+                  {searchMetaQuery}
+                </pre>
+              )}
+            </div>
+
+            {/* Scrape Metadata */}
+            <div className="bg-zinc-950/40 p-4 rounded-lg border border-zinc-800/80 space-y-3">
+              <h4 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
+                <Download size={14} /> Scrape Metadata
+              </h4>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <Input placeholder="Provider (e.g. MetArt)" value={scrapeProvider} onChange={(e) => setScrapeProvider(e.target.value)} className="h-9 text-xs" />
+                </div>
+                <div className="flex-[2]">
+                  <Input placeholder="Gallery URL" value={scrapeUrl} onChange={(e) => setScrapeUrl(e.target.value)} className="h-9 text-xs" />
+                </div>
+              </div>
+              <Button size="sm" onClick={() => scrapeMetaMut.mutate()} disabled={!scrapeProvider || !scrapeUrl || scrapeMetaMut.isPending}>
+                {scrapeMetaMut.isPending ? 'Scraping...' : 'Scrape'}
+              </Button>
+            </div>
+
+            {/* Update Provider */}
+            <div className="bg-zinc-950/40 p-4 rounded-lg border border-zinc-800/80 space-y-3">
+              <h4 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
+                <Upload size={14} /> Update Provider
+              </h4>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <Input placeholder="Provider name" value={updateProvider} onChange={(e) => setUpdateProvider(e.target.value)} className="h-9 text-xs" />
+                </div>
+                <div className="flex-[2]">
+                  <Input placeholder="Source URL (optional)" value={updateSourceUrl} onChange={(e) => setUpdateSourceUrl(e.target.value)} className="h-9 text-xs" />
+                </div>
+              </div>
+              <Button size="sm" onClick={() => updateProviderMut.mutate()} disabled={!updateProvider || updateProviderMut.isPending}>
+                {updateProviderMut.isPending ? 'Updating...' : 'Update'}
+              </Button>
+            </div>
+
+            {/* Add Image by URL */}
+            <div className="bg-zinc-950/40 p-4 rounded-lg border border-zinc-800/80 space-y-3">
+              <h4 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
+                <Download size={14} /> Add Image from URL
+              </h4>
+              <Input placeholder="Image URL to download" value={addImageUrl} onChange={(e) => setAddImageUrl(e.target.value)} className="h-9 text-xs" />
+              <Button size="sm" onClick={() => addImageMut.mutate()} disabled={!addImageUrl || addImageMut.isPending}>
+                {addImageMut.isPending ? 'Downloading...' : 'Download & Add'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="p-1">
         {loadingImages ? (

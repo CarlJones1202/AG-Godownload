@@ -91,73 +91,120 @@ func GetGalleries(c *gin.Context) {
 		query = query.Order("id DESC")
 	}
 
-	// Load galleries with Source preloaded
 	if err := query.Limit(limit).Offset(offset).Find(&galleries).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch galleries"})
 		return
 	}
 
-	// Create response with image counts and first image
 	type GalleryResponse struct {
 		models.Gallery
 		ImageCount int `json:"image_count"`
 	}
 
 	galleryResponses := make([]GalleryResponse, len(galleries))
+	if len(galleries) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"data": galleryResponses,
+			"meta": gin.H{
+				"current_page": page,
+				"total_pages":  0,
+				"total_items":  total,
+				"limit":        limit,
+			},
+		})
+		return
+	}
+
+	// Batch: collect all gallery IDs
+	galleryIDs := make([]uint, len(galleries))
+	for i, g := range galleries {
+		galleryIDs[i] = g.ID
+	}
+
+	// Batch: image counts per gallery via image_galleries junction table
+	type GalleryCount struct {
+		GalleryID uint
+		Count     int
+	}
+	var galleryCounts []GalleryCount
+	database.DB.Table("image_galleries").
+		Select("gallery_id, COUNT(*) as count").
+		Where("gallery_id IN ?", galleryIDs).
+		Group("gallery_id").
+		Scan(&galleryCounts)
+
+	countMap := make(map[uint]int, len(galleries))
+	for _, gc := range galleryCounts {
+		countMap[gc.GalleryID] = gc.Count
+	}
+
+	// Batch: first image per gallery (earliest created_at) using window function
+	type GalleryFirstImage struct {
+		GalleryID uint
+		ImageID   uint
+		Filename  string
+		Type      string
+	}
+	var firstImages []GalleryFirstImage
+	database.DB.Raw(`
+		SELECT gallery_id, image_id, filename, type FROM (
+			SELECT ig.gallery_id, i.id AS image_id, i.filename, i.type,
+				ROW_NUMBER() OVER (PARTITION BY ig.gallery_id ORDER BY i.created_at ASC, i.id ASC) AS rn
+			FROM image_galleries ig
+			JOIN images i ON i.id = ig.image_id
+			WHERE ig.gallery_id IN ?
+		) ranked WHERE rn = 1
+	`, galleryIDs).Scan(&firstImages)
+
+	firstImageMap := make(map[uint]GalleryFirstImage, len(firstImages))
+	for _, fi := range firstImages {
+		firstImageMap[fi.GalleryID] = fi
+	}
+
+	// Build response
 	for i := range galleries {
-		// Get image count
-		var count int64
-		database.DB.Model(&models.Image{}).Where("gallery_id = ?", galleries[i].ID).Count(&count)
+		g := &galleries[i]
+		imageCount := countMap[g.ID]
 
-		// Check for provider thumbnail first
-		hasProviderThumbnail := galleries[i].ProviderThumbnail != ""
-
-		// Handle provider thumbnail - convert to web-accessible path
-		if hasProviderThumbnail {
-			filename := filepath.Base(galleries[i].ProviderThumbnail)
-			galleries[i].Images = []models.Image{{
+		if g.ProviderThumbnail != "" {
+			filename := filepath.Base(g.ProviderThumbnail)
+			g.Images = []models.Image{{
 				ThumbnailPath: "/images/gallery_thumbnails/" + filename,
 			}}
-		} else {
-			var images []models.Image
-			if err := database.DB.Where("gallery_id = ?", galleries[i].ID).Order("created_at ASC").Limit(1).Find(&images).Error; err == nil && len(images) > 0 {
-				firstImage := images[0]
-				// Populate path
-				sourceName := "uncategorized"
-				if galleries[i].Source != nil {
-					sourceName = galleries[i].Source.Name
-				}
-				sanitizedSource := services.SanitizeDirectoryName(sourceName)
-				firstImage.WebPath = fmt.Sprintf("/images/%s", filepath.ToSlash(firstImage.Filename))
-
-				// Construct thumbnail path
-				thumbPath := firstImage.Filename
-				if firstImage.Type == "video" {
-					// Replace extension with .jpg for video thumbnails
-					ext := filepath.Ext(thumbPath)
-					thumbPath = strings.TrimSuffix(thumbPath, ext) + ".jpg"
-				}
-
-				// Inject "thumbnails" into the path
-				// Assumption: Filename is like "Source/file.ext"
-				// We want "/images/Source/thumbnails/file.ext"
-				parts := strings.Split(filepath.ToSlash(thumbPath), "/")
-				if len(parts) > 1 {
-					// Insert "thumbnails" before the filename
-					parts = append(parts[:len(parts)-1], append([]string{"thumbnails"}, parts[len(parts)-1:]...)...)
-					firstImage.ThumbnailPath = "/images/" + strings.Join(parts, "/")
-				} else {
-					// Fallback
-					firstImage.ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, filepath.Base(thumbPath))
-				}
-
-				galleries[i].Images = []models.Image{firstImage}
+		} else if fi, ok := firstImageMap[g.ID]; ok {
+			sourceName := "uncategorized"
+			if g.Source != nil {
+				sourceName = g.Source.Name
 			}
+			sanitizedSource := services.SanitizeDirectoryName(sourceName)
+
+			firstImage := models.Image{
+				ID:       fi.ImageID,
+				Filename: fi.Filename,
+				Type:     fi.Type,
+			}
+			firstImage.WebPath = fmt.Sprintf("/images/%s", filepath.ToSlash(firstImage.Filename))
+
+			thumbPath := firstImage.Filename
+			if firstImage.Type == "video" {
+				ext := filepath.Ext(thumbPath)
+				thumbPath = strings.TrimSuffix(thumbPath, ext) + ".jpg"
+			}
+
+			parts := strings.Split(filepath.ToSlash(thumbPath), "/")
+			if len(parts) > 1 {
+				parts = append(parts[:len(parts)-1], append([]string{"thumbnails"}, parts[len(parts)-1:]...)...)
+				firstImage.ThumbnailPath = "/images/" + strings.Join(parts, "/")
+			} else {
+				firstImage.ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, filepath.Base(thumbPath))
+			}
+
+			g.Images = []models.Image{firstImage}
 		}
 
 		galleryResponses[i] = GalleryResponse{
-			Gallery:    galleries[i],
-			ImageCount: int(count),
+			Gallery:    *g,
+			ImageCount: imageCount,
 		}
 	}
 
@@ -176,58 +223,11 @@ func GetGalleries(c *gin.Context) {
 
 func GetGallery(c *gin.Context) {
 	id := c.Param("id")
-	sortBy := c.DefaultQuery("sort", "newest")
-	seedStr := c.Query("seed")
-	seed, _ := strconv.Atoi(seedStr)
-
 	var gallery models.Gallery
-	query := database.DB.Preload("Source").Preload("People")
-
-	// Preload images with the requested sort order
-	query = query.Preload("Images", func(db *gorm.DB) *gorm.DB {
-		subQuery := db.Preload("Galleries.Source")
-		switch sortBy {
-		case "newest":
-			return subQuery.Order("created_at DESC, id DESC")
-		case "oldest":
-			return subQuery.Order("created_at ASC, id ASC")
-		case "shuffle":
-			return subQuery.Order(fmt.Sprintf("(((id + 1) * 1103515245 + %d * 12345) %% 2147483647)", seed))
-		default:
-			return subQuery.Order("created_at DESC, id DESC")
-		}
-	})
-
-	if err := query.First(&gallery, id).Error; err != nil {
+	if err := database.DB.Preload("Source").Preload("People").First(&gallery, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Gallery not found"})
 		return
 	}
-
-	// Populate paths
-	sourceName := "uncategorized"
-	if gallery.Source != nil {
-		sourceName = gallery.Source.Name
-	}
-	sanitizedSource := services.SanitizeDirectoryName(sourceName)
-
-	for i := range gallery.Images {
-		gallery.Images[i].WebPath = fmt.Sprintf("/images/%s", filepath.ToSlash(gallery.Images[i].Filename))
-
-		thumbPath := gallery.Images[i].Filename
-		if gallery.Images[i].Type == "video" {
-			ext := filepath.Ext(thumbPath)
-			thumbPath = strings.TrimSuffix(thumbPath, ext) + ".jpg"
-		}
-
-		parts := strings.Split(filepath.ToSlash(thumbPath), "/")
-		if len(parts) > 1 {
-			parts = append(parts[:len(parts)-1], append([]string{"thumbnails"}, parts[len(parts)-1:]...)...)
-			gallery.Images[i].ThumbnailPath = "/images/" + strings.Join(parts, "/")
-		} else {
-			gallery.Images[i].ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, filepath.Base(thumbPath))
-		}
-	}
-
 	c.JSON(http.StatusOK, gallery)
 }
 

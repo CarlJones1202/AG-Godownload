@@ -69,7 +69,6 @@ func GetPeople(c *gin.Context) {
 		return
 	}
 
-	// Create response with gallery counts
 	type PersonResponse struct {
 		models.Person
 		GalleryCount  int    `json:"gallery_count"`
@@ -78,97 +77,152 @@ func GetPeople(c *gin.Context) {
 	}
 
 	personResponses := make([]PersonResponse, len(people))
+	if len(people) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"data": personResponses,
+			"meta": gin.H{
+				"current_page": page,
+				"total_pages":  0,
+				"total_items":  total,
+				"limit":        limit,
+			},
+		})
+		return
+	}
+
+	personIDs := make([]uint, len(people))
+	for i, p := range people {
+		personIDs[i] = p.ID
+	}
+
+	// Batch 1: Gallery counts via person_galleries
+	type PersonCount struct {
+		PersonID uint
+		Count    int
+	}
+	var galleryCounts []PersonCount
+	database.DB.Table("person_galleries").
+		Select("person_id, COUNT(*) as count").
+		Where("person_id IN ?", personIDs).
+		Group("person_id").
+		Scan(&galleryCounts)
+
+	galleryCountMap := make(map[uint]int, len(people))
+	for _, gc := range galleryCounts {
+		galleryCountMap[gc.PersonID] = gc.Count
+	}
+
+	// Batch 2: Video counts (via galleries + direct images)
+	var videoCounts []PersonCount
+	database.DB.Raw(`
+		SELECT person_id, COUNT(DISTINCT image_id) AS count FROM (
+			SELECT pg.person_id, i.id AS image_id
+			FROM person_galleries pg
+			JOIN galleries g ON g.id = pg.gallery_id
+			JOIN images i ON i.gallery_id = g.id
+			WHERE pg.person_id IN ? AND i.type = 'video' AND i.deleted_at IS NULL AND g.deleted_at IS NULL
+			UNION
+			SELECT pi.person_id, pi.image_id
+			FROM person_images pi
+			JOIN images i ON i.id = pi.image_id
+			WHERE pi.person_id IN ? AND i.type = 'video' AND i.deleted_at IS NULL
+		) GROUP BY person_id
+	`, personIDs, personIDs).Scan(&videoCounts)
+
+	videoCountMap := make(map[uint]int, len(people))
+	for _, vc := range videoCounts {
+		videoCountMap[vc.PersonID] = vc.Count
+	}
+
+	// Batch 3: Thumbnails with fallback
+	thumbnailMap := make(map[uint]string, len(people))
+
+	// Stage 1: Parse Photos arrays (in-memory)
+	noPhotoIDs := make([]uint, 0, len(people))
 	for i := range people {
-		// Get gallery count
-		var galleryCount int64
-		database.DB.Model(&models.Gallery{}).
-			Joins("JOIN person_galleries ON person_galleries.gallery_id = galleries.id").
-			Where("person_galleries.person_id = ?", people[i].ID).
-			Count(&galleryCount)
-
-		// Get video count (videos can be linked via galleries OR directly via person_images)
-		var videoCount int64
-		database.DB.Model(&models.Image{}).
-			Distinct("images.id").
-			Joins("LEFT JOIN galleries ON galleries.id = images.gallery_id").
-			Joins("LEFT JOIN person_galleries ON person_galleries.gallery_id = galleries.id").
-			Joins("LEFT JOIN person_images ON person_images.image_id = images.id").
-			Where("(person_galleries.person_id = ? OR person_images.person_id = ?) AND images.type = ?",
-				people[i].ID, people[i].ID, "video").
-			Count(&videoCount)
-
-		// Get first image for thumbnail
-		var thumbnailPath string
-
-		// First, try to get from photos array
 		if people[i].Photos != "" {
 			var photos []string
 			if err := json.Unmarshal([]byte(people[i].Photos), &photos); err == nil && len(photos) > 0 {
-				thumbnailPath = photos[0]
+				thumbnailMap[people[i].ID] = photos[0]
+				continue
+			}
+		}
+		noPhotoIDs = append(noPhotoIDs, people[i].ID)
+	}
+
+	if len(noPhotoIDs) > 0 {
+		// Stage 2: First tagged image per person
+		type PersonThumb struct {
+			PersonID   uint
+			Filename   string
+			Type       string
+			SourceName string
+		}
+		var tagThumbs []PersonThumb
+		database.DB.Raw(`
+			SELECT person_id, filename, type, source_name FROM (
+				SELECT pi.person_id, i.filename, i.type,
+					COALESCE(s.name, 'uncategorized') AS source_name,
+					ROW_NUMBER() OVER (PARTITION BY pi.person_id ORDER BY i.created_at DESC, i.id DESC) AS rn
+				FROM person_images pi
+				JOIN images i ON i.id = pi.image_id AND i.deleted_at IS NULL
+				LEFT JOIN sources s ON s.id = i.source_id
+				WHERE pi.person_id IN ?
+			) ranked WHERE rn = 1
+		`, noPhotoIDs).Scan(&tagThumbs)
+
+		for _, tt := range tagThumbs {
+			sanitizedSource := services.SanitizeDirectoryName(tt.SourceName)
+			thumbName := filepath.Base(tt.Filename)
+			if tt.Type == "video" {
+				thumbName += ".jpg"
+			}
+			thumbnailMap[tt.PersonID] = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, thumbName)
+		}
+
+		// Stage 3: First gallery image per person (fallback)
+		var needsGalleryFallback []uint
+		for _, pid := range noPhotoIDs {
+			if _, ok := thumbnailMap[pid]; !ok {
+				needsGalleryFallback = append(needsGalleryFallback, pid)
 			}
 		}
 
-		// If no photo in photos array, try to get from directly tagged images
-		if thumbnailPath == "" {
-			var firstImage models.Image
-			err := database.DB.Model(&models.Image{}).
-				Joins("JOIN person_images ON person_images.image_id = images.id").
-				Where("person_images.person_id = ?", people[i].ID).
-				Preload("Source").
-				Preload("Galleries.Source").
-				Order("images.created_at DESC").
-				First(&firstImage).Error
+		if len(needsGalleryFallback) > 0 {
+			var galleryThumbs []PersonThumb
+			database.DB.Raw(`
+				SELECT person_id, filename, type, source_name FROM (
+					SELECT pg.person_id, i.filename, i.type,
+						COALESCE(s.name, 'uncategorized') AS source_name,
+						ROW_NUMBER() OVER (PARTITION BY pg.person_id ORDER BY g.created_at DESC, i.id ASC) AS rn
+					FROM person_galleries pg
+					JOIN galleries g ON g.id = pg.gallery_id AND g.deleted_at IS NULL
+					JOIN images i ON i.gallery_id = g.id AND i.deleted_at IS NULL
+					LEFT JOIN sources s ON s.id = g.source_id
+					WHERE pg.person_id IN ?
+				) ranked WHERE rn = 1
+			`, needsGalleryFallback).Scan(&galleryThumbs)
 
-			if err == nil {
-				sourceName := "uncategorized"
-				if firstImage.Source != nil {
-					sourceName = firstImage.Source.Name
-				} else if len(firstImage.Galleries) > 0 && firstImage.Galleries[0].Source != nil {
-					sourceName = firstImage.Galleries[0].Source.Name
+			for _, gt := range galleryThumbs {
+				if _, ok := thumbnailMap[gt.PersonID]; ok {
+					continue
 				}
-
-				sanitizedSource := services.SanitizeDirectoryName(sourceName)
-				thumbName := filepath.Base(firstImage.Filename)
-				if firstImage.Type == "video" {
+				sanitizedSource := services.SanitizeDirectoryName(gt.SourceName)
+				thumbName := filepath.Base(gt.Filename)
+				if gt.Type == "video" {
 					thumbName += ".jpg"
 				}
-				thumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, thumbName)
+				thumbnailMap[gt.PersonID] = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, thumbName)
 			}
 		}
+	}
 
-		// If still no thumbnail, try to get from first gallery
-		if thumbnailPath == "" {
-			var firstGallery models.Gallery
-			// Find the first gallery for this person that has images
-			err := database.DB.Model(&models.Gallery{}).
-				Joins("JOIN person_galleries ON person_galleries.gallery_id = galleries.id").
-				Where("person_galleries.person_id = ?", people[i].ID).
-				Preload("Source").
-				First(&firstGallery).Error
-
-			if err == nil {
-				var firstImage models.Image
-				if err := database.DB.Where("gallery_id = ?", firstGallery.ID).Order("created_at ASC").First(&firstImage).Error; err == nil {
-					sourceName := "uncategorized"
-					if firstGallery.Source != nil {
-						sourceName = firstGallery.Source.Name
-					}
-
-					sanitizedSource := services.SanitizeDirectoryName(sourceName)
-					thumbName := filepath.Base(firstImage.Filename)
-					if firstImage.Type == "video" {
-						thumbName += ".jpg"
-					}
-					thumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, thumbName)
-				}
-			}
-		}
-
+	for i := range people {
 		personResponses[i] = PersonResponse{
 			Person:        people[i],
-			GalleryCount:  int(galleryCount),
-			VideoCount:    int(videoCount),
-			ThumbnailPath: thumbnailPath,
+			GalleryCount:  galleryCountMap[people[i].ID],
+			VideoCount:    videoCountMap[people[i].ID],
+			ThumbnailPath: thumbnailMap[people[i].ID],
 		}
 	}
 

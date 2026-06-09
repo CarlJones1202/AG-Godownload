@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { images } from '@/lib/api';
+import { images, tagsApi, people } from '@/lib/api';
 import { cn, parseColors, thumbnailUrl, imageUrl } from '@/lib/utils';
 import {
   PageHeader,
@@ -12,13 +12,15 @@ import {
   Button,
   Pagination,
   ConfirmDialog,
+  Badge,
 } from '@/components/UI';
 import { JustifiedGrid } from '@/components/JustifiedGrid';
 import type { JustifiedItem } from '@/components/JustifiedGrid';
 import { Lightbox } from '@/components/Lightbox';
-import { Heart, Search, Palette, Trash2, Shuffle, HardDrive } from 'lucide-react';
+import { Heart, Search, Palette, Trash2, Shuffle, HardDrive, Tag, UserPlus, X } from 'lucide-react';
 import { Select } from '@/components/UI';
 import { usePagination } from '@/hooks/usePagination';
+import type { Person } from '@/types';
 
 export function ImagesPage() {
   const queryClient = useQueryClient();
@@ -34,6 +36,28 @@ export function ImagesPage() {
   const [activeColorSearch, setActiveColorSearch] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [tagFilter, setTagFilter] = useState('');
+  const [linkPersonImageId, setLinkPersonImageId] = useState<number | null>(null);
+  const [personSearch, setPersonSearch] = useState('');
+
+  const { data: personResults } = useQuery({
+    queryKey: ['people', 'search', personSearch],
+    queryFn: () => people.list({ q: personSearch, limit: 10 }),
+    enabled: personSearch.length > 1,
+  });
+
+  const linkPersonMut = useMutation({
+    mutationFn: (personId: number) => people.linkImage(personId, linkPersonImageId!),
+    onSuccess: () => {
+      setLinkPersonImageId(null);
+      setPersonSearch('');
+    },
+  });
+
+  const { data: allTags } = useQuery({
+    queryKey: ['tags', 'all'],
+    queryFn: () => tagsApi.list(),
+  });
 
   const updateFilter = useCallback((key: string, value: any) => {
     setSearchParams((prev) => {
@@ -49,7 +73,7 @@ export function ImagesPage() {
   }, [setSearchParams]);
 
   const { data: imageList, isLoading } = useQuery({
-    queryKey: ['images', { offset, limit, is_favorite: favoritesOnly || undefined, sort_by: sortBy, random_seed: sortBy === 'random' ? randomSeed : undefined, on_disk: onDiskOnly || undefined }],
+    queryKey: ['images', { offset, limit, is_favorite: favoritesOnly || undefined, sort_by: sortBy, random_seed: sortBy === 'random' ? randomSeed : undefined, on_disk: onDiskOnly || undefined, filter_tags: tagFilter || undefined }],
     queryFn: () =>
       images.list({
         limit,
@@ -59,6 +83,7 @@ export function ImagesPage() {
         sort_by: sortBy,
         random_seed: sortBy === 'random' ? randomSeed : undefined,
         on_disk: onDiskOnly || undefined,
+        filter_tags: tagFilter || undefined,
       }),
     enabled: !activeColorSearch,
   });
@@ -104,6 +129,7 @@ export function ImagesPage() {
   const gridItems: JustifiedItem[] = useMemo(() => {
     return displayImages.map((img) => {
       const colors = parseColors(img.dominant_colors);
+      const tagCount = img.tags?.length ?? 0;
       return {
         id: img.id,
         src: imageUrl(img.filename),
@@ -138,8 +164,24 @@ export function ImagesPage() {
                 >
                   <Trash2 size={16} className="text-white hover:text-red-400" />
                 </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setLinkPersonImageId(img.id);
+                    setPersonSearch('');
+                  }}
+                  className="p-1"
+                  title="Link to person"
+                >
+                  <UserPlus size={16} className="text-white hover:text-blue-400" />
+                </button>
               </div>
               <div className="flex items-center gap-1">
+                {tagCount > 0 && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] text-zinc-300 bg-zinc-900/70 px-1 py-0.5 rounded">
+                    <Tag size={10} />{tagCount}
+                  </span>
+                )}
                 {img.width && img.height && (
                   <span className="text-[10px] text-white/70">
                     {img.width}x{img.height}
@@ -195,6 +237,20 @@ export function ImagesPage() {
               ]}
             />
           </div>
+
+          {allTags && allTags.length > 0 && (
+            <div className="w-48">
+              <Select
+                label="Filter by Tag"
+                value={tagFilter}
+                onChange={(e) => setTagFilter(e.target.value)}
+                options={[
+                  { value: '', label: 'All tags' },
+                  ...allTags.map((t) => ({ value: String(t.id), label: `${t.name} (${t.count})` })),
+                ]}
+              />
+            </div>
+          )}
 
           {sortBy === 'random' && (
             <>
@@ -297,6 +353,48 @@ export function ImagesPage() {
           imageData={displayImages}
           onToggleFavorite={(id) => favMut.mutate(id)}
         />
+      )}
+
+      {linkPersonImageId !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setLinkPersonImageId(null)}>
+          <div
+            className="w-full max-w-sm bg-zinc-900 border border-zinc-700 rounded-xl p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-white">Link Image to Person</h3>
+              <button onClick={() => setLinkPersonImageId(null)} className="text-zinc-500 hover:text-white transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <Input
+              placeholder="Search person by name..."
+              value={personSearch}
+              onChange={(e) => setPersonSearch(e.target.value)}
+              autoFocus
+              className="mb-3"
+            />
+            {personResults && personResults.data.length > 0 && (
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {personResults.data.map((p: Person) => (
+                  <button
+                    key={p.id}
+                    onClick={() => linkPersonMut.mutate(p.id)}
+                    disabled={linkPersonMut.isPending}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 transition-all text-left text-sm"
+                  >
+                    <UserPlus size={14} className="text-zinc-400 shrink-0" />
+                    <span className="text-zinc-200 flex-1 truncate">{p.name}</span>
+                    {p.aliases && <span className="text-[10px] text-zinc-500 truncate max-w-[100px]">{p.aliases}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+            {personSearch.length > 1 && personResults && personResults.data.length === 0 && (
+              <p className="text-xs text-zinc-500 text-center py-2">No people found matching "{personSearch}"</p>
+            )}
+          </div>
+        </div>
       )}
 
       <ConfirmDialog

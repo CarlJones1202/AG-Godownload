@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, X, Info, Heart, Link as LinkIcon, Play, Pause, Maximize, Minimize, Timer } from 'lucide-react';
-import type { Image } from '@/types';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { ChevronLeft, ChevronRight, X, Info, Heart, Link as LinkIcon, Play, Pause, Maximize, Minimize, Timer, UserPlus, Tag, Plus } from 'lucide-react';
+import type { Image, Person } from '@/types';
 import { formatDate, parseColors, cn } from '@/lib/utils';
 import { Link } from 'react-router-dom';
+import { tagsApi, people } from '@/lib/api';
+import { Input, Button } from '@/components/UI';
 
 interface LightboxProps {
   images: { src: string; alt?: string }[];
@@ -18,6 +21,47 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(3000);
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const queryClient = useQueryClient();
+  const [addTagOpen, setAddTagOpen] = useState(false);
+  const [tagSearch, setTagSearch] = useState('');
+  const [linkPersonOpen, setLinkPersonOpen] = useState(false);
+  const [personSearch, setPersonSearch] = useState('');
+
+  const { data: tagResults } = useQuery({
+    queryKey: ['tags', 'search', tagSearch],
+    queryFn: () => tagsApi.search(tagSearch),
+    enabled: tagSearch.length > 1,
+  });
+
+  const { data: personResults } = useQuery({
+    queryKey: ['people', 'search', personSearch],
+    queryFn: () => people.list({ q: personSearch, limit: 10 }),
+    enabled: linkPersonOpen && personSearch.length > 1,
+  });
+
+  const linkTagMut = useMutation({
+    mutationFn: (tagId: number) => tagsApi.linkToImage(currentImage!.id, tagId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['images'] });
+      setAddTagOpen(false);
+      setTagSearch('');
+    },
+  });
+
+  const unlinkTagMut = useMutation({
+    mutationFn: (tagId: number) => tagsApi.unlinkFromImage(currentImage!.id, tagId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['images'] });
+    },
+  });
+
+  const linkPersonMut = useMutation({
+    mutationFn: (personId: number) => people.linkImage(personId, currentImage!.id),
+    onSuccess: () => {
+      setLinkPersonOpen(false);
+      setPersonSearch('');
+    },
+  });
 
   const toggleFullscreen = useCallback(async () => {
     try {
@@ -277,6 +321,102 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
                     {currentImage.is_favorite ? 'Favorited' : 'Favorite'}
                   </span>
                 </button>
+                {currentImage.tags && currentImage.tags.length > 0 && (
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-white/30 text-[10px] uppercase tracking-widest">Tags</span>
+                    <div className="flex gap-1.5 flex-wrap max-w-[200px]">
+                      {currentImage.tags.slice(0, showInfo ? undefined : 4).map((t) => (
+                        <span key={t.id} className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/70 whitespace-nowrap">
+                          {t.name}
+                          {showInfo && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); unlinkTagMut.mutate(t.id); }}
+                              disabled={unlinkTagMut.isPending}
+                              className="hover:text-red-400 transition-colors"
+                            >
+                              <X size={10} />
+                            </button>
+                          )}
+                        </span>
+                      ))}
+                      {!showInfo && currentImage.tags.length > 4 && (
+                        <span className="text-[10px] text-white/40">+{currentImage.tags.length - 4}</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {showInfo && (
+                  <div className="flex flex-col gap-1.5">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setAddTagOpen(!addTagOpen); setTagSearch(''); }}
+                      className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-white/15 text-zinc-400 hover:text-white transition-all"
+                    >
+                      <Plus size={10} /> Add Tag
+                    </button>
+                    {addTagOpen && (
+                      <div className="relative" onClick={(e) => e.stopPropagation()}>
+                        <Input
+                          placeholder="Search tags..."
+                          value={tagSearch}
+                          onChange={(e) => setTagSearch(e.target.value)}
+                          className="h-7 text-[10px] px-2 w-36"
+                          autoFocus
+                        />
+                        {tagResults && tagResults.length > 0 && (
+                          <div className="absolute top-full left-0 mt-1 w-36 bg-zinc-800 border border-zinc-700 rounded-lg overflow-hidden shadow-xl z-10">
+                            {tagResults.map((t) => (
+                              <button
+                                key={t.id}
+                                onClick={() => linkTagMut.mutate(t.id)}
+                                disabled={linkTagMut.isPending}
+                                className="w-full flex items-center gap-1.5 px-2 py-1.5 text-[10px] text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
+                              >
+                                <Tag size={10} />
+                                {t.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {showInfo && (
+                  <div className="flex flex-col gap-1.5">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setLinkPersonOpen(!linkPersonOpen); setPersonSearch(''); }}
+                      className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-white/15 text-zinc-400 hover:text-white transition-all"
+                    >
+                      <UserPlus size={10} /> Link Person
+                    </button>
+                    {linkPersonOpen && (
+                      <div className="relative" onClick={(e) => e.stopPropagation()}>
+                        <Input
+                          placeholder="Search person..."
+                          value={personSearch}
+                          onChange={(e) => setPersonSearch(e.target.value)}
+                          className="h-7 text-[10px] px-2 w-36"
+                          autoFocus
+                        />
+                        {personResults && personResults.data.length > 0 && (
+                          <div className="absolute top-full left-0 mt-1 w-36 bg-zinc-800 border border-zinc-700 rounded-lg overflow-hidden shadow-xl z-10">
+                            {personResults.data.map((p: Person) => (
+                              <button
+                                key={p.id}
+                                onClick={() => linkPersonMut.mutate(p.id)}
+                                disabled={linkPersonMut.isPending}
+                                className="w-full flex items-center gap-1.5 px-2 py-1.5 text-[10px] text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors truncate"
+                              >
+                                <UserPlus size={10} />
+                                {p.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {colors.length > 0 && (
                   <div className="flex flex-col gap-1.5">
                     <span className="text-white/30 text-[10px] uppercase tracking-widest">Palette</span>

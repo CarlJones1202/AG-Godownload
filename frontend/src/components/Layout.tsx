@@ -6,7 +6,7 @@ import {
   Image,
   Film,
   Users,
-  Settings,
+  Tag,
   Loader2,
   CheckCircle2,
   AlertCircle,
@@ -24,7 +24,7 @@ const navItems = [
   { to: '/images', label: 'Images', icon: Image },
   { to: '/videos', label: 'Videos', icon: Film },
   { to: '/people', label: 'People', icon: Users },
-  { to: '/admin', label: 'Admin', icon: Settings },
+  { to: '/tags', label: 'Tags', icon: Tag },
 ];
 
 export function Layout() {

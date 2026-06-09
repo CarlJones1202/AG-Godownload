@@ -59,6 +59,7 @@ export interface Image {
   is_video?: boolean;
   vr_mode: string;
   duration_seconds?: number;
+  tags?: Tag[];
 }
 
 export interface Person {
@@ -131,6 +132,8 @@ export interface PersonScanResult {
   id: number;
   person_id: number;
   source: string;
+  provider?: string;
+  alias?: string;
   status: string;
   results: any;
   created_at: string;
@@ -188,6 +191,22 @@ export interface PersonExclusion {
   person_id: number;
   gallery_id?: number;
   image_id?: number;
+}
+
+export interface IdentifierResult {
+  external_id: string;
+  name: string;
+  disambiguation: string;
+  preview_data: Record<string, unknown>;
+}
+
+export interface DashboardStats {
+  sources: number;
+  galleries: number;
+  images: number;
+  videos: number;
+  people: number;
+  downloads: DownloadStatus;
 }
 
 export interface ActiveSource {

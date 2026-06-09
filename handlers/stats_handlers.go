@@ -3,10 +3,38 @@ package handlers
 import (
 	"gallery_api/database"
 	"gallery_api/models"
+	"gallery_api/services"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
+
+// GetDashboardStats returns aggregate counts for the dashboard
+func GetDashboardStats(c *gin.Context) {
+	var sourceCount int64
+	database.DB.Model(&models.Source{}).Count(&sourceCount)
+
+	var galleryCount int64
+	database.DB.Model(&models.Gallery{}).Count(&galleryCount)
+
+	var imageCount int64
+	database.DB.Model(&models.Image{}).Where("type != ?", "video").Count(&imageCount)
+
+	var videoCount int64
+	database.DB.Model(&models.Image{}).Where("type = ?", "video").Count(&videoCount)
+
+	var personCount int64
+	database.DB.Model(&models.Person{}).Count(&personCount)
+
+	c.JSON(http.StatusOK, gin.H{
+		"sources":   sourceCount,
+		"galleries": galleryCount,
+		"images":    imageCount,
+		"videos":    videoCount,
+		"people":    personCount,
+		"downloads": services.GetGlobalDownloadStatus(),
+	})
+}
 
 // GetPersonStats returns statistics for a person
 func GetPersonStats(c *gin.Context) {

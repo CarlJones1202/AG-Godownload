@@ -209,10 +209,12 @@ func CrawlSource(sourceID uint) error {
 			if len(latestProgress) == 0 {
 				return
 			}
+			tx := database.DB.Begin()
 			for _, update := range latestProgress {
-				database.DB.Exec("UPDATE sources SET download_progress = ?, downloaded_items = ? WHERE id = ?",
+				tx.Exec("UPDATE sources SET download_progress = ?, downloaded_items = ? WHERE id = ?",
 					update.progress, update.downloaded, update.sourceID)
 			}
+			tx.Commit()
 			latestProgress = make(map[uint]progressUpdate)
 		}
 
@@ -496,6 +498,7 @@ func CrawlSource(sourceID uint) error {
 		"downloaded_items":  0,
 		"total_items":       0,
 	})
+	database.Checkpoint()
 
 	// Auto-link gallery to people if it matches missing galleries from scans
 	if gallery.SourceURL != "" {
@@ -614,5 +617,47 @@ func ProcessVideoSource(source models.Source) error {
 	}
 
 	logger.Infof("Created video record in database (ID: %d)", image.ID)
+	return nil
+}
+
+// CleanupVideoGalleries removes galleries that only contain videos (videos are stored standalone)
+func CleanupVideoGalleries() error {
+	var galleries []models.Gallery
+	if err := database.DB.Where("source_id IS NOT NULL").Find(&galleries).Error; err != nil {
+		return err
+	}
+
+	var removed int
+	for _, g := range galleries {
+		var imageCount int64
+		database.DB.Model(&models.Image{}).Where("gallery_id = ?", g.ID).Count(&imageCount)
+
+		if imageCount == 0 {
+			// Empty gallery — check if the source location is a video
+			var src models.Source
+			if err := database.DB.First(&src, *g.SourceID).Error; err != nil {
+				continue
+			}
+			if !IsVideoURL(src.Location) && !IsVideoFile(src.Location) {
+				continue
+			}
+		} else {
+			// Has images — check if all are videos
+			var nonVideoCount int64
+			database.DB.Model(&models.Image{}).Where("gallery_id = ? AND type != 'video'", g.ID).Count(&nonVideoCount)
+			if nonVideoCount > 0 {
+				continue
+			}
+		}
+
+		// Clean up person_galleries join table, then delete the gallery
+		database.DB.Exec("DELETE FROM person_galleries WHERE gallery_id = ?", g.ID)
+		database.DB.Delete(&g, g.ID)
+		removed++
+	}
+
+	if removed > 0 {
+		logger.Infof("Cleaned up %d video-only galleries", removed)
+	}
 	return nil
 }

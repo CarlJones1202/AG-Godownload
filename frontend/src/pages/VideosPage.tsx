@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { videos, images as imagesApi } from '@/lib/api';
+import { videos, images as imagesApi, people } from '@/lib/api';
 import { formatDate, formatDuration, thumbnailUrl } from '@/lib/utils';
 import {
   PageHeader,
@@ -9,19 +9,22 @@ import {
   EmptyState,
   Badge,
   Button,
+  Input,
   Pagination,
   ConfirmDialog,
 } from '@/components/UI';
 import { VideoPlayer } from '@/components/VideoPlayer';
-import { Heart, Play, Trash2 } from 'lucide-react';
+import { Heart, Play, Trash2, UserPlus, X } from 'lucide-react';
 import { usePagination } from '@/hooks/usePagination';
-import type { Image } from '@/types';
+import type { Image, Person } from '@/types';
 
 export function VideosPage() {
   const queryClient = useQueryClient();
   const { page, offset, limit, prevPage, nextPage } = usePagination({ limit: 50 });
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [activeVideo, setActiveVideo] = useState<Image | null>(null);
+  const [linkPersonImageId, setLinkPersonImageId] = useState<number | null>(null);
+  const [personSearch, setPersonSearch] = useState('');
 
   const { data: videoList, isLoading } = useQuery({
     queryKey: ['videos', { offset, limit }],
@@ -47,6 +50,20 @@ export function VideosPage() {
     mutationFn: ({ id, mode }: { id: number; mode: string }) => imagesApi.updateVrMode(id, mode),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['videos'] });
+    },
+  });
+
+  const { data: personResults } = useQuery({
+    queryKey: ['people', 'search', personSearch],
+    queryFn: () => people.list({ q: personSearch, limit: 10 }),
+    enabled: personSearch.length > 1,
+  });
+
+  const linkPersonMut = useMutation({
+    mutationFn: (personId: number) => people.linkImage(personId, linkPersonImageId!),
+    onSuccess: () => {
+      setLinkPersonImageId(null);
+      setPersonSearch('');
     },
   });
 
@@ -123,6 +140,17 @@ export function VideosPage() {
                       <Button
                         variant="ghost"
                         size="sm"
+                        title="Link to person"
+                        onClick={() => {
+                          setLinkPersonImageId(vid.id);
+                          setPersonSearch('');
+                        }}
+                      >
+                        <UserPlus size={14} className="text-zinc-500 hover:text-blue-400" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         title="Delete video"
                         onClick={() => setConfirmDeleteId(vid.id)}
                       >
@@ -157,6 +185,48 @@ export function VideosPage() {
 
       {activeVideo && (
         <VideoPlayer video={activeVideo} onClose={() => setActiveVideo(null)} />
+      )}
+
+      {linkPersonImageId !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setLinkPersonImageId(null)}>
+          <div
+            className="w-full max-w-sm bg-zinc-900 border border-zinc-700 rounded-xl p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-white">Link Video to Person</h3>
+              <button onClick={() => setLinkPersonImageId(null)} className="text-zinc-500 hover:text-white transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <Input
+              placeholder="Search person by name..."
+              value={personSearch}
+              onChange={(e) => setPersonSearch(e.target.value)}
+              autoFocus
+              className="mb-3"
+            />
+            {personResults && personResults.data.length > 0 && (
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {personResults.data.map((p: Person) => (
+                  <button
+                    key={p.id}
+                    onClick={() => linkPersonMut.mutate(p.id)}
+                    disabled={linkPersonMut.isPending}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 transition-all text-left text-sm"
+                  >
+                    <UserPlus size={14} className="text-zinc-400 shrink-0" />
+                    <span className="text-zinc-200 flex-1 truncate">{p.name}</span>
+                    {p.aliases && <span className="text-[10px] text-zinc-500 truncate max-w-[100px]">{p.aliases}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+            {personSearch.length > 1 && personResults && personResults.data.length === 0 && (
+              <p className="text-xs text-zinc-500 text-center py-2">No people found matching "{personSearch}"</p>
+            )}
+          </div>
+        </div>
       )}
 
       <ConfirmDialog

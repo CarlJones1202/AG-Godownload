@@ -166,6 +166,7 @@ func main() {
 	r.POST("/people/:id/stashdb/link", handlers.LinkStashDB)
 
 	// Stats routes
+	r.GET("/api/stats", handlers.GetDashboardStats)
 	r.GET("/people/:id/stats", handlers.GetPersonStats)
 
 	// Source scan routes

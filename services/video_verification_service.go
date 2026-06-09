@@ -122,6 +122,15 @@ func VerifyDownloadedVideos() error {
 			IncVideoVerificationProcessed()
 			expectedFullPath := filepath.Join(UploadsDir, video.Filename)
 
+			// Regenerate thumbnail if missing
+			thumbFilename := strings.TrimSuffix(filepath.Base(video.Filename), filepath.Ext(video.Filename)) + ".jpg"
+			thumbPath := filepath.Join(UploadsDir, filepath.Dir(video.Filename), "thumbnails", thumbFilename)
+			if _, err := os.Stat(thumbPath); os.IsNotExist(err) {
+				if _, err := os.Stat(expectedFullPath); err == nil {
+					go GenerateVideoThumbnail(expectedFullPath)
+				}
+			}
+
 			if _, err := os.Stat(expectedFullPath); os.IsNotExist(err) {
 				missingCount++
 				IncVideoVerificationMissing()
@@ -144,14 +153,6 @@ func VerifyDownloadedVideos() error {
 					logger.Infof("[Source: %s] Expected location: %s (ID: %d)", video.OriginalURL, expectedFullPath, video.ID)
 					atomic.AddInt32(&skippedCount, 1)
 					continue
-				}
-
-				// Check for thumbnail and regenerate if main file exists but thumb doesn't
-				thumbPath := filepath.Join(UploadsDir, filepath.Dir(video.Filename), "thumbnails", filepath.Base(video.Filename)+".jpg")
-				if _, err := os.Stat(thumbPath); os.IsNotExist(err) {
-					if _, err := os.Stat(expectedFullPath); err == nil {
-						go GenerateVideoThumbnail(expectedFullPath)
-					}
 				}
 
 				if video.DownloadURL == "" {
@@ -299,6 +300,7 @@ func VerifyDownloadedVideos() error {
 			wg.Wait()
 			close(resultChan) // Signal batch processor to finish
 			wgBatch.Wait()    // Wait for batch processor to complete writes
+			database.Checkpoint()
 		}
 
 		logger.Infof("Video verification complete — Missing: %d | Recovered: %d | Skipped: %d",

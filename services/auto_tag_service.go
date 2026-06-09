@@ -63,88 +63,137 @@ func AutoTagPerson(personID uint, minConfidence float64, autoApply bool) (*AutoT
 		Suggestions: []TagSuggestion{},
 	}
 
-	// Scan galleries
-	var galleries []models.Gallery
-	database.DB.Find(&galleries)
+	// Batch-load already-tagged links into memory
+	type galleryLink struct{ GalleryID uint }
+	var existingGalleries []galleryLink
+	database.DB.Table("person_galleries").
+		Select("gallery_id").
+		Where("person_id = ?", personID).
+		Scan(&existingGalleries)
 
-	for _, gallery := range galleries {
-		// Skip if excluded
-		if excludedGalleries[gallery.ID] {
-			continue
-		}
-
-		// Check if already tagged
-		var count int64
-		database.DB.Table("person_galleries").
-			Where("person_id = ? AND gallery_id = ?", personID, gallery.ID).
-			Count(&count)
-		if count > 0 {
-			continue // Already tagged
-		}
-
-		// Check for matches
-		for _, term := range searchTerms {
-			confidence := CalculateMatchConfidence(term, gallery.Name)
-			if confidence >= minConfidence {
-				if autoApply {
-					// Auto-apply the tag
-					database.DB.Exec("INSERT INTO person_galleries (person_id, gallery_id) VALUES (?, ?)", personID, gallery.ID)
-					result.GalleriesTagged++
-				} else {
-					// Add as suggestion
-					result.Suggestions = append(result.Suggestions, TagSuggestion{
-						Type:       "gallery",
-						ID:         gallery.ID,
-						Name:       gallery.Name,
-						MatchedOn:  term,
-						Confidence: confidence,
-					})
-				}
-				break // Only match once per gallery
-			}
-		}
+	alreadyTaggedGallery := make(map[uint]bool, len(existingGalleries))
+	for _, link := range existingGalleries {
+		alreadyTaggedGallery[link.GalleryID] = true
 	}
 
-	// Scan videos (images with type "video")
-	var images []models.Image
-	database.DB.Where("type = ?", "video").Find(&images)
+	type imageLink struct{ ImageID uint }
+	var existingImages []imageLink
+	database.DB.Table("person_images").
+		Select("image_id").
+		Where("person_id = ?", personID).
+		Scan(&existingImages)
 
-	for _, image := range images {
-		// Skip if excluded
-		if excludedImages[image.ID] {
-			continue
+	alreadyTaggedImage := make(map[uint]bool, len(existingImages))
+	for _, link := range existingImages {
+		alreadyTaggedImage[link.ImageID] = true
+	}
+
+	// Collect batch inserts for auto-apply
+	type galleryInsert struct {
+		PersonID  uint
+		GalleryID uint
+	}
+	var galleryInserts []galleryInsert
+
+	type imageInsert struct {
+		PersonID uint
+		ImageID  uint
+	}
+	var imageInserts []imageInsert
+
+	// Chunked gallery scan
+	const chunkSize = 500
+	offset := 0
+	for {
+		var galleries []models.Gallery
+		if err := database.DB.Select("id, name").Limit(chunkSize).Offset(offset).Find(&galleries).Error; err != nil {
+			break
+		}
+		if len(galleries) == 0 {
+			break
 		}
 
-		// Check if already tagged
-		var count int64
-		database.DB.Table("person_images").
-			Where("person_id = ? AND image_id = ?", personID, image.ID).
-			Count(&count)
-		if count > 0 {
-			continue // Already tagged
-		}
+		for _, gallery := range galleries {
+			if excludedGalleries[gallery.ID] || alreadyTaggedGallery[gallery.ID] {
+				continue
+			}
 
-		// Check for matches in filename
-		for _, term := range searchTerms {
-			confidence := CalculateMatchConfidence(term, image.Filename)
-			if confidence >= minConfidence {
-				if autoApply {
-					// Auto-apply the tag
-					database.DB.Exec("INSERT INTO person_images (person_id, image_id) VALUES (?, ?)", personID, image.ID)
-					result.VideosTagged++
-				} else {
-					// Add as suggestion
-					result.Suggestions = append(result.Suggestions, TagSuggestion{
-						Type:       "video",
-						ID:         image.ID,
-						Name:       image.Filename,
-						MatchedOn:  term,
-						Confidence: confidence,
-					})
+			for _, term := range searchTerms {
+				confidence := CalculateMatchConfidence(term, gallery.Name)
+				if confidence >= minConfidence {
+					if autoApply {
+						galleryInserts = append(galleryInserts, galleryInsert{personID, gallery.ID})
+						result.GalleriesTagged++
+					} else {
+						result.Suggestions = append(result.Suggestions, TagSuggestion{
+							Type: "gallery", ID: gallery.ID, Name: gallery.Name,
+							MatchedOn: term, Confidence: confidence,
+						})
+					}
+					break
 				}
-				break // Only match once per video
 			}
 		}
+		offset += chunkSize
+	}
+
+	// Batch insert gallery tags in a single transaction
+	if len(galleryInserts) > 0 {
+		tx := database.DB.Begin()
+		for _, ins := range galleryInserts {
+			if err := tx.Exec("INSERT INTO person_galleries (person_id, gallery_id) VALUES (?, ?)", ins.PersonID, ins.GalleryID).Error; err != nil {
+				tx.Rollback()
+				break
+			}
+		}
+		tx.Commit()
+	}
+
+	// Chunked video scan
+	offset = 0
+	for {
+		var images []models.Image
+		if err := database.DB.Select("id, filename").Where("type = ?", "video").Limit(chunkSize).Offset(offset).Find(&images).Error; err != nil {
+			break
+		}
+		if len(images) == 0 {
+			break
+		}
+
+		for _, image := range images {
+			if excludedImages[image.ID] || alreadyTaggedImage[image.ID] {
+				continue
+			}
+
+			for _, term := range searchTerms {
+				confidence := CalculateMatchConfidence(term, image.Filename)
+				if confidence >= minConfidence {
+					if autoApply {
+						imageInserts = append(imageInserts, imageInsert{personID, image.ID})
+						result.VideosTagged++
+					} else {
+						result.Suggestions = append(result.Suggestions, TagSuggestion{
+							Type: "video", ID: image.ID, Name: image.Filename,
+							MatchedOn: term, Confidence: confidence,
+						})
+					}
+					break
+				}
+			}
+		}
+		offset += chunkSize
+	}
+
+	// Batch insert video tags in a single transaction
+	if len(imageInserts) > 0 {
+		tx := database.DB.Begin()
+		for _, ins := range imageInserts {
+			if err := tx.Exec("INSERT INTO person_images (person_id, image_id) VALUES (?, ?)", ins.PersonID, ins.ImageID).Error; err != nil {
+				tx.Rollback()
+				break
+			}
+		}
+		tx.Commit()
 	}
 
 	return result, nil
