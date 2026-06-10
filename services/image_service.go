@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/disintegration/imaging"
 	"gorm.io/gorm"
@@ -61,7 +62,10 @@ type DownloadImageResult struct {
 // in a subdirectory named after the source. If referer is provided it will be set
 // on the outgoing request; otherwise the origin (scheme+host) will be used.
 func DownloadImage(url string, sourceName string, referer string) (*DownloadImageResult, error) {
-	req, err := http.NewRequest("GET", url, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +88,7 @@ func DownloadImage(url string, sourceName string, referer string) (*DownloadImag
 	}
 
 	// Use the shared client with retry logic
-	resp, err := DoRequestWithRetry(context.Background(), req)
+	resp, err := DoRequestWithRetry(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +330,10 @@ func DownloadProviderThumbnail(url string) (string, error) {
 	}
 	logger.Debugf("Downloading provider thumbnail: %s", url)
 
-	req, err := http.NewRequest("GET", url, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return "", err
 	}
@@ -350,7 +357,7 @@ func DownloadProviderThumbnail(url string) (string, error) {
 		req.Header.Set("Referer", origin)
 	}
 
-	resp, err := DoRequestWithRetry(context.Background(), req)
+	resp, err := DoRequestWithRetry(ctx, req)
 	if err != nil {
 		return "", err
 	}
@@ -415,7 +422,10 @@ func DownloadProviderThumbnail(url string) (string, error) {
 
 // DownloadPersonImage downloads an image for a person and saves it to a specific directory
 func DownloadPersonImage(url string, personID uint) (string, error) {
-	req, err := http.NewRequest("GET", url, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return "", err
 	}
@@ -434,7 +444,7 @@ func DownloadPersonImage(url string, personID uint) (string, error) {
 	}
 
 	// Use shared client with retry logic
-	resp, err := DoRequestWithRetry(context.Background(), req)
+	resp, err := DoRequestWithRetry(ctx, req)
 	if err != nil {
 		return "", err
 	}

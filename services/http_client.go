@@ -112,9 +112,11 @@ func DoRequestWithRetry(ctx context.Context, req *http.Request) (*http.Response,
 			// Log the full URL for easier debugging
 			logger.Debugf("Retrying request to %s in %v (attempt %d)", req.URL.String(), backoff, i+1)
 
+			timer := time.NewTimer(backoff)
 			select {
-			case <-time.After(backoff):
+			case <-timer.C:
 			case <-ctx.Done():
+				timer.Stop()
 				return nil, ctx.Err()
 			}
 		}
