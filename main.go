@@ -37,7 +37,7 @@ func main() {
 	// 	logger.Warn("Image migration had errors:", err)
 	// }
 
-	// Run startup verification tasks concurrently
+	// Run startup verification tasks sequentially to avoid memory thrashing
 	go func() {
 		logger.Info("Starting migration for missing provider thumbnails...")
 		if err := services.MigrateMissingProviderThumbnails(); err != nil {
@@ -49,12 +49,7 @@ func main() {
 		} else {
 			logger.Infof("Provider thumbnail validation: %d valid, %d fixed/updated", valid, fixed)
 		}
-	}()
 
-	// Start video worker
-	services.StartVideoWorker()
-
-	go func() {
 		logger.Info("Starting background verification of downloaded images...")
 		if err := services.RemoveDuplicateImages(); err != nil {
 			logger.Error("Duplicate image removal failed:", err)
@@ -65,25 +60,19 @@ func main() {
 		} else {
 			logger.Info("Background verification completed successfully")
 		}
-	}()
 
-	go func() {
 		logger.Info("Starting scanning for missing video metadata...")
 		if err := services.ScanMissingMetadata(database.DB, false); err != nil {
 			logger.Error("Video metadata scan failed:", err)
 		} else {
 			logger.Info("Video metadata scan completed successfully")
 		}
-	}()
 
-	go func() {
 		logger.Info("Starting background verification of person images...")
 		if err := services.VerifyPersonImages(); err != nil {
 			logger.Error("Person image verification failed:", err)
 		}
-	}()
 
-	go func() {
 		logger.Info("Starting background verification of videos...")
 		if err := services.VerifyDownloadedVideos(); err != nil {
 			logger.Error("Video verification failed:", err)
@@ -92,9 +81,18 @@ func main() {
 		}
 	}()
 
+	// Start video worker
+	services.StartVideoWorker()
+
 	// Start workers
 	services.StartCrawlerWorker()
-	services.StartAITagWorker()
+	// AI tagging service has been disabled/commented out. To re-enable,
+	// restore calls to services.StartAITagWorker and the related queueing code.
+	// if config.Global.AITagWorkers > 0 {
+	//     services.StartAITagWorker()
+	// } else {
+	//     logger.Infof("AI tagging worker disabled (AITAG_WORKERS=%d)", config.Global.AITagWorkers)
+	// }
 	services.StartWebSocketHub()
 	services.StartScanWorker()
 	services.StartDailyScanScheduler()
@@ -105,6 +103,13 @@ func main() {
 	// Routes
 	r.POST("/sources", handlers.CreateSource)
 	r.GET("/sources", handlers.GetSources)
+	// Retry endpoints
+	r.GET("/admin/failed-images", handlers.GetFailedImages)
+	r.POST("/admin/failed-images/:id/retry", handlers.RetryImage)
+	r.POST("/admin/failed-images/retry-all", handlers.RetryAllImages)
+	r.GET("/admin/failed-sources", handlers.GetFailedSources)
+	r.POST("/admin/failed-sources/:id/retry", handlers.RetrySource)
+	r.POST("/admin/failed-sources/retry-all", handlers.RetryAllSources)
 	r.POST("/sources/:id/crawl", handlers.CrawlSource)
 	r.DELETE("/sources/:id", handlers.DeleteSource)
 	r.PATCH("/sources/:id/priority", handlers.UpdateSourcePriority)

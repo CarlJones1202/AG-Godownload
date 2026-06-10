@@ -9,6 +9,9 @@ import (
 	"gorm.io/gorm"
 )
 
+// lastCheckpointTime tracks the last time we performed a WAL TRUNCATE checkpoint
+var lastCheckpointTime time.Time
+
 var DB *gorm.DB
 
 func Connect(dbPath string) {
@@ -29,24 +32,28 @@ func Connect(dbPath string) {
 		logger.Fatal("Failed to connect to database:", err)
 	}
 
-	// Configure connection pool — SQLite only supports one writer at a time,
-	// so limiting to 1 open connection eliminates all lock contention overhead.
+	// Configure connection pool.
+	// SQLite WAL mode supports concurrent reads + one writer.
+	// Using 3 connections allows readers to proceed while a writer is active,
+	// preventing API requests from queueing behind slow flushes.
 	sqlDB, err := DB.DB()
 	if err != nil {
 		logger.Fatal("Failed to get underlying sql.DB:", err)
 	}
-	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxOpenConns(3)
 	sqlDB.SetMaxIdleConns(1)
-	sqlDB.SetConnMaxLifetime(time.Hour)
+	sqlDB.SetConnMaxLifetime(5 * time.Minute)
 
 	logger.Info("Database connected successfully")
 }
 
-// Checkpoint forces a WAL checkpoint to keep the WAL file small.
-// Call after heavy write batches to prevent read performance degradation.
+// Checkpoint runs a PASSIVE WAL checkpoint to keep the WAL file manageable.
+// This is non-blocking and fast. The built-in wal_autocheckpoint (triggered
+// every ~1000 pages / ~4 MB) handles TRUNCATE automatically, so we don't
+// force one here and risk blocking concurrent writers on other connections.
 func Checkpoint() {
-	if err := DB.Exec("PRAGMA wal_checkpoint(TRUNCATE)").Error; err != nil {
-		logger.Warnf("WAL checkpoint failed: %v", err)
+	if err := DB.Exec("PRAGMA wal_checkpoint(PASSIVE)").Error; err != nil {
+		logger.Warnf("WAL passive checkpoint failed: %v", err)
 	}
 }
 
@@ -108,14 +115,28 @@ func addJunctionIndexes() {
 
 func addImageIndexes() {
 	err := DB.Exec(`
-		CREATE INDEX IF NOT EXISTS idx_images_type_deleted_created 
-		ON images(type, deleted_at, created_at)
+		CREATE INDEX IF NOT EXISTS idx_images_type_deleted_created_id 
+		ON images(type, deleted_at, created_at, id)
 	`).Error
 	if err != nil {
 		logger.Warn("Failed to add images index:", err)
 		return
 	}
-	logger.Info("Added composite index on images(type, deleted_at, created_at)")
+	logger.Info("Added composite index idx_images_type_deleted_created_id on images(type, deleted_at, created_at, id)")
+
+	// Covering index for gallery-thumbnail window function:
+	//   PARTITION BY ig.gallery_id ORDER BY i.created_at ASC, i.id ASC
+	//   WHERE i.deleted_at IS NULL
+	// Leading with deleted_at lets SQLite scan pre-sorted rows into the window function.
+	err = DB.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_images_deleted_created_id 
+		ON images(deleted_at, created_at, id)
+	`).Error
+	if err != nil {
+		logger.Warn("Failed to add images deleted/created index:", err)
+		return
+	}
+	logger.Info("Added composite index idx_images_deleted_created_id on images(deleted_at, created_at, id)")
 }
 
 func MigrateData() {

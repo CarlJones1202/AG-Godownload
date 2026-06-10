@@ -21,8 +21,9 @@ type Gallery struct {
 	Description          string    `json:"description"`
 	Provider             string    `json:"provider"` // e.g., "Playboy", "Metart"
 	SourceURL            string    `json:"source_url"`
-	ProviderThumbnail    string    `json:"provider_thumbnail"`     // Local path to downloaded thumbnail
-	ProviderThumbnailURL string    `json:"provider_thumbnail_url"` // Original URL for re-download
+	ProviderThumbnail    string    `json:"provider_thumbnail"`          // Local path to downloaded thumbnail
+	ProviderThumbnailURL string    `json:"provider_thumbnail_url"`      // Original URL for re-download
+	CoverImageID         *uint     `json:"cover_image_id" gorm:"index"` // Optional manually selected cover image
 	Rating               float64   `json:"rating"`
 	ReleaseDate          time.Time `json:"release_date"`
 }

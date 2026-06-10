@@ -19,6 +19,14 @@ import (
 	"io"
 )
 
+// absInt returns the absolute value of an int
+func absInt(a int) int {
+	if a < 0 {
+		return -a
+	}
+	return a
+}
+
 func CrawlSource(sourceID uint) error {
 	var source models.Source
 	if err := database.DB.First(&source, sourceID).Error; err != nil {
@@ -201,21 +209,82 @@ func CrawlSource(sourceID uint) error {
 	// Background goroutine to batch and flush progress updates
 	go func() {
 		defer wgProgress.Done()
-		ticker := time.NewTicker(500 * time.Millisecond)
+		// Throttle DB writes: flush at most every 2s and only persist when values changed
+		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 
 		latestProgress := make(map[uint]progressUpdate)
-		flush := func() {
-			if len(latestProgress) == 0 {
+
+		// Track last-saved values to avoid writing unchanged state frequently
+		lastSaved := make(map[uint]progressUpdate)
+		lastSavedTime := make(map[uint]time.Time)
+
+		// thresholds for persisting
+		const minProgressDelta = 2   // percent
+		const minDownloadedDelta = 2 // items
+		const persistInterval = 5 * time.Second
+
+		flush := func(force bool) {
+			// Build a list of updates that need persisting
+			toPersist := make([]progressUpdate, 0, len(latestProgress))
+			now := time.Now()
+			for id, update := range latestProgress {
+				prev, ok := lastSaved[id]
+				lastTime := lastSavedTime[id]
+
+				need := false
+				if update.isComplete {
+					need = true
+				} else if !ok {
+					need = true
+				} else if force {
+					need = true
+				} else if absInt(update.progress-prev.progress) >= minProgressDelta {
+					need = true
+				} else if absInt(update.downloaded-prev.downloaded) >= minDownloadedDelta {
+					need = true
+				} else if now.Sub(lastTime) >= persistInterval {
+					need = true
+				}
+
+				if need {
+					toPersist = append(toPersist, update)
+					lastSaved[id] = update
+					lastSavedTime[id] = now
+				}
+			}
+
+			if len(toPersist) == 0 {
 				return
 			}
+
+			// Persist in a single transaction and measure duration
+			start := time.Now()
 			tx := database.DB.Begin()
-			for _, update := range latestProgress {
-				tx.Exec("UPDATE sources SET download_progress = ?, downloaded_items = ? WHERE id = ?",
-					update.progress, update.downloaded, update.sourceID)
+			for _, update := range toPersist {
+				if err := tx.Exec("UPDATE sources SET download_progress = ?, downloaded_items = ? WHERE id = ?", update.progress, update.downloaded, update.sourceID).Error; err != nil {
+					tx.Rollback()
+					logger.Warnf("Failed to persist crawler progress for source %d: %v", update.sourceID, err)
+					return
+				}
 			}
-			tx.Commit()
-			latestProgress = make(map[uint]progressUpdate)
+			if err := tx.Commit().Error; err != nil {
+				logger.Warnf("Failed to commit crawler progress transaction: %v", err)
+				return
+			}
+			dur := time.Since(start)
+			if dur > 200*time.Millisecond {
+				logger.Warnf("Crawler progress flush took %s for %d updates", dur.String(), len(toPersist))
+			} else {
+				logger.Debugf("Crawler progress flush took %s for %d updates", dur.String(), len(toPersist))
+			}
+
+			// Clear persisted entries from latestProgress if they were completed
+			for _, u := range toPersist {
+				if u.isComplete {
+					delete(latestProgress, u.sourceID)
+				}
+			}
 		}
 
 		for {
@@ -223,11 +292,12 @@ func CrawlSource(sourceID uint) error {
 			case update := <-progressChan:
 				latestProgress[update.sourceID] = update
 				if update.isComplete {
-					flush()
+					// Force flush on completion
+					flush(true)
 					return
 				}
 			case <-ticker.C:
-				flush()
+				flush(false)
 			}
 		}
 	}()
@@ -360,7 +430,8 @@ func CrawlSource(sourceID uint) error {
 				var result *DownloadImageResult
 				maxRetries := 3
 				for attempt := 1; attempt <= maxRetries; attempt++ {
-					result, err = DownloadImage(imageURL, source.Name)
+					// Use the page URL as the referer to improve success on hosts that require it
+					result, err = DownloadImage(imageURL, source.Name, source.Location)
 					if err == nil {
 						break
 					}
@@ -458,7 +529,17 @@ func CrawlSource(sourceID uint) error {
 				var valueStrings []string
 				var valueArgs []interface{}
 
-				for i, imgID := range insertedIDs {
+				// Guard against mismatched lengths between insertedIDs and imagesToInsert.
+				// A mismatch can happen if other rows exist in the DB or the select returned
+				// more rows than we inserted. Use the smaller length and log a warning.
+				pairCount := len(insertedIDs)
+				if pairCount > len(imagesToInsert) {
+					logger.Warnf("Mismatch between inserted IDs (%d) and imagesToInsert (%d); truncating associations to %d", len(insertedIDs), len(imagesToInsert), len(imagesToInsert))
+					pairCount = len(imagesToInsert)
+				}
+
+				for i := 0; i < pairCount; i++ {
+					imgID := insertedIDs[i]
 					for _, g := range imagesToInsert[i].Galleries {
 						valueStrings = append(valueStrings, "(?, ?)")
 						valueArgs = append(valueArgs, imgID, g.ID)
@@ -538,7 +619,18 @@ func ProcessVideoSource(source models.Source) error {
 		logger.Infof("Detected PMVHaven URL, invoking RipPMVHaven...")
 		videoURL, videoTitle, err = RipPMVHaven(source.Location)
 		if err != nil {
-			return fmt.Errorf("failed to extract PMVHaven video: %w", err)
+			logger.Warnf("RipPMVHaven failed: %v; trying yt-dlp fallback...", err)
+			// Some PMVHaven pages render the player via JS/Cloudflare; yt-dlp can often extract the
+			// final video by executing site logic. Use RipYouTube (yt-dlp wrapper) as a fallback.
+			localPath, title2, err2 := RipYouTube(source.Location)
+			if err2 != nil {
+				return fmt.Errorf("failed to extract PMVHaven video: %w; yt-dlp fallback also failed: %v", err, err2)
+			}
+			videoTitle = title2
+			isLocalFile = true
+			localPath = localPath
+			// clear videoURL so later flow uses local import
+			videoURL = ""
 		}
 	} else if strings.Contains(source.Location, "youtube.com") || strings.Contains(source.Location, "youtu.be") {
 		logger.Infof("Detected YouTube URL, invoking RipYouTube...")

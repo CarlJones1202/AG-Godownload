@@ -27,6 +27,7 @@ export interface Gallery {
   source_url?: string;
   provider_thumbnail?: string;     // Local path to downloaded thumbnail
   provider_thumbnail_url?: string; // Original URL for re-download
+  cover_image_id?: number | null;
   rating?: number;
   release_date?: string;
   image_count?: number;
@@ -60,6 +61,7 @@ export interface Image {
   vr_mode: string;
   duration_seconds?: number;
   tags?: Tag[];
+  thumbnail_path?: string;
 }
 
 export interface Person {

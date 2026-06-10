@@ -86,20 +86,20 @@ func AddToCrawlerQueue(sourceID uint) {
 }
 
 func AddToVideoQueue(sourceID uint) {
-    var source models.Source
-    if err := database.DB.Select("id, priority").First(&source, sourceID).Error; err != nil {
-        logger.Errorf("Failed to find source %d for video queueing: %v", sourceID, err)
-        return
-    }
+	var source models.Source
+	if err := database.DB.Select("id, priority").First(&source, sourceID).Error; err != nil {
+		logger.Errorf("Failed to find source %d for video queueing: %v", sourceID, err)
+		return
+	}
 
-    // Update status to queued
-    database.DB.Model(&source).Update("Status", "queued")
+	// Update status to queued
+	database.DB.Model(&source).Update("Status", "queued")
 
-    VideoTaskQueue.Push(&CrawlerTask{
-        SourceID: source.ID,
-        Priority: source.Priority,
-    })
-    logger.Infof("Added source %d to video queue (priority %d)", sourceID, source.Priority)
+	VideoTaskQueue.Push(&CrawlerTask{
+		SourceID: source.ID,
+		Priority: source.Priority,
+	})
+	logger.Infof("Added source %d to video queue (priority %d)", sourceID, source.Priority)
 }
 
 func StartCrawlerWorker() {
@@ -136,76 +136,86 @@ func StartCrawlerWorker() {
 }
 
 func StartVideoWorker() {
-    go func() {
-        logger.Debug("Checking for interrupted or queued video crawls...")
-        var sources []models.Source
-        // Find sources that are 'crawling' (interrupted) or 'queued' on startup
-        if err := database.DB.Where("status IN ?", []string{"crawling", "queued"}).Find(&sources).Error; err == nil {
-            logger.Infof("Found %d pending video crawls, re-queueing...", len(sources))
-            for _, s := range sources {
-                // Re-queue into the appropriate queue based on source type
-                if IsVideoURL(s.Location) || IsVideoFile(s.Location) {
-                    AddToVideoQueue(s.ID)
-                } else {
-                    AddToCrawlerQueue(s.ID)
-                }
-            }
-        }
-    }()
+	go func() {
+		logger.Debug("Checking for interrupted or queued video crawls...")
+		var sources []models.Source
+		// Find sources that are 'crawling' (interrupted) or 'queued' on startup
+		if err := database.DB.Where("status IN ?", []string{"crawling", "queued"}).Find(&sources).Error; err == nil {
+			logger.Infof("Found %d pending video crawls, re-queueing...", len(sources))
+			for _, s := range sources {
+				// Re-queue into the appropriate queue based on source type
+				if IsVideoURL(s.Location) || IsVideoFile(s.Location) {
+					AddToVideoQueue(s.ID)
+				} else {
+					AddToCrawlerQueue(s.ID)
+				}
+			}
+		}
+	}()
 
-    numWorkers := config.Global.CrawlerWorkers
-    if numWorkers < 1 {
-        numWorkers = 1
-    }
-    for i := 0; i < numWorkers; i++ {
-        go func(workerID int) {
-            logger.Debugf("Video worker %d started", workerID)
-            for {
-                task := VideoTaskQueue.Pop()
-                logger.Debugf("Video worker %d processing source %d (priority %d)", workerID, task.SourceID, task.Priority)
-                AddActiveCrawlerSource(task.SourceID)
-                if err := CrawlSource(task.SourceID); err != nil {
-                    logger.Errorf("Video worker %d error crawling source %d: %v", workerID, task.SourceID, err)
-                }
-                RemoveActiveCrawlerSource(task.SourceID)
-            }
-        }(i)
-    }
-}
-
-var AITagQueue = make(chan uint, 100)
-
-func AddToAITagQueue(imageID uint) {
-	select {
-	case AITagQueue <- imageID:
-		logger.Debugf("Added image %d to AI tag queue", imageID)
-	default:
-		logger.Warn("AI tag queue full, skipping image", imageID)
-	}
-}
-
-func StartAITagWorker() {
-	numWorkers := config.Global.AITagWorkers
+	numWorkers := config.Global.CrawlerWorkers
 	if numWorkers < 1 {
 		numWorkers = 1
 	}
-
 	for i := 0; i < numWorkers; i++ {
-		go func() {
-			logger.Debug("AI Tag worker started")
-			for imageID := range AITagQueue {
-				logger.Debugf("AI Tag worker processing image %d", imageID)
-				if err := LabelImage(imageID); err != nil {
-					logger.Errorf("Error AI tagging image %d: %v", imageID, err)
+		go func(workerID int) {
+			logger.Debugf("Video worker %d started", workerID)
+			for {
+				task := VideoTaskQueue.Pop()
+				logger.Debugf("Video worker %d processing source %d (priority %d)", workerID, task.SourceID, task.Priority)
+				AddActiveCrawlerSource(task.SourceID)
+				if err := CrawlSource(task.SourceID); err != nil {
+					logger.Errorf("Video worker %d error crawling source %d: %v", workerID, task.SourceID, err)
 				}
+				RemoveActiveCrawlerSource(task.SourceID)
 			}
-		}()
+		}(i)
 	}
-
-	// Startup: scan for untagged images
-	go func() {
-		if err := ScanUntaggedImages(); err != nil {
-			logger.Errorf("Failed to scan untagged images: %v", err)
-		}
-	}()
 }
+
+/*
+// AI tagging queue and workers
+var AITagQueue = make(chan uint, 100)
+
+func AddToAITagQueue(imageID uint) {
+    // If AI tagging is disabled in config, do not enqueue images.
+    if config.Global.AITagWorkers < 1 {
+        logger.Debugf("AI tagging disabled; not queueing image %d", imageID)
+        return
+    }
+
+    select {
+    case AITagQueue <- imageID:
+        logger.Debugf("Added image %d to AI tag queue", imageID)
+    default:
+        logger.Warn("AI tag queue full, skipping image", imageID)
+    }
+}
+
+func StartAITagWorker() {
+    numWorkers := config.Global.AITagWorkers
+    if numWorkers < 1 {
+        logger.Info("AI tagging disabled via configuration (AITagWorkers < 1). StartAITagWorker exiting.")
+        return
+    }
+
+    for i := 0; i < numWorkers; i++ {
+        go func() {
+            logger.Debug("AI Tag worker started")
+            for imageID := range AITagQueue {
+                logger.Debugf("AI Tag worker processing image %d", imageID)
+                if err := LabelImage(imageID); err != nil {
+                    logger.Errorf("Error AI tagging image %d: %v", imageID, err)
+                }
+            }
+        }()
+    }
+
+    // Startup: scan for untagged images
+    go func() {
+        if err := ScanUntaggedImages(); err != nil {
+            logger.Errorf("Failed to scan untagged images: %v", err)
+        }
+    }()
+}
+*/

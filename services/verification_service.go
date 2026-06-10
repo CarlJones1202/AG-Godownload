@@ -1,12 +1,15 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"gallery_api/config"
 	"gallery_api/database"
 	"gallery_api/logger"
 	"gallery_api/models"
 	"io"
+	urlpkg "net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -57,73 +60,14 @@ func extractImageProvider(url string) string {
 func VerifyDownloadedImages() error {
 	logger.Info("Verifying downloaded images...")
 
-	// Step 1: Identify images belonging to "favorited galleries"
-	// A "favorited gallery" is one that contains at least one favorited image.
-	var favGalleryIDs []uint
-	if err := database.DB.Table("image_galleries").
-		Joins("JOIN images ON images.id = image_galleries.image_id").
-		Where("images.is_favorite = ?", true).
-		Distinct("image_galleries.gallery_id").
-		Pluck("image_galleries.gallery_id", &favGalleryIDs).Error; err != nil {
-		logger.Errorf("Failed to identify favorite galleries: %v", err)
-		// Continue without this optimization if it fails
+	// Count total images first
+	var totalImages int64
+	if err := database.DB.Model(&models.Image{}).Count(&totalImages).Error; err != nil {
+		return fmt.Errorf("failed to count images: %w", err)
 	}
-
-	// Map of ImageID -> bool for fast lookup of "is in favorited gallery"
-	isInFavGallery := make(map[uint]bool)
-	if len(favGalleryIDs) > 0 {
-		var imgIDs []uint
-		// Batch this in chunks if we have massive amounts of favorites, but for now
-		// strict "IN" query should be okay for typical extensive usage (<50k favs).
-		if err := database.DB.Table("image_galleries").
-			Where("gallery_id IN ?", favGalleryIDs).
-			Distinct("image_id").
-			Pluck("image_id", &imgIDs).Error; err == nil {
-			for _, id := range imgIDs {
-				isInFavGallery[id] = true
-			}
-		}
-	}
-
-	var images []struct {
-		ID          uint
-		Filename    string
-		DownloadURL string
-		IsFavorite  bool
-		CreatedAt   time.Time
-	}
-
-	if err := database.DB.
-		Model(&models.Image{}).
-		Select("id, filename, download_url, is_favorite, created_at").
-		// Remove SQL order as we will sort in Go
-		Find(&images).Error; err != nil {
-		return fmt.Errorf("failed to query images: %w", err)
-	}
-
-	// Sort images by priority:
-	// 1. IsFavorite (True)
-	// 2. Belongs to a Favorite Gallery (True)
-	// 3. Newest (CreatedAt Descending)
-	sort.Slice(images, func(i, j int) bool {
-		// 1. IsFavorite
-		if images[i].IsFavorite != images[j].IsFavorite {
-			return images[i].IsFavorite // True comes first
-		}
-
-		// 2. In Favorite Gallery
-		inFavGalI := isInFavGallery[images[i].ID]
-		inFavGalJ := isInFavGallery[images[j].ID]
-		if inFavGalI != inFavGalJ {
-			return inFavGalI // True comes first
-		}
-
-		// 3. Newest to Oldest
-		return images[i].CreatedAt.After(images[j].CreatedAt)
-	})
 
 	go func() {
-		SetVerificationRunning(true, len(images))
+		SetVerificationRunning(true, int(totalImages))
 		defer SetVerificationRunning(false, 0)
 
 		missingCount := 0
@@ -131,7 +75,7 @@ func VerifyDownloadedImages() error {
 
 		type recoveryTask struct {
 			ID            uint
-			CurrentDBPath string // what DB currently thinks the path is
+			CurrentDBPath string
 			DownloadURL   string
 			SourceName    string
 		}
@@ -139,7 +83,6 @@ func VerifyDownloadedImages() error {
 		var tasks []recoveryTask
 		var mu sync.Mutex
 
-		// Channel for batched updates
 		type updateResult struct {
 			ID             uint
 			RelPath        string
@@ -148,7 +91,6 @@ func VerifyDownloadedImages() error {
 		resultChan := make(chan updateResult, 100)
 		var wgBatch sync.WaitGroup
 
-		// Start batch processor
 		wgBatch.Add(1)
 		go func() {
 			defer wgBatch.Done()
@@ -184,7 +126,7 @@ func VerifyDownloadedImages() error {
 				select {
 				case res, ok := <-resultChan:
 					if !ok {
-						flush() // Flush remaining items
+						flush()
 						return
 					}
 					buffer = append(buffer, res)
@@ -197,55 +139,79 @@ func VerifyDownloadedImages() error {
 			}
 		}()
 
-		// Phase 1: scan and collect missing files
-		for _, img := range images {
-			IncVerificationProcessed()
-			expectedFullPath := filepath.Join(UploadsDir, img.Filename)
-
-			if _, err := os.Stat(expectedFullPath); os.IsNotExist(err) {
-				missingCount++
-				IncVerificationMissing()
-
-				// Optional: regenerate thumbnail if main file exists but thumb doesn't
-				thumbPath := filepath.Join(UploadsDir, "thumbnails", filepath.Base(img.Filename))
-				if _, err := os.Stat(thumbPath); os.IsNotExist(err) {
-					if _, err := os.Stat(expectedFullPath); err == nil {
-						go GenerateThumbnail(expectedFullPath)
-					}
-				}
-
-				if img.DownloadURL == "" {
-					continue
-				}
-
-				// Resolve source name (same logic you already had)
-				sourceName := "uncategorized"
-				var sourceID *uint
-				err := database.DB.
-					Table("galleries").
-					Select("galleries.source_id").
-					Joins("JOIN image_galleries ON image_galleries.gallery_id = galleries.id").
-					Where("image_galleries.image_id = ?", img.ID).
-					Limit(1).
-					Scan(&sourceID).Error
-				if err == nil && sourceID != nil {
-					var src models.Source
-					// Use Find() instead of First() to avoid "record not found" errors
-					if database.DB.Select("name").Find(&src, *sourceID).RowsAffected > 0 {
-						sourceName = src.Name
-					}
-					// If source not found (deleted), sourceName remains "uncategorized"
-				}
-
-				mu.Lock()
-				tasks = append(tasks, recoveryTask{
-					ID:            img.ID,
-					CurrentDBPath: img.Filename,
-					DownloadURL:   img.DownloadURL,
-					SourceName:    sourceName,
-				})
-				mu.Unlock()
+		// Phase 1: scan and collect missing files (keyset pagination)
+		const chunkSize = 500
+		var lastID uint
+		for {
+			var imageChunk []struct {
+				ID          uint
+				Filename    string
+				DownloadURL string
+				IsFavorite  bool
+				CreatedAt   time.Time
 			}
+
+			if err := database.DB.
+				Model(&models.Image{}).
+				Select("id, filename, download_url, is_favorite, created_at").
+				Where("id > ?", lastID).
+				Order("id ASC").
+				Limit(chunkSize).
+				Find(&imageChunk).Error; err != nil {
+				logger.Errorf("failed to query image batch: %v", err)
+				break
+			}
+			if len(imageChunk) == 0 {
+				break
+			}
+
+			for _, img := range imageChunk {
+				IncVerificationProcessed()
+				expectedFullPath := filepath.Join(UploadsDir, img.Filename)
+
+				if _, err := os.Stat(expectedFullPath); os.IsNotExist(err) {
+					missingCount++
+					IncVerificationMissing()
+
+					thumbPath := filepath.Join(UploadsDir, "thumbnails", filepath.Base(img.Filename))
+					if _, err := os.Stat(thumbPath); os.IsNotExist(err) {
+						if _, err := os.Stat(expectedFullPath); err == nil {
+							go GenerateThumbnail(expectedFullPath)
+						}
+					}
+
+					if img.DownloadURL == "" {
+						continue
+					}
+
+					sourceName := "uncategorized"
+					var sourceID *uint
+					err := database.DB.
+						Table("galleries").
+						Select("galleries.source_id").
+						Joins("JOIN image_galleries ON image_galleries.gallery_id = galleries.id").
+						Where("image_galleries.image_id = ?", img.ID).
+						Limit(1).
+						Scan(&sourceID).Error
+					if err == nil && sourceID != nil {
+						var src models.Source
+						if database.DB.Select("name").Find(&src, *sourceID).RowsAffected > 0 {
+							sourceName = src.Name
+						}
+					}
+
+					mu.Lock()
+					tasks = append(tasks, recoveryTask{
+						ID:            img.ID,
+						CurrentDBPath: img.Filename,
+						DownloadURL:   img.DownloadURL,
+						SourceName:    sourceName,
+					})
+					mu.Unlock()
+				}
+			}
+
+			lastID = imageChunk[len(imageChunk)-1].ID
 		}
 
 		if missingCount > 0 {
@@ -294,10 +260,30 @@ func VerifyDownloadedImages() error {
 
 					// This returns the FINAL path where it saved the file
 					// (e.g. /uploads/MySource/abc123.jpg or whatever it decided)
-					result, err := DownloadImage(t.DownloadURL, t.SourceName)
+					// Use the download URL's origin as referer (some hosts validate referer)
+					referer := ""
+					if u, perr := urlpkg.Parse(t.DownloadURL); perr == nil {
+						referer = u.Scheme + "://" + u.Host
+					}
+					result, err := DownloadImage(t.DownloadURL, t.SourceName, referer)
 					if err != nil {
-						logger.Warnf("[%s] Failed to download image ID %d: %v", provider, t.ID, err)
-						return
+						// If provider is imx and gallery-dl fallback is enabled, attempt fallback
+						if provider == "imx" && config.Global.GalleryDL.Enabled {
+							logger.Debugf("HTTP download failed for image ID %d; attempting gallery-dl fallback", t.ID)
+							gctx, gcancel := context.WithTimeout(context.Background(), time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
+							// Do not defer gcancel here since we are in a long-running goroutine; call explicitly below
+							result, err = DownloadImageWithGalleryDL(gctx, t.DownloadURL, t.SourceName, time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
+							gcancel()
+							if err != nil {
+								// Only warn now that both attempts failed
+								logger.Warnf("[%s] Failed to download image ID %d after gallery-dl fallback: %v", provider, t.ID, err)
+								return
+							}
+						} else {
+							// No fallback configured; warn and return
+							logger.Warnf("[%s] Failed to download image ID %d: %v", provider, t.ID, err)
+							return
+						}
 					}
 
 					// We now trust DownloadImage to handle hashing and storage consistently.

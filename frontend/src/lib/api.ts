@@ -71,6 +71,15 @@ export const sources = {
     }),
 };
 
+export const adminApi = {
+  getFailedImages: () => request<{ data: import('@/types').Image[] }>('/admin/failed-images'),
+  retryImage: (id: number) => request<{ message: string }>(`/admin/failed-images/${id}/retry`, { method: 'POST' }),
+  retryAllImages: () => request<{ message: string; count: number }>(`/admin/failed-images/retry-all`, { method: 'POST' }),
+  getFailedSources: () => request<{ data: import('@/types').Source[] }>('/admin/failed-sources'),
+  retrySource: (id: number) => request<{ message: string }>(`/admin/failed-sources/${id}/retry`, { method: 'POST' }),
+  retryAllSources: () => request<{ message: string; count: number }>(`/admin/failed-sources/retry-all`, { method: 'POST' }),
+};
+
 export interface GalleryListParams extends PaginationParams {
   q?: string;
   search?: string;

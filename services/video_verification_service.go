@@ -17,33 +17,23 @@ import (
 func VerifyDownloadedVideos() error {
 	logger.Info("Verifying downloaded videos...")
 
-	var videos []struct {
-		ID          uint
-		Filename    string // current value in DB (may point to missing/broken file)
-		DownloadURL string
-		OriginalURL string
-		Title       string
-	}
-
-	if err := database.DB.
-		Model(&models.Image{}).
-		Select("id, filename, download_url, original_url, title").
-		Where("type = ?", "video").
-		Find(&videos).Error; err != nil {
-		return fmt.Errorf("failed to query videos: %w", err)
+	// Count first so the UI can show progress.
+	var total int64
+	if err := database.DB.Model(&models.Image{}).Where("type = ?", "video").Count(&total).Error; err != nil {
+		return fmt.Errorf("failed to count videos: %w", err)
 	}
 
 	go func() {
-		SetVideoVerificationRunning(true, len(videos))
+		SetVideoVerificationRunning(true, int(total))
 		defer SetVideoVerificationRunning(false, 0)
 
 		missingCount := 0
-		var recoveredCount int32 = 0
-		var skippedCount int32 = 0
+		var recoveredCount int32
+		var skippedCount int32
 
 		type recoveryTask struct {
 			ID            uint
-			CurrentDBPath string // what DB currently thinks the path is
+			CurrentDBPath string
 			DownloadURL   string
 			OriginalURL   string
 			SourceName    string
@@ -51,10 +41,8 @@ func VerifyDownloadedVideos() error {
 		}
 
 		var tasks []recoveryTask
-
 		var mu sync.Mutex
 
-		// Channel for batched updates
 		type videoUpdateResult struct {
 			ID       uint
 			RelPath  string
@@ -63,10 +51,11 @@ func VerifyDownloadedVideos() error {
 			Height   int
 			SizeMB   float64
 		}
-		resultChan := make(chan videoUpdateResult, 50) // Smaller buffer as videos process slower
+
+		resultChan := make(chan videoUpdateResult, 50)
 		var wgBatch sync.WaitGroup
 
-		// Start batch processor
+		// Batch writer: collects results and writes periodically or when full.
 		wgBatch.Add(1)
 		go func() {
 			defer wgBatch.Done()
@@ -97,14 +86,14 @@ func VerifyDownloadedVideos() error {
 					}
 				}
 				tx.Commit()
-				buffer = make([]videoUpdateResult, 0, batchSize)
+				buffer = buffer[:0]
 			}
 
 			for {
 				select {
 				case res, ok := <-resultChan:
 					if !ok {
-						flush() // Flush remaining items
+						flush()
 						return
 					}
 					buffer = append(buffer, res)
@@ -117,159 +106,165 @@ func VerifyDownloadedVideos() error {
 			}
 		}()
 
-		// Phase 1: scan and collect missing files
-		for _, video := range videos {
-			IncVideoVerificationProcessed()
-			expectedFullPath := filepath.Join(UploadsDir, video.Filename)
-
-			// Regenerate thumbnail if missing
-			thumbFilename := strings.TrimSuffix(filepath.Base(video.Filename), filepath.Ext(video.Filename)) + ".jpg"
-			thumbPath := filepath.Join(UploadsDir, filepath.Dir(video.Filename), "thumbnails", thumbFilename)
-			if _, err := os.Stat(thumbPath); os.IsNotExist(err) {
-				if _, err := os.Stat(expectedFullPath); err == nil {
-					go GenerateVideoThumbnail(expectedFullPath)
-				}
+		// Phase 1: scan and collect missing files (chunked)
+		const chunkSize = 100
+		var lastID uint
+		for {
+			var videos []struct {
+				ID          uint
+				Filename    string
+				DownloadURL string
+				OriginalURL string
+				Title       string
 			}
 
-			if _, err := os.Stat(expectedFullPath); os.IsNotExist(err) {
-				missingCount++
-				IncVideoVerificationMissing()
-				fmt.Printf("Missing video: %s (ID: %d)\n", video.Filename, video.ID)
+			q := database.DB.Model(&models.Image{}).
+				Select("id, filename, download_url, original_url, title").
+				Where("type = ? AND id > ?", "video", lastID).
+				Order("id ASC").
+				Limit(chunkSize)
 
-				// Check if this is a local video file
-				if strings.HasPrefix(video.OriginalURL, "file://") {
-					// Local video - check if original path exists
-					localPath := strings.TrimPrefix(video.OriginalURL, "file://")
-					if _, err := os.Stat(localPath); os.IsNotExist(err) {
-						// Local file no longer exists, skip gracefully
-						logger.Infof("[Source: %s] Local video file no longer exists at original path: %s (ID: %d)", video.OriginalURL, localPath, video.ID)
-						logger.Infof("[Source: %s] Expected location in uploads: %s", video.OriginalURL, expectedFullPath)
+			if err := q.Find(&videos).Error; err != nil {
+				logger.Errorf("failed to query video batch: %v", err)
+				break
+			}
+			if len(videos) == 0 {
+				break
+			}
+
+			for _, v := range videos {
+				IncVideoVerificationProcessed()
+				expectedFullPath := filepath.Join(UploadsDir, v.Filename)
+
+				// Regenerate thumbnail if missing
+				thumbFilename := strings.TrimSuffix(filepath.Base(v.Filename), filepath.Ext(v.Filename)) + ".jpg"
+				thumbPath := filepath.Join(UploadsDir, filepath.Dir(v.Filename), "thumbnails", thumbFilename)
+				if _, err := os.Stat(thumbPath); os.IsNotExist(err) {
+					if _, err2 := os.Stat(expectedFullPath); err2 == nil {
+						go GenerateVideoThumbnail(expectedFullPath)
+					}
+				}
+
+				if _, err := os.Stat(expectedFullPath); os.IsNotExist(err) {
+					missingCount++
+					IncVideoVerificationMissing()
+					fmt.Printf("Missing video: %s (ID: %d)\n", v.Filename, v.ID)
+
+					// Local file handling
+					if strings.HasPrefix(v.OriginalURL, "file://") {
+						localPath := strings.TrimPrefix(v.OriginalURL, "file://")
+						if _, err := os.Stat(localPath); os.IsNotExist(err) {
+							logger.Infof("[Source: %s] Local video file no longer exists at original path: %s (ID: %d)", v.OriginalURL, localPath, v.ID)
+							logger.Infof("[Source: %s] Expected location in uploads: %s", v.OriginalURL, expectedFullPath)
+							atomic.AddInt32(&skippedCount, 1)
+							continue
+						}
+						logger.Infof("[Source: %s] Local video file still exists at original path but not in expected location", v.OriginalURL)
 						atomic.AddInt32(&skippedCount, 1)
 						continue
 					}
-					// Local file exists, we could re-import it, but for now just log
-					logger.Infof("[Source: %s] Local video file still exists at original path but not in expected location", video.OriginalURL)
-					logger.Infof("[Source: %s] Original path: %s", video.OriginalURL, localPath)
-					logger.Infof("[Source: %s] Expected location: %s (ID: %d)", video.OriginalURL, expectedFullPath, video.ID)
-					atomic.AddInt32(&skippedCount, 1)
-					continue
-				}
 
-				if video.DownloadURL == "" {
-					logger.Infof("No DownloadURL for video ID %d → cannot recover", video.ID)
-					atomic.AddInt32(&skippedCount, 1)
-					continue
-				}
-
-				// Resolve source name (same logic as image verification)
-				sourceName := "uncategorized"
-				var sourceID *uint
-				err := database.DB.
-					Table("galleries").
-					Select("galleries.source_id").
-					Joins("JOIN image_galleries ON image_galleries.gallery_id = galleries.id").
-					Where("image_galleries.image_id = ?", video.ID).
-					Limit(1).
-					Scan(&sourceID).Error
-				if err == nil && sourceID != nil {
-					var src models.Source
-					if database.DB.Select("name").First(&src, *sourceID).Error == nil {
-						sourceName = src.Name
+					if v.DownloadURL == "" {
+						logger.Infof("No DownloadURL for video ID %d → cannot recover", v.ID)
+						atomic.AddInt32(&skippedCount, 1)
+						continue
 					}
-				}
 
-				mu.Lock()
-				tasks = append(tasks, recoveryTask{
-					ID:            video.ID,
-					CurrentDBPath: video.Filename,
-					DownloadURL:   video.DownloadURL,
-					OriginalURL:   video.OriginalURL,
-					SourceName:    sourceName,
-					Title:         video.Title,
-				})
-				mu.Unlock()
+					// Resolve source name
+					sourceName := "uncategorized"
+					var sourceID *uint
+					err := database.DB.Table("galleries").
+						Select("galleries.source_id").
+						Joins("JOIN image_galleries ON image_galleries.gallery_id = galleries.id").
+						Where("image_galleries.image_id = ?", v.ID).
+						Limit(1).
+						Scan(&sourceID).Error
+					if err == nil && sourceID != nil {
+						var src models.Source
+						if database.DB.Select("name").First(&src, *sourceID).Error == nil {
+							sourceName = src.Name
+						}
+					}
+
+					mu.Lock()
+					tasks = append(tasks, recoveryTask{
+						ID:            v.ID,
+						CurrentDBPath: v.Filename,
+						DownloadURL:   v.DownloadURL,
+						OriginalURL:   v.OriginalURL,
+						SourceName:    sourceName,
+						Title:         v.Title,
+					})
+					mu.Unlock()
+				}
 			}
+
+			// keep scanning from last ID in this batch
+			lastID = videos[len(videos)-1].ID
 		}
 
-		// Phase 2: concurrent recovery with limited concurrency for videos
+		// Phase 2: concurrent recovery
 		if len(tasks) > 0 {
 			fmt.Printf("Recovering %d missing videos (max 10 concurrent)...\n", len(tasks))
-
-			const maxConcurrent = 10 // Lower than images due to large file sizes
+			const maxConcurrent = 10
 			sem := make(chan struct{}, maxConcurrent)
 			var wg sync.WaitGroup
 
-			for _, task := range tasks {
+			for _, t := range tasks {
 				wg.Add(1)
-				go func(t recoveryTask) {
+				go func(task recoveryTask) {
 					defer wg.Done()
 					UpdateVideoActiveCount(1)
-					AddActiveVideoDownload(t.ID, t.Title, t.DownloadURL, t.SourceName)
+					AddActiveVideoDownload(task.ID, task.Title, task.DownloadURL, task.SourceName)
 					sem <- struct{}{}
 					defer func() {
 						<-sem
 						UpdateVideoActiveCount(-1)
-						RemoveActiveVideoDownload(t.ID)
+						RemoveActiveVideoDownload(task.ID)
 					}()
 
 					start := time.Now()
-
-					// Determine the page URL for the download
-					pageURL := t.OriginalURL
+					pageURL := task.OriginalURL
 					if pageURL == "" {
-						pageURL = t.DownloadURL
+						pageURL = task.DownloadURL
 					}
 
-					// Download the video
-					result, err := DownloadVideo(t.DownloadURL, t.SourceName, pageURL, t.Title)
+					result, err := DownloadVideo(task.DownloadURL, task.SourceName, pageURL, task.Title)
 					if err != nil {
-						// Attempt to refresh URL if download failed
+						// try to refresh URLs for some providers
 						refreshed := false
-						if t.OriginalURL != "" {
+						if task.OriginalURL != "" {
 							var newVideoURL, newTitle string
 							var ripErr error
-
-							if strings.Contains(t.OriginalURL, "tnaflix.com") {
-								logger.Infof("[Video ID %d] Attempting to refresh TnaFlix URL from %s", t.ID, t.OriginalURL)
-								newVideoURL, newTitle, ripErr = RipTnaFlix(t.OriginalURL)
-							} else if strings.Contains(t.OriginalURL, "pornhub.com") {
-								logger.Infof("[Video ID %d] Attempting to refresh Pornhub URL from %s", t.ID, t.OriginalURL)
-								newVideoURL, newTitle, ripErr = RipPornhub(t.OriginalURL)
+							if strings.Contains(task.OriginalURL, "tnaflix.com") {
+								newVideoURL, newTitle, ripErr = RipTnaFlix(task.OriginalURL)
+							} else if strings.Contains(task.OriginalURL, "pornhub.com") {
+								newVideoURL, newTitle, ripErr = RipPornhub(task.OriginalURL)
 							}
-
 							if ripErr == nil && newVideoURL != "" {
-								logger.Infof("[Video ID %d] Successfully refreshed URL. Retrying download...", t.ID)
-
-								// Update DB with new URL
-								database.DB.Model(&models.Image{ID: t.ID}).Update("download_url", newVideoURL)
-
-								// Retry download
-								result, err = DownloadVideo(newVideoURL, t.SourceName, pageURL, newTitle)
+								database.DB.Model(&models.Image{ID: task.ID}).Update("download_url", newVideoURL)
+								result, err = DownloadVideo(newVideoURL, task.SourceName, pageURL, newTitle)
 								if err == nil {
 									refreshed = true
 								}
-							} else if ripErr != nil {
-								logger.Warnf("[Video ID %d] Failed to refresh URL: %v", t.ID, ripErr)
 							}
 						}
-
 						if !refreshed {
-							logger.Warnf("[Video ID %d] [Source: %s] [Page: %s] [DL: %s] Re-download failed: %v", t.ID, t.SourceName, t.OriginalURL, t.DownloadURL, err)
+							logger.Warnf("[Video ID %d] [Source: %s] Re-download failed: %v", task.ID, task.SourceName, err)
 							atomic.AddInt32(&skippedCount, 1)
 							return
 						}
 					}
 
-					// Calculate relative path for DB
 					relPath, err := filepath.Rel(UploadsDir, result.Path)
 					if err != nil {
-						logger.Warnf("[Video ID %d] [Source: %s] Failed to get relative path: %v", t.ID, t.SourceName, err)
-						relPath = filepath.Join(t.SourceName, filepath.Base(result.Path)) // Fallback
+						logger.Warnf("[Video ID %d] [Source: %s] Failed to get relative path: %v", task.ID, task.SourceName, err)
+						relPath = filepath.Join(task.SourceName, filepath.Base(result.Path))
 					}
 
-					// Send result to batch processor
+					// send to batch writer
 					resultChan <- videoUpdateResult{
-						ID:       t.ID,
+						ID:       task.ID,
 						RelPath:  relPath,
 						Duration: result.Duration,
 						Width:    result.Width,
@@ -277,29 +272,24 @@ func VerifyDownloadedVideos() error {
 						SizeMB:   result.SizeMB,
 					}
 
-					logger.Infof("[Video ID %d] [Source: %s] [Page: %s] Recovered → %s (%dx%d, %.1fs, %.1fMB)",
-						t.ID, t.SourceName, t.OriginalURL, relPath, result.Width, result.Height, result.Duration, result.SizeMB)
-
-					// Generate thumbnail (DownloadVideo already does this, but just in case)
+					// extra processing
 					if _, err := GenerateVideoThumbnail(result.Path); err != nil {
-						logger.Warnf("[Video ID %d] [Source: %s] Thumbnail generation failed: %v", t.ID, t.SourceName, err)
+						logger.Warnf("[Video ID %d] Thumbnail generation failed: %v", task.ID, err)
 					}
-
-					// Generate trickplay data (DownloadVideo already does this, but just in case)
 					if err := GenerateTrickplayData(result.Path); err != nil {
-						logger.Warnf("[Video ID %d] [Source: %s] Trickplay generation failed: %v", t.ID, t.SourceName, err)
+						logger.Warnf("[Video ID %d] Trickplay generation failed: %v", task.ID, err)
 					}
 
-					duration := time.Since(start)
-					if duration > 10*time.Second {
-						time.Sleep(2 * time.Second) // polite pause for large downloads
+					dur := time.Since(start)
+					if dur > 10*time.Second {
+						time.Sleep(2 * time.Second)
 					}
-				}(task)
+				}(t)
 			}
 
 			wg.Wait()
-			close(resultChan) // Signal batch processor to finish
-			wgBatch.Wait()    // Wait for batch processor to complete writes
+			close(resultChan)
+			wgBatch.Wait()
 			database.Checkpoint()
 		}
 

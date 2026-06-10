@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -82,12 +83,12 @@ func createSingleSource(name, location, sourceType string, priority int) (*model
 		}
 	}
 
-    // Queue for crawling (use video queue for known video sources)
-    if isVideo {
-        services.AddToVideoQueue(source.ID)
-    } else {
-        services.AddToCrawlerQueue(source.ID)
-    }
+	// Queue for crawling (use video queue for known video sources)
+	if isVideo {
+		services.AddToVideoQueue(source.ID)
+	} else {
+		services.AddToCrawlerQueue(source.ID)
+	}
 
 	return &source, nil
 }
@@ -103,11 +104,11 @@ func BulkImportSources(c *gin.Context) {
 	}
 
 	type resultEntry struct {
-		URL     string `json:"url"`
-		Name    string `json:"name"`
-		Status  string `json:"status"`
+		URL      string `json:"url"`
+		Name     string `json:"name"`
+		Status   string `json:"status"`
 		SourceID *uint  `json:"source_id,omitempty"`
-		Error  string `json:"error,omitempty"`
+		Error    string `json:"error,omitempty"`
 	}
 
 	results := make([]resultEntry, 0, len(inputs))
@@ -155,7 +156,7 @@ func BulkImportSources(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"results":    results,
+		"results": results,
 		"summary": gin.H{
 			"total":      len(inputs),
 			"created":    created,
@@ -173,17 +174,17 @@ func CrawlSource(c *gin.Context) {
 		return
 	}
 
-    // Trigger crawl in background - route to video queue if applicable
-    var src models.Source
-    if err := database.DB.Select("location").First(&src, id).Error; err == nil {
-        if services.IsVideoURL(src.Location) || services.IsVideoFile(src.Location) {
-            services.AddToVideoQueue(uint(id))
-        } else {
-            services.AddToCrawlerQueue(uint(id))
-        }
-    } else {
-        services.AddToCrawlerQueue(uint(id))
-    }
+	// Trigger crawl in background - route to video queue if applicable
+	var src models.Source
+	if err := database.DB.Select("location").First(&src, id).Error; err == nil {
+		if services.IsVideoURL(src.Location) || services.IsVideoFile(src.Location) {
+			services.AddToVideoQueue(uint(id))
+		} else {
+			services.AddToCrawlerQueue(uint(id))
+		}
+	} else {
+		services.AddToCrawlerQueue(uint(id))
+	}
 
 	c.JSON(http.StatusAccepted, gin.H{"message": "Crawl started"})
 }
@@ -329,6 +330,57 @@ func GetDownloadStatus(c *gin.Context) {
 	// but for now, the UI can match by ID from the sources list.
 
 	c.JSON(http.StatusOK, status)
+}
+
+// GetFailedSources returns sources that have status == "error" for dashboard retry
+func GetFailedSources(c *gin.Context) {
+	var sources []models.Source
+	if err := database.DB.Where("status = ?", "error").Find(&sources).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query sources"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": sources})
+}
+
+// RetrySource triggers a crawl for a single source ID
+func RetrySource(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid source ID"})
+		return
+	}
+	// Reset status to queued and add to crawler/video queue as appropriate
+	var src models.Source
+	if err := database.DB.First(&src, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Source not found"})
+		return
+	}
+	database.DB.Model(&src).Updates(models.Source{Status: "queued", LastCheckedAt: time.Now()})
+	if services.IsVideoURL(src.Location) || services.IsVideoFile(src.Location) {
+		services.AddToVideoQueue(src.ID)
+	} else {
+		services.AddToCrawlerQueue(src.ID)
+	}
+	c.JSON(http.StatusAccepted, gin.H{"message": "Retry scheduled"})
+}
+
+// RetryAllSources schedules retry for all errored sources
+func RetryAllSources(c *gin.Context) {
+	var sources []models.Source
+	if err := database.DB.Where("status = ?", "error").Find(&sources).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query sources"})
+		return
+	}
+	for _, s := range sources {
+		database.DB.Model(&s).Updates(models.Source{Status: "queued", LastCheckedAt: time.Now()})
+		if services.IsVideoURL(s.Location) || services.IsVideoFile(s.Location) {
+			services.AddToVideoQueue(s.ID)
+		} else {
+			services.AddToCrawlerQueue(s.ID)
+		}
+	}
+	c.JSON(http.StatusAccepted, gin.H{"message": "Retries scheduled", "count": len(sources)})
 }
 
 // autoLinkPeopleToGallery attempts to link people to a gallery based on name matching

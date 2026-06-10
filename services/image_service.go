@@ -58,8 +58,9 @@ type DownloadImageResult struct {
 }
 
 // DownloadImage downloads an image and saves it with a content-based hash filename
-// in a subdirectory named after the source. Returns the path and extracted colors.
-func DownloadImage(url string, sourceName string) (*DownloadImageResult, error) {
+// in a subdirectory named after the source. If referer is provided it will be set
+// on the outgoing request; otherwise the origin (scheme+host) will be used.
+func DownloadImage(url string, sourceName string, referer string) (*DownloadImageResult, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -69,6 +70,18 @@ func DownloadImage(url string, sourceName string) (*DownloadImageResult, error) 
 	req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("Connection", "keep-alive")
+	// Prefer an explicit referer argument when supplied, otherwise fall back to origin
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+	} else if req.Header.Get("Referer") == "" {
+		if u, perr := urlpkg.Parse(url); perr == nil {
+			req.Header.Set("Referer", u.Scheme+"://"+u.Host)
+		}
+	}
+	// Advertise common encodings similar to a browser
+	if req.Header.Get("Accept-Encoding") == "" {
+		req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	}
 
 	// Use the shared client with retry logic
 	resp, err := DoRequestWithRetry(context.Background(), req)
@@ -80,16 +93,6 @@ func DownloadImage(url string, sourceName string) (*DownloadImageResult, error) 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to download image: status code %d", resp.StatusCode)
 	}
-
-	// Read the entire response body into memory
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	// Calculate SHA-256 hash of the content
-	hash := sha256.Sum256(data)
-	hashStr := hex.EncodeToString(hash[:])
 
 	// Determine extension from content type
 	ext := ".jpg" // default
@@ -105,9 +108,6 @@ func DownloadImage(url string, sourceName string) (*DownloadImageResult, error) 
 		ext = ".webp"
 	}
 
-	// Create filename from hash
-	filename := hashStr + ext
-
 	// Sanitize source name for directory
 	sourceDir := SanitizeDirectoryName(sourceName)
 	if sourceDir == "" {
@@ -120,27 +120,42 @@ func DownloadImage(url string, sourceName string) (*DownloadImageResult, error) 
 		return nil, err
 	}
 
+	// Stream to a temp file while computing the hash (avoids reading entire body into memory)
+	tmpFile, err := os.CreateTemp(fullDir, "download-*"+ext)
+	if err != nil {
+		return nil, err
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	hash := sha256.New()
+	written, err := io.Copy(io.MultiWriter(tmpFile, hash), resp.Body)
+	tmpFile.Close()
+	if err != nil {
+		return nil, err
+	}
+	// Guard against zero-byte downloads
+	if written == 0 {
+		return nil, fmt.Errorf("downloaded file is empty: %s", url)
+	}
+
+	hashStr := hex.EncodeToString(hash.Sum(nil))
+	filename := hashStr + ext
+
 	// Full path for the image
 	destPath := filepath.Join(fullDir, filename)
 
 	// Check if file already exists (same content hash)
-	fileExists := false
 	if _, err := os.Stat(destPath); err == nil {
-		fileExists = true
+		// File exists — remove temp and return existing
+		return &DownloadImageResult{
+			Path: destPath,
+		}, nil
 	}
 
-	if !fileExists {
-		// Write the file
-		out, err := os.Create(destPath)
-		if err != nil {
-			return nil, err
-		}
-		defer out.Close()
-
-		_, err = out.Write(data)
-		if err != nil {
-			return nil, err
-		}
+	// Rename temp file to final destination
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		return nil, err
 	}
 
 	// Validate that the downloaded content is a valid image
@@ -320,6 +335,14 @@ func DownloadProviderThumbnail(url string) (string, error) {
 	req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("Connection", "keep-alive")
+	if req.Header.Get("Referer") == "" {
+		if u, perr := urlpkg.Parse(url); perr == nil {
+			req.Header.Set("Referer", u.Scheme+"://"+u.Host)
+		}
+	}
+	if req.Header.Get("Accept-Encoding") == "" {
+		req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	}
 
 	// Use the page origin as referer when possible (some providers require it)
 	if u, perr := urlpkg.Parse(url); perr == nil {
@@ -342,14 +365,7 @@ func DownloadProviderThumbnail(url string) (string, error) {
 		return "", fmt.Errorf("failed to download thumbnail: status %d; snippet=%s", resp.StatusCode, snippet)
 	}
 
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	hash := sha256.Sum256(data)
-	hashStr := hex.EncodeToString(hash[:])
-
+	// Determine extension from content type
 	ext := ".jpg"
 	contentType := resp.Header.Get("Content-Type")
 	if strings.HasPrefix(contentType, "image/png") {
@@ -358,18 +374,40 @@ func DownloadProviderThumbnail(url string) (string, error) {
 		ext = ".webp"
 	}
 
-	filename := hashStr + ext
 	thumbDir := filepath.Join(UploadsDir, "gallery_thumbnails")
 	if err := os.MkdirAll(thumbDir, 0755); err != nil {
 		return "", err
 	}
 
+	// Stream to temp file while computing hash
+	tmpFile, err := os.CreateTemp(thumbDir, "thumb-*"+ext)
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	hash := sha256.New()
+	written, err := io.Copy(io.MultiWriter(tmpFile, hash), resp.Body)
+	tmpFile.Close()
+	if err != nil {
+		return "", err
+	}
+	if written == 0 {
+		return "", fmt.Errorf("downloaded thumbnail is empty: %s", url)
+	}
+
+	hashStr := hex.EncodeToString(hash.Sum(nil))
+	filename := hashStr + ext
 	thumbPath := filepath.Join(thumbDir, filename)
 
-	if _, err := os.Stat(thumbPath); err != nil {
-		if err := os.WriteFile(thumbPath, data, 0644); err != nil {
-			return "", err
-		}
+	// If final file exists, remove temp and return existing
+	if _, err := os.Stat(thumbPath); err == nil {
+		return thumbPath, nil
+	}
+
+	if err := os.Rename(tmpPath, thumbPath); err != nil {
+		return "", err
 	}
 
 	return thumbPath, nil
@@ -386,6 +424,14 @@ func DownloadPersonImage(url string, personID uint) (string, error) {
 	req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("Connection", "keep-alive")
+	if req.Header.Get("Referer") == "" {
+		if u, perr := urlpkg.Parse(url); perr == nil {
+			req.Header.Set("Referer", u.Scheme+"://"+u.Host)
+		}
+	}
+	if req.Header.Get("Accept-Encoding") == "" {
+		req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	}
 
 	// Use shared client with retry logic
 	resp, err := DoRequestWithRetry(context.Background(), req)
@@ -397,15 +443,6 @@ func DownloadPersonImage(url string, personID uint) (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("failed to download image: status code %d", resp.StatusCode)
 	}
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	// Calculate hash for filename
-	hash := sha256.Sum256(data)
-	hashStr := hex.EncodeToString(hash[:])
 
 	// Determine extension
 	ext := ".jpg"
@@ -421,21 +458,41 @@ func DownloadPersonImage(url string, personID uint) (string, error) {
 		ext = ".webp"
 	}
 
-	filename := hashStr + ext
-
 	// Create person-specific directory: uploads/person_images/{id}
 	personDir := filepath.Join(UploadsDir, "person_images", fmt.Sprintf("%d", personID))
 	if err := os.MkdirAll(personDir, 0755); err != nil {
 		return "", err
 	}
 
+	// Stream to temp file while computing hash
+	tmpFile, err := os.CreateTemp(personDir, "person-*"+ext)
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	hash := sha256.New()
+	written, err := io.Copy(io.MultiWriter(tmpFile, hash), resp.Body)
+	tmpFile.Close()
+	if err != nil {
+		return "", err
+	}
+	if written == 0 {
+		return "", fmt.Errorf("downloaded person image is empty: %s", url)
+	}
+
+	hashStr := hex.EncodeToString(hash.Sum(nil))
+	filename := hashStr + ext
 	destPath := filepath.Join(personDir, filename)
 
-	// Write file if it doesn't exist
-	if _, err := os.Stat(destPath); os.IsNotExist(err) {
-		if err := os.WriteFile(destPath, data, 0644); err != nil {
-			return "", err
-		}
+	// If final file exists, remove temp and return existing path
+	if _, err := os.Stat(destPath); err == nil {
+		return fmt.Sprintf("/person-images/%d/%s", personID, filename), nil
+	}
+
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		return "", err
 	}
 
 	// Return web-accessible path
@@ -545,30 +602,31 @@ func formatVTTTime(seconds float64) string {
 
 // ScanMissingMetadata finds videos with missing metadata and updates them
 func ScanMissingMetadata(db *gorm.DB, force bool) error {
-	var videos []models.Image
+	logger.Info("Scanning videos for missing metadata...")
 
-	query := db.Where("type = ?", "video")
+	const chunkSize = 100
+	var lastID uint
+	processedCount := 0
 
-	if !force {
-		// Find videos with type='video' AND (missing metadata OR dirty titles)
-		// We want to fix:
-		// 1. Missing Duration (0)
-		// 2. Missing Width (0)
-		// 3. Titles with underscores or dots (likely raw filenames)
-		query = query.Where("duration = ? OR width = ? OR title LIKE ? OR title LIKE ?", 0, 0, "%_%", "%.%")
-	}
+	for {
+		var videos []models.Image
 
-	if err := query.Find(&videos).Error; err != nil {
-		return err
-	}
+		query := db.Where("type = ? AND id > ?", "video", lastID).
+			Order("id ASC").
+			Limit(chunkSize)
 
-	if len(videos) == 0 {
-		return nil
-	}
+		if !force {
+			query = query.Where("duration = ? OR width = ? OR title LIKE ? OR title LIKE ?", 0, 0, "%_%", "%.%")
+		}
 
-	logger.Infof("Found %d videos with missing metadata. Starting scan...", len(videos))
+		if err := query.Find(&videos).Error; err != nil {
+			return err
+		}
+		if len(videos) == 0 {
+			break
+		}
 
-	for _, video := range videos {
+		for _, video := range videos {
 		// Construct full path
 		// We need to resolve the path similar to how ServeImage does or use what we know about storage
 		// Usually UploadsDir + SourceName + Filename
@@ -681,8 +739,12 @@ func ScanMissingMetadata(db *gorm.DB, force bool) error {
 		} else {
 			logger.Infof("Updated metadata for video %d: %s (%dp)", video.ID, video.Filename, video.Height)
 		}
+		processedCount++
 	}
 
-	logger.Infof("Metadata scan complete.")
+		lastID = videos[len(videos)-1].ID
+	}
+
+	logger.Infof("Metadata scan complete. Processed %d videos.", processedCount)
 	return nil
 }

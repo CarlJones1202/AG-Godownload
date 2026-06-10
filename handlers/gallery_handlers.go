@@ -138,68 +138,145 @@ func GetGalleries(c *gin.Context) {
 		countMap[gc.GalleryID] = gc.Count
 	}
 
-	// Batch: first image per gallery (earliest created_at) using window function
-	type GalleryFirstImage struct {
+	// Batch: first image per gallery (lowest image_id = first added)
+	// Step 1: get the minimum image_id per gallery from the junction table (index-only, fast)
+	type galleryFirstID struct {
 		GalleryID uint
 		ImageID   uint
-		Filename  string
-		Type      string
 	}
-	var firstImages []GalleryFirstImage
-	database.DB.Raw(`
-		SELECT gallery_id, image_id, filename, type FROM (
-			SELECT ig.gallery_id, i.id AS image_id, i.filename, i.type,
-				ROW_NUMBER() OVER (PARTITION BY ig.gallery_id ORDER BY i.created_at ASC, i.id ASC) AS rn
-			FROM image_galleries ig
-			JOIN images i ON i.id = ig.image_id
-			WHERE ig.gallery_id IN ?
-		) ranked WHERE rn = 1
-	`, galleryIDs).Scan(&firstImages)
+	var firstIDs []galleryFirstID
+	database.DB.Table("image_galleries").
+		Select("gallery_id, MIN(image_id) as image_id").
+		Where("gallery_id IN ?", galleryIDs).
+		Group("gallery_id").
+		Scan(&firstIDs)
 
-	firstImageMap := make(map[uint]GalleryFirstImage, len(firstImages))
-	for _, fi := range firstImages {
-		firstImageMap[fi.GalleryID] = fi
+	// Step 2: collect unique image IDs and batch-fetch their details
+	thumbImgIDs := make([]uint, 0, len(firstIDs))
+	thumbGalleryMap := make(map[uint]uint, len(firstIDs)) // gallery_id → image_id
+	for _, fi := range firstIDs {
+		thumbImgIDs = append(thumbImgIDs, fi.ImageID)
+		thumbGalleryMap[fi.GalleryID] = fi.ImageID
+	}
+
+	type galleryFirstImage struct {
+		ID       uint
+		Filename string
+		Type     string
+	}
+	var thumbImgs []galleryFirstImage
+	if len(thumbImgIDs) > 0 {
+		database.DB.Model(&models.Image{}).
+			Select("id, filename, type").
+			Where("id IN ? AND deleted_at IS NULL", thumbImgIDs).
+			Scan(&thumbImgs)
+	}
+
+	// Map image_id → image details
+	thumbImgMap := make(map[uint]galleryFirstImage, len(thumbImgs))
+	for _, img := range thumbImgs {
+		thumbImgMap[img.ID] = img
 	}
 
 	// Build response
+	// Build a map from gallery ID to the first non-deleted image
 	for i := range galleries {
 		g := &galleries[i]
 		imageCount := countMap[g.ID]
 
+		// If provider thumbnail is present, use it first
 		if g.ProviderThumbnail != "" {
 			filename := filepath.Base(g.ProviderThumbnail)
 			g.Images = []models.Image{{
 				ThumbnailPath: "/images/gallery_thumbnails/" + filename,
 			}}
-		} else if fi, ok := firstImageMap[g.ID]; ok {
-			sourceName := "uncategorized"
-			if g.Source != nil {
-				sourceName = g.Source.Name
-			}
-			sanitizedSource := services.SanitizeDirectoryName(sourceName)
+		} else if g.CoverImageID != nil {
+			// If a manual cover image is set, attempt to use that image's filename from DB
+			var img models.Image
+			if err := database.DB.Select("id", "filename", "type").First(&img, *g.CoverImageID).Error; err == nil {
+				sourceName := "uncategorized"
+				if g.Source != nil {
+					sourceName = g.Source.Name
+				}
+				sanitizedSource := services.SanitizeDirectoryName(sourceName)
 
-			firstImage := models.Image{
-				ID:       fi.ImageID,
-				Filename: fi.Filename,
-				Type:     fi.Type,
-			}
-			firstImage.WebPath = fmt.Sprintf("/images/%s", filepath.ToSlash(firstImage.Filename))
+				img.WebPath = fmt.Sprintf("/images/%s", filepath.ToSlash(img.Filename))
+				thumbPath := img.Filename
+				if img.Type == "video" {
+					ext := filepath.Ext(thumbPath)
+					thumbPath = strings.TrimSuffix(thumbPath, ext) + ".jpg"
+				}
+				parts := strings.Split(filepath.ToSlash(thumbPath), "/")
+				if len(parts) > 1 {
+					parts = append(parts[:len(parts)-1], append([]string{"thumbnails"}, parts[len(parts)-1:]...)...)
+					img.ThumbnailPath = "/images/" + strings.Join(parts, "/")
+				} else {
+					img.ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, filepath.Base(thumbPath))
+				}
+				g.Images = []models.Image{img}
+			} else if imgID, hasThumb := thumbGalleryMap[g.ID]; hasThumb {
+				if fi, ok := thumbImgMap[imgID]; ok {
+					sourceName := "uncategorized"
+					if g.Source != nil {
+						sourceName = g.Source.Name
+					}
+					sanitizedSource := services.SanitizeDirectoryName(sourceName)
 
-			thumbPath := firstImage.Filename
-			if firstImage.Type == "video" {
-				ext := filepath.Ext(thumbPath)
-				thumbPath = strings.TrimSuffix(thumbPath, ext) + ".jpg"
-			}
+					firstImage := models.Image{
+						ID:       fi.ID,
+						Filename: fi.Filename,
+						Type:     fi.Type,
+					}
+					firstImage.WebPath = fmt.Sprintf("/images/%s", filepath.ToSlash(firstImage.Filename))
 
-			parts := strings.Split(filepath.ToSlash(thumbPath), "/")
-			if len(parts) > 1 {
-				parts = append(parts[:len(parts)-1], append([]string{"thumbnails"}, parts[len(parts)-1:]...)...)
-				firstImage.ThumbnailPath = "/images/" + strings.Join(parts, "/")
-			} else {
-				firstImage.ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, filepath.Base(thumbPath))
-			}
+					thumbPath := firstImage.Filename
+					if firstImage.Type == "video" {
+						ext := filepath.Ext(thumbPath)
+						thumbPath = strings.TrimSuffix(thumbPath, ext) + ".jpg"
+					}
 
-			g.Images = []models.Image{firstImage}
+					parts := strings.Split(filepath.ToSlash(thumbPath), "/")
+					if len(parts) > 1 {
+						parts = append(parts[:len(parts)-1], append([]string{"thumbnails"}, parts[len(parts)-1:]...)...)
+						firstImage.ThumbnailPath = "/images/" + strings.Join(parts, "/")
+					} else {
+						firstImage.ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, filepath.Base(thumbPath))
+					}
+
+					g.Images = []models.Image{firstImage}
+				}
+			}
+		} else if imgID, hasThumb := thumbGalleryMap[g.ID]; hasThumb {
+			if fi, ok := thumbImgMap[imgID]; ok {
+				sourceName := "uncategorized"
+				if g.Source != nil {
+					sourceName = g.Source.Name
+				}
+				sanitizedSource := services.SanitizeDirectoryName(sourceName)
+
+				firstImage := models.Image{
+					ID:       fi.ID,
+					Filename: fi.Filename,
+					Type:     fi.Type,
+				}
+				firstImage.WebPath = fmt.Sprintf("/images/%s", filepath.ToSlash(firstImage.Filename))
+
+				thumbPath := firstImage.Filename
+				if firstImage.Type == "video" {
+					ext := filepath.Ext(thumbPath)
+					thumbPath = strings.TrimSuffix(thumbPath, ext) + ".jpg"
+				}
+
+				parts := strings.Split(filepath.ToSlash(thumbPath), "/")
+				if len(parts) > 1 {
+					parts = append(parts[:len(parts)-1], append([]string{"thumbnails"}, parts[len(parts)-1:]...)...)
+					firstImage.ThumbnailPath = "/images/" + strings.Join(parts, "/")
+				} else {
+					firstImage.ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, filepath.Base(thumbPath))
+				}
+
+				g.Images = []models.Image{firstImage}
+			}
 		}
 
 		galleryResponses[i] = GalleryResponse{
@@ -290,7 +367,8 @@ func UpdateGallery(c *gin.Context) {
 	}
 
 	var input struct {
-		Name string `json:"name"`
+		Name         string `json:"name"`
+		CoverImageID *uint  `json:"cover_image_id"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -299,6 +377,9 @@ func UpdateGallery(c *gin.Context) {
 	}
 
 	gallery.Name = input.Name
+	if input.CoverImageID != nil {
+		gallery.CoverImageID = input.CoverImageID
+	}
 	if err := database.DB.Save(&gallery).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update gallery"})
 		return
@@ -316,8 +397,9 @@ func UpdateGalleryProvider(c *gin.Context) {
 	}
 
 	var input struct {
-		Provider  string `json:"provider" binding:"required"`
-		SourceURL string `json:"source_url"`
+		Provider     string `json:"provider" binding:"required"`
+		SourceURL    string `json:"source_url"`
+		CoverImageID *uint  `json:"cover_image_id"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -328,6 +410,9 @@ func UpdateGalleryProvider(c *gin.Context) {
 	gallery.Provider = input.Provider
 	if input.SourceURL != "" {
 		gallery.SourceURL = input.SourceURL
+	}
+	if input.CoverImageID != nil {
+		gallery.CoverImageID = input.CoverImageID
 	}
 
 	if err := database.DB.Save(&gallery).Error; err != nil {

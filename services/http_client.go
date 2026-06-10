@@ -103,9 +103,14 @@ func DoRequestWithRetry(ctx context.Context, req *http.Request) (*http.Response,
 		}
 
 		if i > 0 {
-			// Exponential backoff: 2^i * 100ms
+			// Exponential backoff: 2^i * 100ms, capped to a sensible maximum
 			backoff := time.Duration(math.Pow(2, float64(i))) * 100 * time.Millisecond
-			logger.Debugf("Retrying request to %s in %v (attempt %d)", req.URL.Host, backoff, i+1)
+			maxBackoff := 10 * time.Second
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			// Log the full URL for easier debugging
+			logger.Debugf("Retrying request to %s in %v (attempt %d)", req.URL.String(), backoff, i+1)
 
 			select {
 			case <-time.After(backoff):

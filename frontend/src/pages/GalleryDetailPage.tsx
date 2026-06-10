@@ -153,6 +153,15 @@ export function GalleryDetailPage() {
     },
   });
 
+  const setCoverMut = useMutation({
+    mutationFn: (imageId: number) => galleries.update(galleryId, { cover_image_id: imageId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gallery', galleryId] });
+      queryClient.invalidateQueries({ queryKey: ['galleries'] });
+      queryClient.invalidateQueries({ queryKey: ['images', { gallery_id: galleryId }] });
+    },
+  });
+
   const addImageMut = useMutation({
     mutationFn: () => galleries.addImage(galleryId, { url: addImageUrl }),
     onSuccess: () => {
@@ -213,6 +222,18 @@ export function GalleryDetailPage() {
                 >
                   <Trash2 size={16} className="text-white hover:text-red-400" />
                 </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (img.id === gallery.cover_image_id) return;
+                    setCoverMut.mutate(img.id);
+                  }}
+                  className={cn('p-1', img.id === gallery.cover_image_id ? 'opacity-100' : '')}
+                  title={img.id === gallery.cover_image_id ? 'Gallery cover' : 'Set as gallery cover'}
+                  disabled={setCoverMut.isLoading}
+                >
+                  <Star size={16} className={cn(img.id === gallery.cover_image_id ? 'text-amber-400 fill-amber-400' : 'text-white')} />
+                </button>
               </div>
               <div className="flex items-center gap-1">
                 {img.is_video && <Badge variant="info">Video</Badge>}
@@ -243,12 +264,40 @@ export function GalleryDetailPage() {
   if (loadingGallery) return <Spinner />;
   if (!gallery) return <EmptyState message="Gallery not found." />;
 
+  // Determine gallery cover image source (preference: provider thumbnail -> manual cover image -> first image)
+  const coverImageSrc = (() => {
+    // Provider thumbnail (stored as local path to gallery_thumbnails)
+    if (gallery.provider_thumbnail) {
+      const filename = gallery.provider_thumbnail.replace(/\\/g, '/').split('/').pop()!;
+      return { type: 'provider', src: thumbnailUrl(filename) };
+    }
+
+    // Manual cover image (cover_image_id) - try to find in imageList
+    if (gallery.cover_image_id && imageList && imageList.data) {
+      const img = imageList.data.find((i) => i.id === gallery.cover_image_id);
+      if (img) {
+        // Use thumbnail_path if present (absolute path), otherwise construct via thumbnailUrl
+        const thumb = img.thumbnail_path && img.thumbnail_path.startsWith('/') ? img.thumbnail_path : thumbnailUrl(img.filename);
+        return { type: 'image', src: thumb };
+      }
+    }
+
+    // Fallback to first image in gallery
+    if (imageList && imageList.data && imageList.data.length > 0) {
+      const img = imageList.data[0];
+      const thumb = img.thumbnail_path && img.thumbnail_path.startsWith('/') ? img.thumbnail_path : thumbnailUrl(img.filename);
+      return { type: 'image', src: thumb };
+    }
+
+    return null;
+  })();
+
   return (
     <>
     <div className="relative">
       {/* Immersive Background Layer with Masked Fade */}
       <div className="absolute inset-x-0 -top-6 -mx-6 h-[800px] pointer-events-none select-none overflow-hidden">
-        {gallery.provider_thumbnail ? (
+        {coverImageSrc ? (
           <div
             className="h-full w-full"
             style={{
@@ -257,7 +306,7 @@ export function GalleryDetailPage() {
             }}
           >
             <img
-              src={thumbnailUrl(gallery.provider_thumbnail.replace(/\\/g, '/').split('/').pop()!)}
+              src={coverImageSrc.src}
               alt=""
               className="h-full w-full object-cover scale-150 blur-[120px] opacity-60"
             />
@@ -283,9 +332,9 @@ export function GalleryDetailPage() {
           <div className="relative group shrink-0">
             <div className="absolute -inset-1 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl blur opacity-25 group-hover:opacity-50 transition duration-1000 group-hover:duration-200" />
             <div className="relative w-48 h-64 md:w-56 md:h-80 rounded-xl overflow-hidden bg-zinc-800 shadow-2xl ring-1 ring-white/10">
-              {gallery.provider_thumbnail ? (
+              {coverImageSrc ? (
                 <img
-                  src={thumbnailUrl(gallery.provider_thumbnail.replace(/\\/g, '/').split('/').pop()!)}
+                  src={coverImageSrc.src}
                   alt={gallery.name}
                   className="w-full h-full object-cover"
                 />

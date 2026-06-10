@@ -1,16 +1,20 @@
 package services
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"gallery_api/config"
 	"gallery_api/database"
 	"gallery_api/logger"
 	"gallery_api/models"
 	"github.com/disintegration/imaging"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // MigrateImagesToNewStructure migrates existing images from flat structure to source-based subdirectories
@@ -84,11 +88,30 @@ func MigrateImagesToNewStructure() error {
 				continue
 			}
 
-			result, err := DownloadImage(image.DownloadURL, sourceName)
+			// Prefer using the download URL origin as the referer when re-downloading
+			referer := ""
+			if u, perr := url.Parse(image.DownloadURL); perr == nil {
+				referer = u.Scheme + "://" + u.Host
+			}
+
+			result, err := DownloadImage(image.DownloadURL, sourceName, referer)
 			if err != nil {
-				logger.Errorf("Failed to re-download %s: %v", image.Filename, err)
-				errors++
-				continue
+				// If imx and gallery-dl enabled, try fallback without logging the initial HTTP failure as final
+				if strings.Contains(strings.ToLower(image.DownloadURL), "imx.to") && config.Global.GalleryDL.Enabled {
+					logger.Debugf("HTTP re-download failed for %s; attempting gallery-dl fallback", image.Filename)
+					gctx, gcancel := context.WithTimeout(context.Background(), time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
+					result, err = DownloadImageWithGalleryDL(gctx, image.DownloadURL, sourceName, time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
+					gcancel()
+					if err != nil {
+						logger.Errorf("Failed to re-download %s after gallery-dl fallback: %v", image.Filename, err)
+						errors++
+						continue
+					}
+				} else {
+					logger.Errorf("Failed to re-download %s: %v", image.Filename, err)
+					errors++
+					continue
+				}
 			}
 
 			_, err = GenerateThumbnail(result.Path)
@@ -142,11 +165,34 @@ func MigrateImagesToNewStructure() error {
 			logger.Infof("Hash collision detected for %s, re-downloading to ensure separate copy", image.Filename)
 
 			if image.DownloadURL != "" {
-				result, err := DownloadImage(image.DownloadURL, sourceName)
+				// Prefer using the download URL origin as the referer when re-downloading
+				referer := ""
+				if u, perr := url.Parse(image.DownloadURL); perr == nil {
+					referer = u.Scheme + "://" + u.Host
+				}
+
+				result, err := DownloadImage(image.DownloadURL, sourceName, referer)
 				if err != nil {
-					logger.Errorf("Failed to re-download %s: %v", image.Filename, err)
-					// Fall back: just point to existing file
-					database.DB.Model(&models.Image{ID: image.ID}).Update("filename", filepath.Join(sourceDir, newFilename))
+					// Try gallery-dl fallback for imx when enabled; suppress initial HTTP failure as final
+					if strings.Contains(strings.ToLower(image.DownloadURL), "imx.to") && config.Global.GalleryDL.Enabled {
+						logger.Debugf("HTTP re-download failed for %s (hash collision path); attempting gallery-dl fallback", image.Filename)
+						gctx, gcancel := context.WithTimeout(context.Background(), time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
+						result, err = DownloadImageWithGalleryDL(gctx, image.DownloadURL, sourceName, time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
+						gcancel()
+						if err != nil {
+							logger.Errorf("Failed to re-download %s after gallery-dl fallback: %v", image.Filename, err)
+							// Fall back: just point to existing file
+							database.DB.Model(&models.Image{ID: image.ID}).Update("filename", filepath.Join(sourceDir, newFilename))
+							redownloaded++
+							continue
+						}
+					} else {
+						logger.Errorf("Failed to re-download %s: %v", image.Filename, err)
+						// Fall back: just point to existing file
+						database.DB.Model(&models.Image{ID: image.ID}).Update("filename", filepath.Join(sourceDir, newFilename))
+						redownloaded++
+						continue
+					}
 				} else {
 					_, err = GenerateThumbnail(result.Path)
 					if err != nil {

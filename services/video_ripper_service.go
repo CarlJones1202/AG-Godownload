@@ -2,6 +2,7 @@ package services
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -40,6 +41,7 @@ func RipYouTube(pageURL string) (string, string, error) {
 		"-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
 		"--no-playlist",
 		"--merge-output-format", "mp4",
+		"--socket-timeout", "30",
 		"-o", outputPathTemplate,
 	}
 
@@ -50,10 +52,12 @@ func RipYouTube(pageURL string) (string, string, error) {
 	}
 
 	// First, let's get the title and the expected filename
-	metadataArgs := append([]string{"--get-title", "--get-filename", "-o", outputPathTemplate}, args[2:]...) // replace -o for filename check
+	metadataArgs := append([]string{"--get-title", "--get-filename", "-o", outputPathTemplate}, args[3:]...) // skip -o and socket-timeout, replace -o for filename check
 	metadataArgs = append(metadataArgs, pageURL)
 
-	cmdMetadata := exec.Command("yt-dlp", metadataArgs...)
+	ctxMeta, cancelMeta := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelMeta()
+	cmdMetadata := exec.CommandContext(ctxMeta, "yt-dlp", metadataArgs...)
 	output, err := cmdMetadata.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -73,7 +77,9 @@ func RipYouTube(pageURL string) (string, string, error) {
 
 	// Now perform the actual download
 	downloadArgs := append(args, pageURL)
-	cmdDownload := exec.Command("yt-dlp", downloadArgs...)
+	ctxDownload, cancelDownload := context.WithTimeout(context.Background(), 2*time.Hour)
+	defer cancelDownload()
+	cmdDownload := exec.CommandContext(ctxDownload, "yt-dlp", downloadArgs...)
 
 	// Stream output to logs for visibility
 	stderr, _ := cmdDownload.StderrPipe()
@@ -258,18 +264,18 @@ func RipTnaFlix(pageURL string) (string, string, error) {
 func DownloadVideo(videoURL string, sourceName string, pageURL string, title string) (*DownloadImageResult, error) {
 	logger.Infof("Downloading video from %s", videoURL)
 
-	// Create HTTP client with proper headers
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", videoURL, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", videoURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
-	// Set headers to bypass hotlink protection
 	req.Header.Set("Referer", pageURL)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0")
 
-	resp, err := client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("downloading video: %w", err)
 	}
@@ -279,26 +285,13 @@ func DownloadVideo(videoURL string, sourceName string, pageURL string, title str
 		return nil, fmt.Errorf("video download returned status %d", resp.StatusCode)
 	}
 
-	// Read the entire video into memory for hashing
-	// Note: For very large videos, we might want to stream this differently
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading video data: %w", err)
-	}
-
-	// Calculate SHA-256 hash
-	hash := sha256.Sum256(data)
-	hashStr := hex.EncodeToString(hash[:])
-
-	// Determine extension (should be .mp4 for most cases)
+	// Determine extension
 	ext := ".mp4"
 	if strings.HasSuffix(strings.ToLower(videoURL), ".webm") {
 		ext = ".webm"
 	} else if strings.HasSuffix(strings.ToLower(videoURL), ".mkv") {
 		ext = ".mkv"
 	}
-
-	filename := hashStr + ext
 
 	// Sanitize source name for directory
 	sourceDir := SanitizeDirectoryName(sourceName)
@@ -312,35 +305,52 @@ func DownloadVideo(videoURL string, sourceName string, pageURL string, title str
 		return nil, fmt.Errorf("creating directory: %w", err)
 	}
 
-	// Full path for the video
+	// Stream to temp file while computing hash (avoids loading entire video into memory)
+	tmpFile, err := os.CreateTemp(fullDir, "video-*"+ext)
+	if err != nil {
+		return nil, fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	hash := sha256.New()
+	written, err := io.Copy(io.MultiWriter(tmpFile, hash), resp.Body)
+	tmpFile.Close()
+	if err != nil {
+		return nil, fmt.Errorf("downloading video: %w", err)
+	}
+	if written == 0 {
+		return nil, fmt.Errorf("downloaded video is empty")
+	}
+
+	hashStr := hex.EncodeToString(hash.Sum(nil))
+	filename := hashStr + ext
 	destPath := filepath.Join(fullDir, filename)
 
-	// Check if file already exists
-	fileExists := false
+	// If final file already exists, remove temp and return
 	if _, err := os.Stat(destPath); err == nil {
-		fileExists = true
 		logger.Debugf("Video file already exists: %s", destPath)
+		return buildVideoResult(destPath, title)
 	}
 
-	if !fileExists {
-		// Write the file
-		if err := os.WriteFile(destPath, data, 0644); err != nil {
-			return nil, fmt.Errorf("writing video file: %w", err)
-		}
-		logger.Infof("Saved video to: %s", destPath)
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		return nil, fmt.Errorf("renaming video file: %w", err)
 	}
+	logger.Infof("Saved video to: %s", destPath)
 
-	// Generate thumbnail
+	return buildVideoResult(destPath, title)
+}
+
+// buildVideoResult generates thumbnail, trickplay, metadata for a video and returns the result
+func buildVideoResult(destPath string, title string) (*DownloadImageResult, error) {
 	if _, err := GenerateVideoThumbnail(destPath); err != nil {
 		logger.Warnf("Failed to generate video thumbnail: %v", err)
 	}
 
-	// Generate trickplay data
 	if err := GenerateTrickplayData(destPath); err != nil {
 		logger.Warnf("Failed to generate trickplay data: %v", err)
 	}
 
-	// Parse Video Metadata
 	meta, err := GetVideoMetadata(destPath)
 	if err != nil {
 		logger.Warnf("Failed to get video metadata: %v", err)
@@ -354,7 +364,7 @@ func DownloadVideo(videoURL string, sourceName string, pageURL string, title str
 		Width:          meta.Width,
 		Height:         meta.Height,
 		SizeMB:         meta.SizeMB,
-		DominantColors: "[]", // Videos don't need color extraction
+		DominantColors: "[]",
 	}, nil
 }
 
@@ -392,35 +402,82 @@ func RipPMVHaven(pageURL string) (string, string, error) {
 
 	var videoURL string
 
-	// Method 1: Look for regex matches in all script tags
-	// We look for patterns like:
-	// video_url: "..."
-	// contentUrl: "..." (but avoid the page URL itself)
-	// .mp4 inside any string
-	doc.Find("script").Each(func(i int, s *goquery.Selection) {
-		if videoURL != "" {
-			return
-		}
-		text := s.Text()
+    // Method 1: Look for regex matches in all script tags
+    // Handle JSON-LD, JS-escaped slashes (\/), and protocol-relative URLs (//cdn...)
+    doc.Find("script").Each(func(i int, s *goquery.Selection) {
+        if videoURL != "" {
+            return
+        }
+        text := s.Text()
 
-		// Regex to find mp4 URLs
-		re := regexp.MustCompile(`https?://[^"'\s<>]+\.mp4`)
-		matches := re.FindAllString(text, -1)
+        // Normalize common JS-escaped slash sequences so regexes match
+        textUnescaped := strings.ReplaceAll(text, `\/`, "/")
+        textUnescaped = strings.ReplaceAll(textUnescaped, `\\/`, "/")
 
-		if len(matches) > 0 {
-			logger.Debugf("Script %d: Found %d potential mp4 matches", i, len(matches))
-		}
+        // Try JSON-LD style contentUrl / url first
+        reJSON := regexp.MustCompile(`(?i)"contentUrl"\s*:\s*"([^"]+\.mp4)"`)
+        if m := reJSON.FindStringSubmatch(textUnescaped); len(m) > 1 {
+            candidate := m[1]
+            if strings.HasPrefix(candidate, "//") {
+                candidate = "https:" + candidate
+            }
+            videoURL = candidate
+            logger.Infof("Found JSON-LD contentUrl mp4: %s", videoURL)
+            return
+        }
+        reJSON2 := regexp.MustCompile(`(?i)"url"\s*:\s*"([^"]+\.mp4)"`)
+        if m := reJSON2.FindStringSubmatch(textUnescaped); len(m) > 1 {
+            candidate := m[1]
+            if strings.HasPrefix(candidate, "//") {
+                candidate = "https:" + candidate
+            }
+            videoURL = candidate
+            logger.Infof("Found JSON-LD url mp4: %s", videoURL)
+            return
+        }
 
-		for _, match := range matches {
-			logger.Debugf("Checking match: %s", match)
-			// Filter out obviously wrong ones if needed
-			if strings.Contains(match, "pmvhaven.com") {
-				videoURL = match
-				logger.Infof("Found candidate video URL in script: %s", videoURL)
-				return
-			}
-		}
-	})
+        // General mp4 matcher accepting protocol-relative URLs
+        re := regexp.MustCompile(`(?i)(?:https?:)?//[^"'\\s<>]+\.mp4`)
+        matches := re.FindAllString(textUnescaped, -1)
+
+        if len(matches) > 0 {
+            logger.Debugf("Script %d: Found %d potential mp4 matches", i, len(matches))
+        }
+
+        for _, raw := range matches {
+            match := raw
+            // Normalize protocol-relative URLs by adding https:
+            if strings.HasPrefix(match, "//") {
+                match = "https:" + match
+            }
+
+            logger.Debugf("Checking match: %s", match)
+            if !strings.HasSuffix(strings.ToLower(match), ".mp4") || match == pageURL {
+                continue
+            }
+
+            // Prefer pmvhaven-hosted files
+            if strings.Contains(match, "pmvhaven.com") {
+                videoURL = match
+                logger.Infof("Found candidate video URL in script: %s", videoURL)
+                return
+            }
+
+            // Accept known CDN/storage hosts
+            if strings.Contains(match, "cdn") || strings.Contains(match, "amazonaws.com") || strings.Contains(match, "cloudfront") || strings.Contains(match, "akamaized.net") || strings.Contains(match, "storage") {
+                videoURL = match
+                logger.Infof("Found candidate mp4 on CDN/storage: %s", videoURL)
+                return
+            }
+
+            // Last resort: accept first mp4 found
+            if videoURL == "" {
+                videoURL = match
+                logger.Infof("Found candidate mp4 (non-pmvhaven): %s", videoURL)
+                return
+            }
+        }
+    })
 
 	// Method 2: Check standard meta tags (fallback)
 	if videoURL == "" {

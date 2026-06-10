@@ -42,11 +42,21 @@ function CoverGridCard({ item, onDelete }: CoverGridCardProps) {
       className="group relative block aspect-[3/2] rounded-lg overflow-hidden bg-zinc-900 hover:scale-[1.02] transition-transform duration-200"
     >
       {item.thumbnailPath ? (
-        <img
-          src={thumbnailUrl(item.thumbnailPath)}
-          alt={item.title || `Gallery ${item.id}`}
-          className="w-full h-full object-cover"
-        />
+        // If thumbnailPath looks like an absolute URL/path (starts with '/'), use it directly.
+        // Otherwise treat it as a thumbnail filename and pass to thumbnailUrl helper.
+        /^\//.test(item.thumbnailPath) ? (
+          <img
+            src={item.thumbnailPath}
+            alt={item.title || `Gallery ${item.id}`}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <img
+            src={thumbnailUrl(item.thumbnailPath)}
+            alt={item.title || `Gallery ${item.id}`}
+            className="w-full h-full object-cover"
+          />
+        )
       ) : (
         <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
           <span className="text-zinc-600 text-sm">No preview</span>

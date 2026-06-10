@@ -68,9 +68,10 @@ export function GalleriesPage() {
   const coverItems = galleryList?.data.map((g) => ({
     id: g.id,
     title: g.name || null,
+    // Prefer provider thumbnail, then gallery cover image, then first image filename
     thumbnailPath: g.provider_thumbnail
       ? g.provider_thumbnail.replace(/\\/g, '/').split('/').pop()
-      : g.images?.[0]?.filename,
+      : g.images?.[0]?.thumbnail_path ?? g.images?.[0]?.filename,
     provider: g.provider,
     createdAt: g.created_at,
     url: g.source_url,

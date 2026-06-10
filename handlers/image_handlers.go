@@ -3,9 +3,11 @@ package handlers
 import (
 	"fmt"
 	"gallery_api/database"
+	"gallery_api/logger"
 	"gallery_api/models"
 	"gallery_api/services"
 	"net/http"
+	urlpkg "net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -59,7 +61,12 @@ func AddImageToGallery(c *gin.Context) {
 	}
 
 	// Download image
-	result, err := services.DownloadImage(req.URL, sourceName)
+	// Use the request URL origin as referer to improve success on hosts that validate referer
+	referer := ""
+	if u, errp := urlpkg.Parse(req.URL); errp == nil {
+		referer = u.Scheme + "://" + u.Host
+	}
+	result, err := services.DownloadImage(req.URL, sourceName, referer)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to download image: " + err.Error()})
 		return
@@ -123,44 +130,34 @@ func GetImages(c *gin.Context) {
 	var total int64
 	query := database.DB.Model(&models.Image{})
 
-	// Gallery filter (via many-to-many join table)
-	if galleryIDStr := c.Query("gallery_id"); galleryIDStr != "" {
-		galleryID, err := strconv.Atoi(galleryIDStr)
-		if err == nil {
-			query = query.Joins("JOIN image_galleries ON image_galleries.image_id = images.id").
-				Where("image_galleries.gallery_id = ?", galleryID).
-				Distinct()
-		}
-	}
-
 	// Type filter — accept both "type" and "is_video" from the frontend
 	filterType := c.Query("type")
 	if filterType == "" {
-		// Check the frontend-style "is_video" param
 		if c.Query("is_video") == "true" {
 			filterType = "video"
 		} else if c.Query("is_video") == "false" {
 			filterType = "image"
 		} else {
-			filterType = "image" // Default to showing only images to preserve backward compat
+			filterType = "image"
 		}
 	}
 	if filterType != "all" {
 		query = query.Where("type = ?", filterType)
 	}
 
-	// Tag filter
-	if tagIDs := c.Query("filter_tags"); tagIDs != "" {
-		query = query.Joins("JOIN image_tags ON image_tags.image_id = images.id").
-			Where("image_tags.tag_id IN (?)", strings.Split(tagIDs, ",")).
-			Distinct()
+	// Use subqueries instead of JOIN+DISTINCT for M2M filter conditions.
+	// This lets SQLite use covering indexes on both the junction table and images,
+	// avoiding a wide DISTINCT scan of all columns.
+	if galleryIDStr := c.Query("gallery_id"); galleryIDStr != "" {
+		if galleryID, err := strconv.Atoi(galleryIDStr); err == nil {
+			query = query.Where("id IN (SELECT image_id FROM image_galleries WHERE gallery_id = ?)", galleryID)
+		}
 	}
-
-	// Person filter
+	if tagIDs := c.Query("filter_tags"); tagIDs != "" {
+		query = query.Where("id IN (SELECT image_id FROM image_tags WHERE tag_id IN (?))", strings.Split(tagIDs, ","))
+	}
 	if personID := c.Query("filter_person"); personID != "" {
-		query = query.Joins("JOIN person_images ON person_images.image_id = images.id").
-			Where("person_images.person_id = ?", personID).
-			Distinct()
+		query = query.Where("id IN (SELECT image_id FROM person_images WHERE person_id = ?)", personID)
 	}
 
 	// Color filter (approximate match)
@@ -180,29 +177,21 @@ func GetImages(c *gin.Context) {
 	}
 	applyExistsFilter := existsFilter != ""
 
-	// Count total matching images using a separate query chain to avoid
-	// GORM's Count method resetting the ORDER BY clause
+	// Count total matching images using a separate query chain
 	countQuery := database.DB.Model(&models.Image{})
-	// Re-apply joins and where conditions to the count query
-	if galleryIDStr := c.Query("gallery_id"); galleryIDStr != "" {
-		if galleryID, err := strconv.Atoi(galleryIDStr); err == nil {
-			countQuery = countQuery.Joins("JOIN image_galleries ON image_galleries.image_id = images.id").
-				Where("image_galleries.gallery_id = ?", galleryID).
-				Distinct()
-		}
-	}
 	if filterType != "all" {
 		countQuery = countQuery.Where("type = ?", filterType)
 	}
+	if galleryIDStr := c.Query("gallery_id"); galleryIDStr != "" {
+		if galleryID, err := strconv.Atoi(galleryIDStr); err == nil {
+			countQuery = countQuery.Where("id IN (SELECT image_id FROM image_galleries WHERE gallery_id = ?)", galleryID)
+		}
+	}
 	if tagIDs := c.Query("filter_tags"); tagIDs != "" {
-		countQuery = countQuery.Joins("JOIN image_tags ON image_tags.image_id = images.id").
-			Where("image_tags.tag_id IN (?)", strings.Split(tagIDs, ",")).
-			Distinct()
+		countQuery = countQuery.Where("id IN (SELECT image_id FROM image_tags WHERE tag_id IN (?))", strings.Split(tagIDs, ","))
 	}
 	if personID := c.Query("filter_person"); personID != "" {
-		countQuery = countQuery.Joins("JOIN person_images ON person_images.image_id = images.id").
-			Where("person_images.person_id = ?", personID).
-			Distinct()
+		countQuery = countQuery.Where("id IN (SELECT image_id FROM person_images WHERE person_id = ?)", personID)
 	}
 	if color := c.Query("filter_color"); color != "" {
 		countQuery = countQuery.Where("dominant_colors LIKE ?", "%"+color+"%")
@@ -603,6 +592,90 @@ func DeleteImage(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Image deleted successfully"})
 }
 
+// GetFailedImages lists images where the file is missing on disk (for dashboard)
+func GetFailedImages(c *gin.Context) {
+	// Use keyset pagination internally to avoid loading everything
+	const pageSize = 500
+	var missing []models.Image
+	var lastID uint
+	for {
+		var page []models.Image
+		if err := database.DB.Select("id, filename").Where("id > ?", lastID).Order("id ASC").Limit(pageSize).Find(&page).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query images"})
+			return
+		}
+		if len(page) == 0 {
+			break
+		}
+		for _, img := range page {
+			fullPath := filepath.Join(services.UploadsDir, img.Filename)
+			if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+				missing = append(missing, img)
+			}
+		}
+		lastID = page[len(page)-1].ID
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": missing})
+}
+
+// RetryImage attempts to re-download a single image by ID
+func RetryImage(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid image ID"})
+		return
+	}
+
+	go func(imageID int) {
+		// Fire-and-forget: use service to recover
+		if err := services.RecoverImage(uint(imageID)); err != nil {
+			logger.Warnf("RetryImage failed for %d: %v", imageID, err)
+		}
+	}(id)
+
+	c.JSON(http.StatusAccepted, gin.H{"message": "Retry scheduled"})
+}
+
+// RetryAllImages schedules recovery for all missing images found
+func RetryAllImages(c *gin.Context) {
+	const pageSize = 500
+	const maxRetries = 5000
+	count := 0
+	var lastID uint
+	for {
+		var page []models.Image
+		if err := database.DB.Select("id, filename").Where("id > ?", lastID).Order("id ASC").Limit(pageSize).Find(&page).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query images"})
+			return
+		}
+		if len(page) == 0 {
+			break
+		}
+		for _, img := range page {
+			fullPath := filepath.Join(services.UploadsDir, img.Filename)
+			if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+				count++
+				if count > maxRetries {
+					break
+				}
+				go func(id uint) {
+					if err := services.RecoverImage(id); err != nil {
+						logger.Warnf("RetryAllImages failed for %d: %v", id, err)
+					}
+				}(img.ID)
+			}
+		}
+		if count > maxRetries {
+			break
+		}
+		lastID = page[len(page)-1].ID
+	}
+
+	c.JSON(http.StatusAccepted, gin.H{"message": "Retries scheduled", "count": count})
+}
+
 // ToggleFavorite toggles the favorite status of an image
 func ToggleFavorite(c *gin.Context) {
 	idStr := c.Param("imageId")
@@ -618,11 +691,15 @@ func ToggleFavorite(c *gin.Context) {
 		return
 	}
 
-	image.IsFavorite = !image.IsFavorite
-	if err := database.DB.Save(&image).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update image"})
-		return
-	}
+    // Toggle favorite WITHOUT touching UpdatedAt so we don't affect list ordering.
+    // Use UpdateColumn which updates the given column directly and does not
+    // modify the model's timestamps or run hooks that would change UpdatedAt.
+    newFav := !image.IsFavorite
+    if err := database.DB.Model(&image).UpdateColumn("is_favorite", newFav).Error; err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update image"})
+        return
+    }
+    image.IsFavorite = newFav
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":     "Favorite status updated",

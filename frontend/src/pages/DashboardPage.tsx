@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { sources, admin, maintenance, stats } from '@/lib/api';
+import { sources, admin, maintenance, stats, /* adminApi included below */ } from '@/lib/api';
+import { adminApi } from '@/lib/api';
 import {
   PageHeader,
   StatCard,
@@ -28,7 +29,7 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
-type SectionId = 'system-status' | 'sources' | 'missing-galleries' | 'maintenance';
+type SectionId = 'system-status' | 'sources' | 'missing-galleries' | 'maintenance' | 'failed-downloads';
 
 export function DashboardPage() {
   const queryClient = useQueryClient();
@@ -57,6 +58,33 @@ export function DashboardPage() {
     queryKey: ['admin', 'missing-galleries'],
     queryFn: () => admin.missingGalleries({ limit: 50 }),
     enabled: expanded.has('missing-galleries'),
+  });
+  const { data: failedImagesData } = useQuery({
+    queryKey: ['admin', 'failed-images'],
+    queryFn: () => adminApi.getFailedImages(),
+    enabled: expanded.has('failed-downloads'),
+  });
+  const { data: failedSourcesData } = useQuery({
+    queryKey: ['admin', 'failed-sources'],
+    queryFn: () => adminApi.getFailedSources(),
+    enabled: expanded.has('failed-downloads'),
+  });
+
+  const retryImageMut = useMutation({
+    mutationFn: (id: number) => adminApi.retryImage(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'failed-images'] }),
+  });
+  const retryAllImagesMut = useMutation({
+    mutationFn: () => adminApi.retryAllImages(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'failed-images'] }),
+  });
+  const retrySourceMut = useMutation({
+    mutationFn: (id: number) => adminApi.retrySource(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'failed-sources'] }),
+  });
+  const retryAllSourcesMut = useMutation({
+    mutationFn: () => adminApi.retryAllSources(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'failed-sources'] }),
   });
 
   const crawlMut = useMutation({
@@ -277,6 +305,75 @@ export function DashboardPage() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+        </Card>
+
+        {/* Failed Downloads (images + sources) */}
+        <Card>
+          <SectionToggle id="failed-downloads" label="Failed Downloads" />
+          {expanded.has('failed-downloads') && (
+            <div className="mt-3 space-y-3">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-sm font-medium text-white">Images (missing files)</h4>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="ghost" onClick={() => retryAllImagesMut.mutate()} disabled={retryAllImagesMut.isPending}>
+                      Retry All
+                    </Button>
+                  </div>
+                </div>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {(failedImagesData?.data ?? []).length === 0 ? (
+                    <p className="text-xs text-zinc-500">No missing images found.</p>
+                  ) : (
+                    (failedImagesData?.data ?? []).map((img: any) => (
+                      <div key={img.id} className="flex items-center justify-between p-2 rounded bg-zinc-800/50">
+                        <div className="min-w-0 flex-1">
+                          <span className="text-sm text-zinc-300 truncate block">{img.filename || img.original_url || `#${img.id}`}</span>
+                          <span className="text-xs text-zinc-500">ID: {img.id} · {img.type}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button size="sm" variant="ghost" onClick={() => retryImageMut.mutate(img.id)} disabled={retryImageMut.isPending}>
+                            Retry
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-sm font-medium text-white">Sources (errored)</h4>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="ghost" onClick={() => retryAllSourcesMut.mutate()} disabled={retryAllSourcesMut.isPending}>
+                      Retry All
+                    </Button>
+                  </div>
+                </div>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {(failedSourcesData?.data ?? []).length === 0 ? (
+                    <p className="text-xs text-zinc-500">No errored sources.</p>
+                  ) : (
+                    (failedSourcesData?.data ?? []).map((s: any) => (
+                      <div key={s.id} className="flex items-center justify-between p-2 rounded bg-zinc-800/50">
+                        <div className="min-w-0 flex-1">
+                          <span className="text-sm text-zinc-300 truncate block">{s.name || s.location}</span>
+                          <span className="text-xs text-zinc-500">{s.location}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="danger">{s.status}</Badge>
+                          <Button size="sm" variant="ghost" onClick={() => retrySourceMut.mutate(s.id)} disabled={retrySourceMut.isPending}>
+                            Retry
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </Card>

@@ -287,7 +287,7 @@ func GetPerson(c *gin.Context) {
 
 		// Load first image for thumbnail
 		var firstImage models.Image
-		if err := database.DB.Where("gallery_id = ?", galleries[i].ID).Order("created_at ASC").First(&firstImage).Error; err == nil {
+		if err := database.DB.Where("gallery_id = ? AND deleted_at IS NULL", galleries[i].ID).Order("created_at ASC").First(&firstImage).Error; err == nil {
 			// Determine source name
 			sourceName := "uncategorized"
 			if galleries[i].Source != nil {
