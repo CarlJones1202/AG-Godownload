@@ -33,6 +33,10 @@ func CrawlSource(sourceID uint) error {
 		return err
 	}
 
+	// Clear session cookie cache at the start of each crawl so stale cookies
+	// from previous runs don't interfere
+	ClearCookieCache()
+
 	// Update status to crawling
 	database.DB.Model(&source).Updates(models.Source{Status: "crawling", LastCheckedAt: time.Now()})
 

@@ -11,8 +11,6 @@ import (
 	urlpkg "net/url"
 	"sync"
 	"time"
-
-	"github.com/gocolly/colly/v2"
 )
 
 // cookieCache caches session cookies per domain (e.g. vipr.im) so we only need
@@ -174,23 +172,12 @@ func GetOrFetchCookies(pageURL string) ([]*http.Cookie, error) {
 		return val.([]*http.Cookie), nil
 	}
 
-	// Visit the page with Colly so cookies from redirects are properly tracked.
-	// Colly's internal cookie jar stores cookies set during the full redirect chain.
-	c := newCollector(pageURL)
-	if err := c.Visit(pageURL); err != nil {
-		logger.Warnf("Colly visit of %s failed: %v", pageURL, err)
+	logger.Debugf("Fetching session cookies from %s", pageURL)
+	gotCookies, err := visitPageForCookies(pageURL)
+	if err != nil {
+		logger.Warnf("Failed to visit %s for cookies: %v", pageURL, err)
 		return nil, nil // fail open — caller falls back to regular DownloadImage
 	}
-
-	// Get cookies from Colly's cookie jar — the collector maintains cookies
-	// through the full redirect chain.
-	var gotCookies []*http.Cookie
-	if ck := c.Cookies(pageURL); ck != nil {
-		gotCookies = ck
-	} else {
-		gotCookies = []*http.Cookie{}
-	}
-
 	if len(gotCookies) > 0 {
 		cookieCache.Store(domain, gotCookies)
 		logger.Debugf("Cached %d cookies for domain %s (from %s)", len(gotCookies), domain, pageURL)

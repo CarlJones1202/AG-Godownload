@@ -12,6 +12,7 @@ import {
   Input,
 } from '@/components/UI';
 import { JustifiedGrid } from '@/components/JustifiedGrid';
+import type { GallerySearchResult } from '@/types';
 import type { JustifiedItem } from '@/components/JustifiedGrid';
 import { Lightbox } from '@/components/Lightbox';
 import {
@@ -55,7 +56,7 @@ export function GalleryDetailPage() {
   const [editedTitle, setEditedTitle] = useState('');
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'largest' | 'smallest'>('newest');
   const [showTools, setShowTools] = useState(false);
-  const [searchMetaQuery, setSearchMetaQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<GallerySearchResult[] | null>(null);
   const [scrapeProvider, setScrapeProvider] = useState('');
   const [scrapeUrl, setScrapeUrl] = useState('');
   const [updateProvider, setUpdateProvider] = useState('');
@@ -131,7 +132,7 @@ export function GalleryDetailPage() {
   const searchMetaMut = useMutation({
     mutationFn: () => galleries.searchMetadata(galleryId),
     onSuccess: (data) => {
-      setSearchMetaQuery(JSON.stringify(data.results, null, 2));
+      setSearchResults(data.results);
     },
   });
 
@@ -141,6 +142,8 @@ export function GalleryDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['gallery', galleryId] });
       setScrapeProvider('');
       setScrapeUrl('');
+      // Re-run search to update linked/missing status
+      searchMetaMut.mutate();
     },
   });
 
@@ -562,12 +565,64 @@ export function GalleryDetailPage() {
               </h4>
               <p className="text-xs text-zinc-500">Search provider for matching galleries based on name and linked people.</p>
               <Button size="sm" onClick={() => searchMetaMut.mutate()} disabled={searchMetaMut.isPending}>
-                {searchMetaMut.isPending ? 'Searching...' : 'Search Providers'}
+                {searchMetaMut.isPending ? 'Searching...' : 'Search'}
               </Button>
-              {searchMetaQuery && (
-                <pre className="text-[10px] text-zinc-400 max-h-40 overflow-y-auto bg-zinc-950 p-2 rounded border border-zinc-800">
-                  {searchMetaQuery}
-                </pre>
+              {searchMetaMut.isPending && (
+                <div className="text-xs text-zinc-400 animate-pulse py-2">Searching providers...</div>
+              )}
+              {searchResults && searchResults.length === 0 && (
+                <p className="text-xs text-zinc-500 italic py-2">No matching galleries found.</p>
+              )}
+              {searchResults && searchResults.length > 0 && (
+                <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                  {searchResults.map((r, idx) => {
+                    const isLinked = !!r.id;
+                    return (
+                      <div key={idx} className="flex items-start gap-3 bg-zinc-900/80 border border-zinc-800 p-2.5 rounded-lg hover:border-zinc-700 transition-colors">
+                        {r.thumbnail && (
+                          <div className="w-12 h-16 shrink-0 rounded overflow-hidden bg-zinc-800">
+                            <img src={r.thumbnail} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs text-zinc-200 font-medium truncate">{r.title}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge variant={isLinked ? 'success' : 'info'} className="text-[9px]">{r.provider}</Badge>
+                            {r.release_date && <span className="text-[9px] text-zinc-500">{r.release_date}</span>}
+                            {isLinked && <Badge variant="success" className="text-[8px]">Linked</Badge>}
+                            {!isLinked && <Badge variant="warning" className="text-[8px]">Missing</Badge>}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0 self-center">
+                          {!isLinked && (
+                            <>
+                              <Button
+                                size="sm"
+                                className="h-7 px-2 text-[10px]"
+                                disabled={scrapeMetaMut.isPending}
+                                onClick={() => {
+                                  setScrapeProvider(r.provider);
+                                  setScrapeUrl(r.url);
+                                  setTimeout(() => scrapeMetaMut.mutate(), 50);
+                                }}
+                              >
+                                {scrapeMetaMut.isPending && scrapeProvider === r.provider && scrapeUrl === r.url ? 'Scraping...' : 'Scrape'}
+                              </Button>
+                              <a
+                                href={`https://www.vipergirls.to/search.php?query="${encodeURIComponent(r.title)}"&titleonly=1&search_in=topics&forumchoice%5B%5D=235&childforums=1`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="h-7 px-2 inline-flex items-center justify-center text-[10px] font-medium rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 border border-blue-500/20 transition-all whitespace-nowrap"
+                              >
+                                VG
+                              </a>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
 

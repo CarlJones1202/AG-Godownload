@@ -381,3 +381,17 @@ func RipMyMyPic(src string) (string, error) {
 	}
 	return src, nil
 }
+
+// visitPageForCookies visits the given page URL with a Colly collector and returns
+// the session cookies obtained during the visit (including those set via redirects).
+func visitPageForCookies(pageURL string) ([]*http.Cookie, error) {
+	c := newCollector(pageURL)
+	// Colly does NOT initialize a cookie jar by default — without this, any
+	// Set-Cookie headers from the server are silently discarded.
+	jar, _ := cookiejar.New(nil)
+	c.SetCookieJar(jar)
+	if err := c.Visit(pageURL); err != nil {
+		return nil, err
+	}
+	return c.Cookies(pageURL), nil
+}
