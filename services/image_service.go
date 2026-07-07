@@ -150,6 +150,17 @@ type DownloadImageResult struct {
 // in a subdirectory named after the source. If referer is provided it will be set
 // on the outgoing request; otherwise the origin (scheme+host) will be used.
 func DownloadImage(url string, sourceName string, referer string) (*DownloadImageResult, error) {
+	return downloadImageWithCookies(url, sourceName, referer, nil)
+}
+
+// DownloadImageWithCookies behaves like DownloadImage but also attaches the
+// supplied cookies to the HTTP request. This is needed for hosts (e.g. vipr.im)
+// that require a session cookie obtained by first visiting the hosting page.
+func DownloadImageWithCookies(url string, sourceName string, referer string, cookies []*http.Cookie) (*DownloadImageResult, error) {
+	return downloadImageWithCookies(url, sourceName, referer, cookies)
+}
+
+func downloadImageWithCookies(url string, sourceName string, referer string, cookies []*http.Cookie) (*DownloadImageResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -168,6 +179,13 @@ func DownloadImage(url string, sourceName string, referer string) (*DownloadImag
 	} else if req.Header.Get("Referer") == "" {
 		if u, perr := urlpkg.Parse(url); perr == nil {
 			req.Header.Set("Referer", u.Scheme+"://"+u.Host)
+		}
+	}
+	// Attach session cookies if provided (hosts like vipr.im require a session
+	// obtained by first visiting the hosting page)
+	if len(cookies) > 0 {
+		for _, c := range cookies {
+			req.AddCookie(c)
 		}
 	}
 	// Advertise common encodings similar to a browser

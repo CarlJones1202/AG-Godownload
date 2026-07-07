@@ -439,10 +439,25 @@ func CrawlSource(sourceID uint) error {
 				// Download the actual image with retry logic
 				var result *DownloadImageResult
 				maxRetries := 3
+
+				// vipr.im CDN requires session cookies obtained by visiting the page first
+				var viprCookies []*http.Cookie
+				if strings.Contains(imageURL, "vipr.im") {
+					var ckErr error
+					viprCookies, ckErr = GetOrFetchCookies(src)
+					if ckErr != nil {
+						logger.Warnf("Failed to obtain vipr.im session cookies: %v", ckErr)
+					}
+				}
+
 				for attempt := 1; attempt <= maxRetries; attempt++ {
 					// Use the provider-correct referer (some hosts like imagetwist require
 					// the hosting page URL, not the forum URL, to avoid hotlink protection)
-					result, err = DownloadImage(imageURL, source.Name, downloadReferer)
+					if len(viprCookies) > 0 {
+						result, err = DownloadImageWithCookies(imageURL, source.Name, downloadReferer, viprCookies)
+					} else {
+						result, err = DownloadImage(imageURL, source.Name, downloadReferer)
+					}
 					if err == nil {
 						break
 					}

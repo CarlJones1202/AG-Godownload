@@ -8,8 +8,16 @@ import (
 	"math"
 	"net"
 	"net/http"
+	urlpkg "net/url"
+	"sync"
 	"time"
+
+	"github.com/gocolly/colly/v2"
 )
+
+// cookieCache caches session cookies per domain (e.g. vipr.im) so we only need
+// to visit the hosting page once per crawl session to obtain them.
+var cookieCache sync.Map
 
 // HTTPClientConfig holds configuration for the HTTP client
 type HTTPClientConfig struct {
@@ -149,4 +157,49 @@ func DoRequestWithRetry(ctx context.Context, req *http.Request) (*http.Response,
 	}
 
 	return nil, fmt.Errorf("request failed after %d retries: %w", config.MaxRetries, lastErr)
+}
+
+// GetOrFetchCookies returns session cookies for the given page URL. It caches
+// cookies per domain so subsequent calls for the same domain return cached
+// values without an additional HTTP round-trip.
+func GetOrFetchCookies(pageURL string) ([]*http.Cookie, error) {
+	u, err := urlpkg.Parse(pageURL)
+	if err != nil {
+		return nil, err
+	}
+	domain := u.Hostname()
+
+	// Return cached cookies if available
+	if val, ok := cookieCache.Load(domain); ok {
+		return val.([]*http.Cookie), nil
+	}
+
+	// Visit the page with Colly so cookies from redirects are properly tracked.
+	// Colly's internal cookie jar stores cookies set during the full redirect chain.
+	c := newCollector(pageURL)
+	if err := c.Visit(pageURL); err != nil {
+		logger.Warnf("Colly visit of %s failed: %v", pageURL, err)
+		return nil, nil // fail open — caller falls back to regular DownloadImage
+	}
+
+	// Get cookies from Colly's cookie jar — the collector maintains cookies
+	// through the full redirect chain.
+	var gotCookies []*http.Cookie
+	if ck := c.Cookies(pageURL); ck != nil {
+		gotCookies = ck
+	} else {
+		gotCookies = []*http.Cookie{}
+	}
+
+	if len(gotCookies) > 0 {
+		cookieCache.Store(domain, gotCookies)
+		logger.Debugf("Cached %d cookies for domain %s (from %s)", len(gotCookies), domain, pageURL)
+	}
+
+	return gotCookies, nil
+}
+
+// ClearCookieCache clears the cached cookies (e.g. at the start of a new crawl).
+func ClearCookieCache() {
+	cookieCache = sync.Map{}
 }

@@ -193,15 +193,6 @@ export function PersonDetailPage() {
     },
   });
 
-  const linkFoundMut = useMutation({
-    mutationFn: (data: { provider: string; source_url: string; name: string; thumbnail_url?: string }) =>
-      people.linkFoundGallery(personId, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['person', personId] });
-      refetchScans();
-    },
-  });
-
   // Mutation: link an "unsure" gallery result to this person
   const linkUnsureMut = useMutation({
     mutationFn: (data: { gallery_id: number; provider: string; source_url: string }) =>
@@ -559,9 +550,9 @@ export function PersonDetailPage() {
                                         <button
                                           onClick={() => {
                                             const alias = scanAlias || person?.name || '';
-                                            const query = encodeURIComponent(`${alias} ${mg.title}`);
+                                            const query = encodeURIComponent(`"${alias}" "${mg.title}"`);
                                             window.open(
-                                              `https://vipergirls.to/search.php?do=process&query=${query}&titleonly=1&searchphoto=1&excludegay=1&excludescat=1&excludetrans=1`,
+                                              `https://vipergirls.to/search.php?do=process&query=${query}&titleonly=1&forumchoice%5B%5D=235&childforums=1`,
                                               '_blank'
                                             );
                                           }}
@@ -647,21 +638,20 @@ export function PersonDetailPage() {
                                             <p className="truncate text-zinc-300 font-medium" title={mg.title}>{mg.title}</p>
                                             {mg.release_date && <p className="text-[9px] text-zinc-500">{mg.release_date}</p>}
                                           </div>
-                                          <Button
-                                            size="sm"
-                                            className="h-7 px-2 text-[10px] shrink-0"
-                                            disabled={linkFoundMut.isPending}
+                                          <button
                                             onClick={() => {
-                                              linkFoundMut.mutate({
-                                                provider: scan.provider ?? '',
-                                                source_url: mg.url ?? '',
-                                                name: mg.title ?? '',
-                                                thumbnail_url: mg.thumbnail,
-                                              });
+                                              const alias = scan.alias || person?.name || '';
+                                              const query = encodeURIComponent(`"${alias}" "${mg.title || ''}"`);
+                                              window.open(
+                                                `https://vipergirls.to/search.php?do=process&query=${query}&titleonly=1&forumchoice%5B%5D=235&childforums=1`,
+                                                '_blank'
+                                              );
                                             }}
+                                            className="h-7 px-2 text-[10px] shrink-0 inline-flex items-center justify-center rounded-md bg-zinc-700 text-zinc-200 hover:bg-zinc-600 hover:text-white transition-colors cursor-pointer"
+                                            title="Search vipergirls.to"
                                           >
-                                            Add
-                                          </Button>
+                                            VG
+                                          </button>
                                           {mg.unsure && (
                                             <div className="ml-2 flex items-center gap-2">
                                               <Button size="sm" className="h-7 px-2 text-[10px]" onClick={() => {
