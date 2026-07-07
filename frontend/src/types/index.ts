@@ -102,6 +102,7 @@ export interface GallerySearchResult {
   thumbnail: string;
   release_date?: string;
   source_id?: string;
+  id?: number;
 }
 
 export interface GalleryMetadata {
@@ -193,6 +194,18 @@ export interface PersonExclusion {
   person_id: number;
   gallery_id?: number;
   image_id?: number;
+}
+
+export interface PersonScanResponse {
+  person_id: number;
+  person_name: string;
+  provider: string;
+  found_count: number;
+  existing_count: number;
+  unsure_count: number;
+  missing_count: number;
+  missing_galleries: GallerySearchResult[];
+  unsure_galleries: GallerySearchResult[];
 }
 
 export interface IdentifierResult {

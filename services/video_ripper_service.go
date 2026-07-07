@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"gallery_api/logger"
+	"hash"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -260,30 +261,208 @@ func RipTnaFlix(pageURL string) (string, string, error) {
 	return videoURL, title, nil
 }
 
-// DownloadVideo downloads a video from a direct URL and saves it with hash-based naming
-func DownloadVideo(videoURL string, sourceName string, pageURL string, title string) (*DownloadImageResult, error) {
-	logger.Infof("Downloading video from %s", videoURL)
+const videoChunkSize = 8 * 1024 * 1024 // 8MB per chunk
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "GET", videoURL, nil)
+// probeRangeSupport sends a HEAD request to check whether the server supports
+// HTTP Range requests and returns the total file size.
+func probeRangeSupport(ctx context.Context, client *http.Client, videoURL, pageURL string) (int64, bool) {
+	req, err := http.NewRequestWithContext(ctx, "HEAD", videoURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
+		return 0, false
 	}
-
 	req.Header.Set("Referer", pageURL)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("downloading video: %w", err)
+		return 0, false
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body) // drain body so the connection can be reused
+
+	if resp.StatusCode != 200 {
+		return 0, false
+	}
+
+	acceptRanges := resp.Header.Get("Accept-Ranges")
+	contentLength := resp.ContentLength
+
+	return contentLength, acceptRanges == "bytes" && contentLength > 0
+}
+
+// downloadChunked downloads a file in sequential 8MB chunks using HTTP Range
+// requests. Each chunk is written directly to the file and hashed
+// incrementally, keeping memory usage constant regardless of total file size.
+func downloadChunked(ctx context.Context, client *http.Client, videoURL, pageURL string, dst *os.File, hasher hash.Hash, totalSize int64) error {
+	var offset int64
+	buf := make([]byte, 32*1024) // 32KB read buffer, reused across all chunks
+
+	for offset < totalSize {
+		end := offset + videoChunkSize - 1
+		if end >= totalSize {
+			end = totalSize - 1
+		}
+
+		if err := downloadChunkWithRetry(ctx, client, videoURL, pageURL, dst, hasher, offset, end, buf); err != nil {
+			return fmt.Errorf("chunk %d-%d failed: %w", offset, end, err)
+		}
+
+		offset = end + 1
+
+		// Log progress periodically (every ~50MB)
+		if offset%(50*1024*1024) < videoChunkSize {
+			pct := float64(offset) / float64(totalSize) * 100
+			logger.Infof("Download progress: %.1f%% (%s / %s)", pct, formatBytes(offset), formatBytes(totalSize))
+		}
+	}
+
+	return nil
+}
+
+// downloadChunkWithRetry downloads a single byte range with up to 3 retries
+// and exponential backoff. Requires a 206 Partial Content response and
+// validates the Content-Range header to detect servers that ignore the Range
+// header and send the full body.
+func downloadChunkWithRetry(ctx context.Context, client *http.Client, videoURL, pageURL string, dst *os.File, hasher hash.Hash, start, end int64, buf []byte) error {
+	const maxRetries = 3
+	var lastErr error
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		if attempt > 0 {
+			backoff := time.Duration(1<<uint(attempt-1)) * time.Second
+			logger.Debugf("Retrying chunk %d-%d (attempt %d) after %v", start, end, attempt+1, backoff)
+			time.Sleep(backoff)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "GET", videoURL, nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
+		req.Header.Set("Referer", pageURL)
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		// Require 206 Partial Content. If the server returns 200 OK it means
+		// the Range header was ignored and the full body is being sent, which
+		// would blow up disk usage and waste bandwidth.
+		if resp.StatusCode != 206 {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("expected 206 got %d for range %d-%d (server ignoring Range header)", resp.StatusCode, start, end)
+			continue
+		}
+
+		// Validate Content-Range header to confirm the server sent the
+		// exact byte range we requested.
+		cr := resp.Header.Get("Content-Range")
+		if cr == "" {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("missing Content-Range header in 206 response for %d-%d", start, end)
+			continue
+		}
+		expectedRange := fmt.Sprintf("bytes %d-%d", start, end)
+		if !strings.HasPrefix(cr, expectedRange) {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("Content-Range mismatch: expected prefix %q, got %q", expectedRange, cr)
+			continue
+		}
+
+		// Write chunk data directly to file and hash simultaneously.
+		// The read is bounded by the chunk size; io.CopyBuffer returns
+		// after resp.Body.Read returns EOF, which the server signals
+		// after sending exactly the requested byte range.
+		n, err := io.CopyBuffer(io.MultiWriter(dst, hasher), resp.Body, buf)
+		resp.Body.Close()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		expectedBytes := end - start + 1
+		if n != expectedBytes {
+			// Truncate the file back to where the chunk started so
+			// we don't leave partial garbage on failure.
+			dst.Truncate(start)
+			dst.Seek(start, io.SeekStart)
+			lastErr = fmt.Errorf("chunk %d-%d: wrote %d bytes, expected %d", start, end, n, expectedBytes)
+			continue
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("chunk download failed after %d retries: %w", maxRetries, lastErr)
+}
+
+// downloadStreaming performs a standard streaming download as a fallback
+// when the server does not support HTTP Range requests. Uses a buffered
+// writer to reduce syscall overhead.
+func downloadStreaming(ctx context.Context, client *http.Client, videoURL, pageURL string, dst *os.File, hasher hash.Hash) error {
+	req, err := http.NewRequestWithContext(ctx, "GET", videoURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Referer", pageURL)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("downloading video: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("video download returned status %d", resp.StatusCode)
+		return fmt.Errorf("video download returned status %d", resp.StatusCode)
 	}
+
+	// Use a buffered writer (256KB) to reduce syscall overhead for large files
+	bufWriter := bufio.NewWriterSize(dst, 256*1024)
+	multiWriter := io.MultiWriter(bufWriter, hasher)
+	if _, err := io.Copy(multiWriter, resp.Body); err != nil {
+		return fmt.Errorf("writing video data: %w", err)
+	}
+	if err := bufWriter.Flush(); err != nil {
+		return fmt.Errorf("flushing video data: %w", err)
+	}
+
+	return nil
+}
+
+// formatBytes formats a byte count as a human-readable string.
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+// DownloadVideo downloads a video from a direct URL and saves it with hash-based naming.
+// It uses chunked HTTP Range requests (8MB chunks) when the server supports them,
+// falling back to buffered streaming otherwise. This keeps memory usage constant
+// regardless of video file size.
+func DownloadVideo(videoURL string, sourceName string, pageURL string, title string) (*DownloadImageResult, error) {
+	logger.Infof("Downloading video from %s", videoURL)
+
+	// Use the appropriate HTTP client (WireGuard for blocked domains, default otherwise)
+	client := GetHTTPClient(videoURL)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
 
 	// Determine extension
 	ext := ".mp4"
@@ -305,7 +484,7 @@ func DownloadVideo(videoURL string, sourceName string, pageURL string, title str
 		return nil, fmt.Errorf("creating directory: %w", err)
 	}
 
-	// Stream to temp file while computing hash (avoids loading entire video into memory)
+	// Create temp file for download
 	tmpFile, err := os.CreateTemp(fullDir, "video-*"+ext)
 	if err != nil {
 		return nil, fmt.Errorf("creating temp file: %w", err)
@@ -313,17 +492,43 @@ func DownloadVideo(videoURL string, sourceName string, pageURL string, title str
 	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath)
 
-	hash := sha256.New()
-	written, err := io.Copy(io.MultiWriter(tmpFile, hash), resp.Body)
-	tmpFile.Close()
-	if err != nil {
-		return nil, fmt.Errorf("downloading video: %w", err)
+	hasher := sha256.New()
+
+	// Probe the server for Range request support and total file size
+	totalSize, supportsRange := probeRangeSupport(ctx, client, videoURL, pageURL)
+
+	if supportsRange && totalSize > 0 {
+		// Chunked download using HTTP Range requests
+		logger.Infof("Server supports range requests, downloading %s in 8MB chunks", formatBytes(totalSize))
+		if err := downloadChunked(ctx, client, videoURL, pageURL, tmpFile, hasher, totalSize); err != nil {
+			logger.Warnf("Chunked download failed (%v), falling back to streaming", err)
+			// Reset temp file and hasher for streaming fallback
+			tmpFile.Truncate(0)
+			tmpFile.Seek(0, io.SeekStart)
+			hasher = sha256.New()
+			if err := downloadStreaming(ctx, client, videoURL, pageURL, tmpFile, hasher); err != nil {
+				tmpFile.Close()
+				return nil, fmt.Errorf("streaming download failed after chunked fallback: %w", err)
+			}
+		}
+	} else {
+		// Fallback: standard streaming download with buffered I/O
+		logger.Info("Server does not support range requests, using buffered streaming download")
+		if err := downloadStreaming(ctx, client, videoURL, pageURL, tmpFile, hasher); err != nil {
+			tmpFile.Close()
+			return nil, fmt.Errorf("streaming download failed: %w", err)
+		}
 	}
-	if written == 0 {
+
+	tmpFile.Close()
+
+	// Verify we got data
+	info, err := os.Stat(tmpPath)
+	if err != nil || info.Size() == 0 {
 		return nil, fmt.Errorf("downloaded video is empty")
 	}
 
-	hashStr := hex.EncodeToString(hash.Sum(nil))
+	hashStr := hex.EncodeToString(hasher.Sum(nil))
 	filename := hashStr + ext
 	destPath := filepath.Join(fullDir, filename)
 
@@ -336,7 +541,7 @@ func DownloadVideo(videoURL string, sourceName string, pageURL string, title str
 	if err := os.Rename(tmpPath, destPath); err != nil {
 		return nil, fmt.Errorf("renaming video file: %w", err)
 	}
-	logger.Infof("Saved video to: %s", destPath)
+	logger.Infof("Saved video to: %s (%s)", destPath, formatBytes(info.Size()))
 
 	return buildVideoResult(destPath, title)
 }

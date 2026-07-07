@@ -8,6 +8,7 @@ import (
 	"gallery_api/config"
 	"gallery_api/database"
 	"gallery_api/models"
+	"gallery_api/services"
 	"github.com/gin-gonic/gin"
 )
 
@@ -96,4 +97,24 @@ func CleanupDupes(c *gin.Context) {
 // helper to convert int to string without importing strconv just for brevity here
 func intToString(n uint) string {
 	return strconv.Itoa(int(n))
+}
+
+// PurgePlaceholders scans all images on disk, detects known hotlinking-placeholder
+// images (e.g. "hotlinking is disabled" from imagetwist), and deletes them from
+// both the filesystem and the database.  Protected by X-Maintenance-Token.
+func PurgePlaceholders(c *gin.Context) {
+	token := c.GetHeader("X-Maintenance-Token")
+	if config.Global.MaintenanceToken != "" {
+		if strings.TrimSpace(token) != strings.TrimSpace(config.Global.MaintenanceToken) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
+		}
+	}
+
+	result, err := services.ScanAndPurgePlaceholders()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }

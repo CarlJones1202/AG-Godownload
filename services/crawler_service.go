@@ -361,6 +361,8 @@ func CrawlSource(sourceID uint) error {
 				// Use rippers to extract actual image URL based on hosting site
 				var imageURL string
 				var err error
+				// Track the correct referer per provider. Default to the source (forum) URL.
+				downloadReferer := source.Location
 				switch {
 				case strings.Contains(src, "imagebam"):
 					logger.Debug("Ripping from ImageBam")
@@ -377,6 +379,9 @@ func CrawlSource(sourceID uint) error {
 				case strings.Contains(src, "vipr.im"):
 					logger.Debug("Ripping from Vipr.im")
 					imageURL, err = RipViprIm(imgSrc)
+					if err == nil && imageURL != "" {
+						downloadReferer = src
+					}
 				case strings.Contains(src, "pixhost"):
 					logger.Debug("Ripping from PixHost")
 					imageURL, err = RipPixHost(imgSrc)
@@ -386,6 +391,11 @@ func CrawlSource(sourceID uint) error {
 				case strings.Contains(src, "imagetwist"):
 					logger.Debug("Ripping from Imagetwist")
 					imageURL, err = RipImagetwist(src)
+					if err == nil && imageURL != "" {
+						// Imagetwist validates the Referer: it must be the imagetwist page,
+						// not the forum URL; otherwise they return a "hotlinking disabled" image.
+						downloadReferer = src
+					}
 				case strings.Contains(src, "acidimg"):
 					logger.Debug("Ripping from AcidImg")
 					imageURL, err = RipAcidImg(imgSrc)
@@ -430,8 +440,9 @@ func CrawlSource(sourceID uint) error {
 				var result *DownloadImageResult
 				maxRetries := 3
 				for attempt := 1; attempt <= maxRetries; attempt++ {
-					// Use the page URL as the referer to improve success on hosts that require it
-					result, err = DownloadImage(imageURL, source.Name, source.Location)
+					// Use the provider-correct referer (some hosts like imagetwist require
+					// the hosting page URL, not the forum URL, to avoid hotlink protection)
+					result, err = DownloadImage(imageURL, source.Name, downloadReferer)
 					if err == nil {
 						break
 					}

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { people } from '@/lib/api';
-import type { TagSuggestion } from '@/types';
+import type { PersonScanResponse, TagSuggestion } from '@/types';
 import {
   Badge,
   Button,
@@ -33,6 +33,12 @@ import {
   Trash2,
 } from 'lucide-react';
 import { CoverGrid } from '@/components/CoverGrid';
+
+const PROVIDER_LIST = [
+  "MetArt", "MetartX", "Playboy", "PlayboyPlus", "Vixen",
+  "SexArt", "LifeErotic", "EternalDesire", "MPLStudios",
+  "VivThomas", "WowGirls", "RylskyArt",
+] as const;
 
 function parsePhotos(photos?: string): string[] {
   if (!photos) return [];
@@ -147,6 +153,7 @@ export function PersonDetailPage() {
   const [newAliasName, setNewAliasName] = useState('');
   const [scanSource, setScanSource] = useState('MetArt');
   const [scanAlias, setScanAlias] = useState('');
+  const [scanResults, setScanResults] = useState<PersonScanResponse | null>(null);
 
   const { data: aliases, refetch: refetchAliases } = useQuery({
     queryKey: ['person-aliases', personId],
@@ -178,11 +185,11 @@ export function PersonDetailPage() {
     },
   });
 
-  const scanMut = useMutation({
+  const searchMut = useMutation({
     mutationFn: (data: { source: string; alias?: string }) =>
       people.scanPerson(personId, data.source, data.alias),
-    onSuccess: () => {
-      refetchScans();
+    onSuccess: (result) => {
+      setScanResults(result);
     },
   });
 
@@ -453,9 +460,9 @@ export function PersonDetailPage() {
                                 className="bg-zinc-900 border border-zinc-700 rounded px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none transition-all cursor-pointer w-full h-9"
                               >
                                 <option value="">Select...</option>
-                                <option value="MetArt">MetArt</option>
-                                <option value="MPLStudios">MPLStudios</option>
-                                <option value="Playboy">Playboy</option>
+                                {PROVIDER_LIST.map((p) => (
+                                  <option key={p} value={p}>{p}</option>
+                                ))}
                               </select>
                             </div>
                             <div className="flex-1">
@@ -486,24 +493,27 @@ export function PersonDetailPage() {
                       {/* Scanners & Scans */}
                       <div className="space-y-6">
                         <div className="bg-zinc-950/40 p-4 rounded-lg border border-zinc-800/80 space-y-4">
-                          <h4 className="text-sm font-semibold text-zinc-300">Run Provider Scanner</h4>
+                          <h4 className="text-sm font-semibold text-zinc-300">Search Provider</h4>
                           <div className="flex gap-2 items-end">
                             <div className="flex-1">
-                              <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Source Provider</label>
+                              <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Provider</label>
                               <select
                                 value={scanSource}
-                                onChange={(e) => setScanSource(e.target.value)}
+                                onChange={(e) => {
+                                  setScanSource(e.target.value);
+                                  setScanResults(null);
+                                }}
                                 className="bg-zinc-900 border border-zinc-700 rounded px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none transition-all cursor-pointer w-full h-9"
                               >
-                                <option value="MetArt">MetArt</option>
-                                <option value="MPLStudios">MPLStudios</option>
-                                <option value="Playboy">Playboy</option>
+                                {PROVIDER_LIST.map((p) => (
+                                  <option key={p} value={p}>{p}</option>
+                                ))}
                               </select>
                             </div>
                             <div className="flex-1">
-                              <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Optional Override Alias</label>
+                              <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Search Alias</label>
                               <Input
-                                placeholder="Use custom alias"
+                                placeholder={scanAlias || (person?.name ?? '')}
                                 value={scanAlias}
                                 onChange={(e) => setScanAlias(e.target.value)}
                                 className="h-9"
@@ -513,13 +523,94 @@ export function PersonDetailPage() {
                               size="sm"
                               className="h-9"
                               onClick={() => {
-                                scanMut.mutate({ source: scanSource, alias: scanAlias || undefined });
+                                searchMut.mutate({ source: scanSource, alias: scanAlias || undefined });
                               }}
-                              disabled={scanMut.isPending}
+                              disabled={searchMut.isPending}
                             >
-                              {scanMut.isPending ? 'Queued' : 'Trigger Scan'}
+                              {searchMut.isPending ? 'Searching...' : 'Search'}
                             </Button>
                           </div>
+
+                          {searchMut.isPending && (
+                            <div className="py-4 flex items-center justify-center">
+                              <span className="text-xs text-zinc-400 animate-pulse">Searching {scanSource}...</span>
+                            </div>
+                          )}
+
+                          {scanResults && (
+                            <div className="border-t border-zinc-700/50 pt-3 space-y-3">
+                              <div className="grid grid-cols-4 gap-2 text-[10px] text-zinc-400">
+                                <div>Found: <span className="text-zinc-200 font-medium">{scanResults.found_count}</span></div>
+                                <div>Existing: <span className="text-zinc-200 font-medium">{scanResults.existing_count}</span></div>
+                                <div>Unsure: <span className="text-zinc-200 font-medium">{scanResults.unsure_count}</span></div>
+                                <div>Missing: <span className="text-zinc-200 font-medium">{scanResults.missing_count}</span></div>
+                              </div>
+
+                              {scanResults.missing_galleries?.length > 0 && (
+                                <div>
+                                  <p className="text-[10px] uppercase font-bold text-zinc-400 mb-1.5">Missing galleries:</p>
+                                  <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                                    {scanResults.missing_galleries.map((mg, idx) => (
+                                      <div key={idx} className="flex items-center justify-between bg-zinc-950 p-2 rounded border border-zinc-800/50">
+                                        <div className="min-w-0 flex-1 pr-2">
+                                          <p className="truncate text-zinc-300 font-medium text-xs" title={mg.title}>{mg.title}</p>
+                                          {mg.release_date && <p className="text-[9px] text-zinc-500">{mg.release_date}</p>}
+                                        </div>
+                                        <button
+                                          onClick={() => {
+                                            const alias = scanAlias || person?.name || '';
+                                            const query = encodeURIComponent(`${alias} ${mg.title}`);
+                                            window.open(
+                                              `https://vipergirls.to/search.php?do=process&query=${query}&titleonly=1&searchphoto=1&excludegay=1&excludescat=1&excludetrans=1`,
+                                              '_blank'
+                                            );
+                                          }}
+                                          className="h-7 px-2 text-[10px] shrink-0 inline-flex items-center justify-center rounded-md bg-zinc-700 text-zinc-200 hover:bg-zinc-600 hover:text-white transition-colors cursor-pointer"
+                                          title="Search vipergirls.to"
+                                        >
+                                          VG
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {scanResults.unsure_galleries?.length > 0 && (
+                                <div>
+                                  <p className="text-[10px] uppercase font-bold text-amber-400 mb-1.5">Unsure matches (already in DB, different provider):</p>
+                                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                                    {scanResults.unsure_galleries.map((ug, idx) => (
+                                      <div key={idx} className="flex items-center justify-between bg-zinc-950 p-2 rounded border border-zinc-800/50">
+                                        <div className="min-w-0 flex-1 pr-2">
+                                          <p className="truncate text-zinc-300 font-medium text-xs" title={ug.title}>{ug.title}</p>
+                                          {ug.release_date && <p className="text-[9px] text-zinc-500">{ug.release_date}</p>}
+                                        </div>
+                                        <div className="flex gap-1.5 shrink-0">
+                                          <Button size="sm" className="h-7 px-2 text-[10px]" disabled={linkUnsureMut.isPending} onClick={() => {
+                                            if (ug.id) {
+                                              linkUnsureMut.mutate({ gallery_id: ug.id, provider: scanResults.provider, source_url: ug.url });
+                                            }
+                                          }}>
+                                            Link
+                                          </Button>
+                                          <Button size="sm" variant="secondary" className="h-7 px-2 text-[10px]" onClick={() => {
+                                            excludeScanResultMut.mutate({ provider: scanResults.provider, source_url: ug.url, title: ug.title });
+                                          }}>
+                                            Exclude
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {scanResults.missing_count === 0 && scanResults.unsure_count === 0 && (
+                                <p className="text-xs text-zinc-500 italic">All galleries from this provider are already in your database.</p>
+                              )}
+                            </div>
+                          )}
                         </div>
 
                         <div className="bg-zinc-950/40 p-4 rounded-lg border border-zinc-800/80 space-y-4">

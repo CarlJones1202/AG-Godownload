@@ -14,9 +14,11 @@ import (
 )
 
 var (
-	wgDialer     *wiredialer.WireDialer
-	wgDialerOnce sync.Once
-	wgDialerErr  error
+	wgDialer         *wiredialer.WireDialer
+	wgDialerOnce     sync.Once
+	wgDialerErr      error
+	wgHTTPClient     *http.Client
+	wgHTTPClientOnce sync.Once
 )
 
 // GetWireGuardDialer returns a singleton WireGuard dialer if configured
@@ -80,12 +82,12 @@ func GetHTTPClient(targetURL string) *http.Client {
 	// Temporary bypass for testing
 	if os.Getenv("BYPASS_VPN") == "true" {
 		logger.Infof("[VPN] BYPASS_VPN=true, using direct connection for: %s", targetURL)
-		return http.DefaultClient
+		return GetConfiguredHTTPClient()
 	}
 
 	if !ShouldUseWireGuard(targetURL) {
 		logger.Debugf("[VPN] URL not in blocked list, using direct connection: %s", targetURL)
-		return http.DefaultClient
+		return GetConfiguredHTTPClient()
 	}
 
 	logger.Infof("[VPN] URL requires WireGuard tunnel: %s", targetURL)
@@ -97,22 +99,24 @@ func GetHTTPClient(targetURL string) *http.Client {
 		return http.DefaultClient
 	}
 
-	logger.Infof("[VPN] ✓ Using WireGuard tunnel for: %s", targetURL)
-
-	// CRITICAL: We must also route DNS through the tunnel to avoid DNS leaks
-	// The default resolver uses the system DNS which reveals our real location
-	return &http.Client{
-		Transport: &http.Transport{
-			// Force IPv4 only - this prevents IPv6 leaks which are common causes of detection
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				// Force "tcp4" to ensure we don't accidentally use system IPv6
-				return dialer.DialContext(ctx, "tcp4", addr)
+	wgHTTPClientOnce.Do(func() {
+		// CRITICAL: We must also route DNS through the tunnel to avoid DNS leaks
+		// The default resolver uses the system DNS which reveals our real location
+		wgHTTPClient = &http.Client{
+			Transport: &http.Transport{
+				// Force IPv4 only - this prevents IPv6 leaks which are common causes of detection
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+					// Force "tcp4" to ensure we don't accidentally use system IPv6
+					return dialer.DialContext(ctx, "tcp4", addr)
+				},
+				DialTLSContext: nil, // Use DialContext for TLS too
 			},
-			DialTLSContext: nil, // Use DialContext for TLS too
-		},
-		// Disable automatic redirects to ensure all requests go through our custom transport
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+			// Disable automatic redirects to ensure all requests go through our custom transport
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+	})
+
+	return wgHTTPClient
 }

@@ -11,6 +11,7 @@ import type {
   Person,
   PersonExclusion,
   PersonIdentifier,
+  PersonScanResponse,
   PersonScanResult,
   ProviderAlias,
   Source,
@@ -188,7 +189,7 @@ export const people = {
       `/people/${id}/stats`,
     ),
   scanPerson: (id: number, source: string, alias?: string) =>
-    request<{ message: string }>(`/people/${id}/scan${qs({ source, alias })}`),
+    request<PersonScanResponse>(`/people/${id}/scan${qs({ source, alias })}`),
   getScans: (id: number) =>
     request<PersonScanResult[]>(`/people/${id}/scans`),
   linkFoundGallery: (id: number, data: { provider: string; source_url: string; name: string; thumbnail_url?: string }) =>

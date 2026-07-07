@@ -118,6 +118,8 @@ func main() {
 	r.GET("/ws", services.HandleWebSocket)
 	// Maintenance: cleanup duplicate images
 	r.POST("/cleanup-dupes", handlers.CleanupDupes)
+	// Maintenance: purge known hotlinking-placeholder images (imagetwist etc.)
+	r.POST("/purge-placeholders", handlers.PurgePlaceholders)
 
 	r.POST("/galleries", handlers.CreateGallery)
 	r.GET("/galleries", handlers.GetGalleries)

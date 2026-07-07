@@ -26,6 +26,94 @@ const (
 	UploadsDir = "uploads"
 )
 
+// KnownPlaceholderHashes lists SHA-256 hashes of known "hotlinking disabled"
+// placeholder images from various hosts. Populate this by downloading the
+// placeholder once, computing sha256sum, and adding it here.
+// Key format: "provider:hash" — set provider to "" to match any provider.
+var KnownPlaceholderHashes = map[string]string{
+	// vipr.im — "hotlinking is disabled" placeholder (177×142, ~8 KB)
+	"viprimg:dead7a5996b78ca426adebf347e28758bc5a766f7385e41d6edf30dec2ef4190": "viprimg",
+	"viprimg:cc3d009865e4980b354ea615270128620d57aaaa243d8593adc8a13a96e4b088": "viprimg",
+	// Other detected placeholders (heuristic matches — add provider once confirmed)
+	// "208c9ad84252cc31794d6dbccb0779f37788950b94b64f2c3fd97ce7af7b1050": "unknown",
+	// "3222f188a489c47d281c856dd4bea49b8823e15be3385d1406f721ee0f1e59ff": "unknown",
+	// "5aec0ef5ce727c55af3ebfde673ff30f06c6611b35322de62b6a9bdba316bede": "unknown",
+	// imagetwist.com — run `sha256sum` on the placeholder image to fill this in.
+	// "imagetwist:abcdef1234567890...": "imagetwist",
+}
+
+// PlaceholderSizeThresholds defines (maxWidth, maxHeight, maxBytes) tuples for
+// known placeholder images indexed by provider. An image smaller than ALL of
+// these thresholds and matching the provider is flagged as a likely placeholder.
+var PlaceholderSizeThresholds = map[string]struct {
+	MaxWidth, MaxHeight int
+	MaxBytes            int64
+}{
+	// A typical text-only "hotlinking disabled" JPEG is under ~50 KB and ~800×200
+	"imagetwist": {MaxWidth: 800, MaxHeight: 300, MaxBytes: 50 * 1024},
+	"viprimg":    {MaxWidth: 800, MaxHeight: 400, MaxBytes: 50 * 1024},
+	"default":    {MaxWidth: 800, MaxHeight: 400, MaxBytes: 60 * 1024},
+}
+
+// IsHotlinkPlaceholder checks whether the image at path matches a known
+// placeholder pattern. It returns true and a user-readable reason if it does.
+func IsHotlinkPlaceholder(imgPath string, providerHint string) (bool, string, error) {
+	fi, err := os.Stat(imgPath)
+	if err != nil {
+		return false, "", err
+	}
+	size := fi.Size()
+
+	// --- Check 1: exact hash match against KnownPlaceholderHashes ---
+	f, err := os.Open(imgPath)
+	if err != nil {
+		return false, "", err
+	}
+	defer f.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, f); err != nil {
+		return false, "", err
+	}
+	hashStr := hex.EncodeToString(hash.Sum(nil))
+
+	// Log the hash at DEBUG level so the user can find and add unknown placeholders
+	logger.Debugf("Image hash for %s: %s (provider=%s, size=%d)", filepath.Base(imgPath), hashStr, providerHint, size)
+
+	// Check exact hash match (provider-specific first, then global)
+	if provider, ok := KnownPlaceholderHashes[providerHint+":"+hashStr]; ok {
+		return true, fmt.Sprintf("known placeholder image for %s (hash match)", provider), nil
+	}
+	if provider, ok := KnownPlaceholderHashes[":"+hashStr]; ok {
+		return true, fmt.Sprintf("known placeholder image for %s (global hash match)", provider), nil
+	}
+	if provider, ok := KnownPlaceholderHashes[hashStr]; ok {
+		return true, fmt.Sprintf("known placeholder image for %s (hash match)", provider), nil
+	}
+
+	// --- Check 2: heuristic size-based detection ---
+	thresh, ok := PlaceholderSizeThresholds[providerHint]
+	if !ok {
+		thresh = PlaceholderSizeThresholds["default"]
+	}
+	if size <= thresh.MaxBytes {
+		// Small enough to suspect — confirm by decoding dimensions
+		img, err := imaging.Open(imgPath)
+		if err != nil {
+			// Can't decode — flag it anyway if it's suspiciously small
+			return true, fmt.Sprintf("undecodable image, size %d bytes suggests placeholder", size), nil
+		}
+		bounds := img.Bounds()
+		w := bounds.Dx()
+		h := bounds.Dy()
+		if w <= thresh.MaxWidth && h <= thresh.MaxHeight {
+			return true, fmt.Sprintf("image dimensions %dx%d and size %d bytes match placeholder profile for %s", w, h, size, providerHint), nil
+		}
+	}
+
+	return false, "", nil
+}
+
 func EnsureUploadsDir() error {
 	if _, err := os.Stat(UploadsDir); os.IsNotExist(err) {
 		return os.MkdirAll(UploadsDir, 0755)
@@ -177,6 +265,16 @@ func DownloadImage(url string, sourceName string, referer string) (*DownloadImag
 		}
 		// For other decode errors, still return the error but without assuming it's a placeholder
 		return nil, fmt.Errorf("failed to decode image: %w", err)
+	}
+
+	// Check for known hotlinking-placeholder images
+	provider := extractImageProvider(url)
+	if isPlaceholder, reason, err := IsHotlinkPlaceholder(destPath, provider); err == nil && isPlaceholder {
+		os.Remove(destPath)
+		logger.Warnf("Rejected placeholder image from %s: %s (%s)", provider, url, reason)
+		return nil, fmt.Errorf("hotlinking placeholder detected from %s: %s", provider, reason)
+	} else if err != nil {
+		logger.Warnf("Failed to check placeholder status for %s: %v", destPath, err)
 	}
 
 	// Extract dominant colors

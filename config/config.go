@@ -4,6 +4,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -42,6 +44,7 @@ type Config struct {
 var Global Config
 
 func Load() {
+	_ = godotenv.Load()
 	Global = Config{
 		Port:           getEnv("PORT", "8080"),
 		env:            getEnv("ENV", "development"),
