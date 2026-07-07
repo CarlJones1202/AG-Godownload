@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, useQueries } from '@tanstack/react-query';
 import { galleries, images as imagesApi, people } from '@/lib/api';
 import { formatDate, parseColors, thumbnailUrl, imageUrl } from '@/lib/utils';
 import {
@@ -79,6 +79,69 @@ export function GalleryDetailPage() {
     queryFn: () => galleries.people(galleryId),
   });
 
+  // Smart suggestions: find people whose name appears in this gallery's title, fetch their scans
+  const { data: allPeople } = useQuery({
+    queryKey: ['people-all'],
+    queryFn: () => people.list({ limit: 5000 }),
+    enabled: !!gallery?.name,
+  });
+
+  const candidatePeople = useMemo(() => {
+    if (!gallery?.name || !allPeople?.data) return [];
+    const galleryNameLower = gallery.name.toLowerCase();
+    const linkedIds = new Set((linkedPeople ?? []).map((p: any) => p.id));
+    return allPeople.data.filter((p) => {
+      if (linkedIds.has(p.id)) return true; // always include linked people
+      // Check if person's name appears in the gallery title
+      return galleryNameLower.includes(p.name.toLowerCase());
+    });
+  }, [gallery?.name, allPeople?.data, linkedPeople]);
+
+  const candidateScansQueries = useQueries({
+    queries: candidatePeople.map((person) => ({
+      queryKey: ['person-scans', person.id],
+      queryFn: () => people.getScans(person.id),
+      enabled: !!person.id,
+    })),
+  });
+
+  interface AutoSuggestion extends GallerySearchResult {
+    personId: number;
+    personName: string;
+  }
+
+  const autoSuggestions = useMemo(() => {
+    if (!gallery?.name) return [] as AutoSuggestion[];
+    const suggestions: AutoSuggestion[] = [];
+    const seenUrls = new Set<string>();
+    const galleryNameNorm = gallery.name.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+
+    for (let i = 0; i < candidatePeople.length; i++) {
+      const person = candidatePeople[i];
+      const query = candidateScansQueries[i];
+      if (!query?.data) continue;
+
+      for (const scan of query.data) {
+        const missingGals = scan.results?.missing_galleries || [];
+        for (const mg of missingGals) {
+          if (!mg.title) continue;
+          const mgNorm = mg.title.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+          const match = galleryNameNorm === mgNorm || galleryNameNorm.includes(mgNorm) || mgNorm.includes(galleryNameNorm);
+          if (match && mg.url !== gallery.source_url && !seenUrls.has(mg.url)) {
+            seenUrls.add(mg.url);
+            suggestions.push({
+              ...mg,
+              provider: scan.provider || mg.provider || '',
+              personId: person.id,
+              personName: person.name,
+            });
+          }
+        }
+      }
+    }
+    return suggestions;
+  }, [candidateScansQueries, candidatePeople, gallery?.name, gallery?.source_url]);
+
   const favMut = useMutation({
     mutationFn: (imgId: number) => imagesApi.toggleFavorite(imgId),
     onSuccess: () => {
@@ -144,6 +207,19 @@ export function GalleryDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gallery', galleryId] });
       searchMetaMut.mutate();
+    },
+  });
+
+  // Scrape metadata AND auto-link the person to this gallery
+  const scrapeAndLinkMut = useMutation({
+    mutationFn: async (params: { provider: string; source_url: string; personId: number }) => {
+      await galleries.scrapeMetadata(galleryId, { provider: params.provider, source_url: params.source_url });
+      await people.linkGallery(params.personId, galleryId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gallery', galleryId] });
+      queryClient.invalidateQueries({ queryKey: ['gallery-people', galleryId] });
+      queryClient.invalidateQueries({ queryKey: ['person-scans'] });
     },
   });
 
@@ -578,6 +654,42 @@ export function GalleryDetailPage() {
               <p className="text-xs text-zinc-500">Search provider for matching galleries based on name and linked people.</p>
               {searchMetaMut.isPending && (
                 <div className="text-xs text-zinc-400 animate-pulse py-4 text-center">Searching providers...</div>
+              )}
+              {!searchMetaMut.isPending && !searchResults && autoSuggestions.length > 0 && (
+                <div className="space-y-2 pt-2 border-t border-white/5">
+                  <p className="text-[10px] uppercase font-bold text-amber-400">Suggested Scrapes (Found in performer's missing list):</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                    {autoSuggestions.map((r, idx) => (
+                      <div key={idx} className="group relative flex flex-col rounded-lg overflow-hidden border border-zinc-800 bg-zinc-900/80 hover:border-zinc-700 transition-all">
+                        <div className="aspect-[2/3] bg-zinc-800 overflow-hidden">
+                          {r.thumbnail ? (
+                            <img src={r.thumbnail} alt={r.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-zinc-600 text-[9px]">No thumb</div>
+                          )}
+                        </div>
+                        <div className="p-1.5 space-y-0.5 flex-1 flex flex-col">
+                          <p className="text-[9px] text-zinc-200 font-medium leading-tight line-clamp-2">{r.title}</p>
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <Badge variant="info" className="text-[7px]">{r.provider}</Badge>
+                            {r.release_date && <span className="text-[7px] text-zinc-500">{r.release_date}</span>}
+                          </div>
+                          <div className="mt-auto pt-0.5">
+                            <Badge variant="warning" className="text-[7px]">Suggested</Badge>
+                          </div>
+                        </div>
+                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                          <Button size="sm" className="h-6 px-1.5 text-[9px]" disabled={scrapeMetaMut.isPending} onClick={() => scrapeMetaMut.mutate({ provider: r.provider, source_url: r.url })}>
+                            {scrapeMetaMut.isPending ? '...' : 'Scrape'}
+                          </Button>
+                          <a href={`https://www.vipergirls.to/search.php?query="${encodeURIComponent(r.title)}"&titleonly=1&search_in=topics&forumchoice%5B%5D=235&childforums=1`} target="_blank" rel="noopener noreferrer" className="h-6 px-1.5 inline-flex items-center justify-center text-[9px] font-medium rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 border border-blue-500/30 transition-all">
+                            VG
+                          </a>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
               {!searchMetaMut.isPending && searchResults && searchResults.length === 0 && (
                 <p className="text-xs text-zinc-500 italic py-4 text-center">No matching galleries found.</p>
