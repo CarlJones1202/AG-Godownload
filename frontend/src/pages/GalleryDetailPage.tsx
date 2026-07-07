@@ -15,6 +15,7 @@ import { JustifiedGrid } from '@/components/JustifiedGrid';
 import type { GallerySearchResult } from '@/types';
 import type { JustifiedItem } from '@/components/JustifiedGrid';
 import { Lightbox } from '@/components/Lightbox';
+import { PersonModal } from '@/components/PersonModal';
 import {
   Heart,
   ArrowLeft,
@@ -57,6 +58,7 @@ export function GalleryDetailPage() {
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'largest' | 'smallest'>('newest');
   const [showTools, setShowTools] = useState(false);
   const [searchResults, setSearchResults] = useState<GallerySearchResult[] | null>(null);
+  const [modalPersonId, setModalPersonId] = useState<number | null>(null);
   const [scrapeProvider, setScrapeProvider] = useState('');
   const [scrapeUrl, setScrapeUrl] = useState('');
   const [updateProvider, setUpdateProvider] = useState('');
@@ -137,12 +139,10 @@ export function GalleryDetailPage() {
   });
 
   const scrapeMetaMut = useMutation({
-    mutationFn: () => galleries.scrapeMetadata(galleryId, { provider: scrapeProvider, source_url: scrapeUrl }),
+    mutationFn: (params: { provider: string; source_url: string }) =>
+      galleries.scrapeMetadata(galleryId, { provider: params.provider, source_url: params.source_url }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gallery', galleryId] });
-      setScrapeProvider('');
-      setScrapeUrl('');
-      // Re-run search to update linked/missing status
       searchMetaMut.mutate();
     },
   });
@@ -506,10 +506,10 @@ export function GalleryDetailPage() {
               {linkedPeople.map((person) => {
                 const photo = parsePhotos(person.photos)[0];
                 return (
-                  <Link
+                  <div
                     key={person.id}
-                    to={`/people/${person.id}`}
-                    className="group relative flex items-center gap-3 rounded-full bg-white/5 border border-white/5 pr-4 pl-1 py-1 hover:bg-white/10 hover:border-white/20 transition-all duration-300"
+                    className="group relative flex items-center gap-3 rounded-full bg-white/5 border border-white/5 pr-4 pl-1 py-1 hover:bg-white/10 hover:border-white/20 transition-all duration-300 cursor-pointer"
+                    onClick={() => setModalPersonId(person.id)}
                   >
                     <div className="relative h-8 w-8 rounded-full overflow-hidden ring-1 ring-white/10 group-hover:ring-blue-500/50 transition-all">
                       {photo ? (
@@ -525,7 +525,6 @@ export function GalleryDetailPage() {
                     </span>
                     <button
                       onClick={(e) => {
-                        e.preventDefault();
                         e.stopPropagation();
                         unlinkPersonMut.mutate(person.id);
                       }}
@@ -535,12 +534,13 @@ export function GalleryDetailPage() {
                     >
                       <X size={12} />
                     </button>
-                  </Link>
+                  </div>
                 );
               })}
             </div>
           )}
         </div>
+
       </div>
 
       {/* Gallery Management Tools */}
@@ -558,67 +558,67 @@ export function GalleryDetailPage() {
           </h3>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Search Metadata */}
-            <div className="bg-zinc-950/40 p-4 rounded-lg border border-zinc-800/80 space-y-3">
-              <h4 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
-                <Search size={14} /> Search Metadata
-              </h4>
+            {/* Search & Missing Galleries */}
+            <div className="md:col-span-2 bg-zinc-950/40 p-4 rounded-lg border border-zinc-800/80 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
+                  <Search size={14} /> Search & Missing Galleries
+                </h4>
+                <div className="flex items-center gap-2">
+                  {searchResults && searchResults.length > 0 && (
+                    <span className="text-[10px] bg-white/5 text-zinc-500 px-2 py-0.5 rounded-full border border-white/5">
+                      {searchResults.filter(r => !r.id).length} missing / {searchResults.length} total
+                    </span>
+                  )}
+                  <Button size="sm" onClick={() => searchMetaMut.mutate()} disabled={searchMetaMut.isPending}>
+                    {searchMetaMut.isPending ? 'Searching...' : 'Search'}
+                  </Button>
+                </div>
+              </div>
               <p className="text-xs text-zinc-500">Search provider for matching galleries based on name and linked people.</p>
-              <Button size="sm" onClick={() => searchMetaMut.mutate()} disabled={searchMetaMut.isPending}>
-                {searchMetaMut.isPending ? 'Searching...' : 'Search'}
-              </Button>
               {searchMetaMut.isPending && (
-                <div className="text-xs text-zinc-400 animate-pulse py-2">Searching providers...</div>
+                <div className="text-xs text-zinc-400 animate-pulse py-4 text-center">Searching providers...</div>
               )}
-              {searchResults && searchResults.length === 0 && (
-                <p className="text-xs text-zinc-500 italic py-2">No matching galleries found.</p>
+              {!searchMetaMut.isPending && searchResults && searchResults.length === 0 && (
+                <p className="text-xs text-zinc-500 italic py-4 text-center">No matching galleries found.</p>
               )}
-              {searchResults && searchResults.length > 0 && (
-                <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+              {!searchMetaMut.isPending && searchResults && searchResults.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
                   {searchResults.map((r, idx) => {
                     const isLinked = !!r.id;
                     return (
-                      <div key={idx} className="flex items-start gap-3 bg-zinc-900/80 border border-zinc-800 p-2.5 rounded-lg hover:border-zinc-700 transition-colors">
-                        {r.thumbnail && (
-                          <div className="w-12 h-16 shrink-0 rounded overflow-hidden bg-zinc-800">
-                            <img src={r.thumbnail} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-                          </div>
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs text-zinc-200 font-medium truncate">{r.title}</p>
-                          <div className="flex items-center gap-2 mt-1">
-                            <Badge variant={isLinked ? 'success' : 'info'} className="text-[9px]">{r.provider}</Badge>
-                            {r.release_date && <span className="text-[9px] text-zinc-500">{r.release_date}</span>}
-                            {isLinked && <Badge variant="success" className="text-[8px]">Linked</Badge>}
-                            {!isLinked && <Badge variant="warning" className="text-[8px]">Missing</Badge>}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0 self-center">
-                          {!isLinked && (
-                            <>
-                              <Button
-                                size="sm"
-                                className="h-7 px-2 text-[10px]"
-                                disabled={scrapeMetaMut.isPending}
-                                onClick={() => {
-                                  setScrapeProvider(r.provider);
-                                  setScrapeUrl(r.url);
-                                  setTimeout(() => scrapeMetaMut.mutate(), 50);
-                                }}
-                              >
-                                {scrapeMetaMut.isPending && scrapeProvider === r.provider && scrapeUrl === r.url ? 'Scraping...' : 'Scrape'}
-                              </Button>
-                              <a
-                                href={`https://www.vipergirls.to/search.php?query="${encodeURIComponent(r.title)}"&titleonly=1&search_in=topics&forumchoice%5B%5D=235&childforums=1`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="h-7 px-2 inline-flex items-center justify-center text-[10px] font-medium rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 border border-blue-500/20 transition-all whitespace-nowrap"
-                              >
-                                VG
-                              </a>
-                            </>
+                      <div key={idx} className={`group relative flex flex-col rounded-lg overflow-hidden border transition-all ${isLinked ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-zinc-800 bg-zinc-900/80 hover:border-zinc-700'}`}>
+                        <div className="aspect-[2/3] bg-zinc-800 overflow-hidden">
+                          {r.thumbnail ? (
+                            <img src={r.thumbnail} alt={r.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-zinc-600 text-[9px]">No thumb</div>
                           )}
                         </div>
+                        <div className="p-1.5 space-y-0.5 flex-1 flex flex-col">
+                          <p className="text-[9px] text-zinc-200 font-medium leading-tight line-clamp-2">{r.title}</p>
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <Badge variant={isLinked ? 'success' : 'info'} className="text-[7px]">{r.provider}</Badge>
+                            {r.release_date && <span className="text-[7px] text-zinc-500">{r.release_date}</span>}
+                          </div>
+                          <div className="mt-auto pt-0.5">
+                            {isLinked ? (
+                              <Badge variant="success" className="text-[7px]">Linked</Badge>
+                            ) : (
+                              <Badge variant="warning" className="text-[7px]">Missing</Badge>
+                            )}
+                          </div>
+                        </div>
+                        {!isLinked && (
+                          <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                            <Button size="sm" className="h-6 px-1.5 text-[9px]" disabled={scrapeMetaMut.isPending} onClick={() => scrapeMetaMut.mutate({ provider: r.provider, source_url: r.url })}>
+                              {scrapeMetaMut.isPending ? '...' : 'Scrape'}
+                            </Button>
+                            <a href={`https://www.vipergirls.to/search.php?query="${encodeURIComponent(r.title)}"&titleonly=1&search_in=topics&forumchoice%5B%5D=235&childforums=1`} target="_blank" rel="noopener noreferrer" className="h-6 px-1.5 inline-flex items-center justify-center text-[9px] font-medium rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 border border-blue-500/30 transition-all">
+                              VG
+                            </a>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -639,7 +639,7 @@ export function GalleryDetailPage() {
                   <Input placeholder="Gallery URL" value={scrapeUrl} onChange={(e) => setScrapeUrl(e.target.value)} className="h-9 text-xs" />
                 </div>
               </div>
-              <Button size="sm" onClick={() => scrapeMetaMut.mutate()} disabled={!scrapeProvider || !scrapeUrl || scrapeMetaMut.isPending}>
+              <Button size="sm" onClick={() => scrapeMetaMut.mutate({ provider: scrapeProvider, source_url: scrapeUrl })} disabled={!scrapeProvider || !scrapeUrl || scrapeMetaMut.isPending}>
                 {scrapeMetaMut.isPending ? 'Scraping...' : 'Scrape'}
               </Button>
             </div>
@@ -726,6 +726,10 @@ export function GalleryDetailPage() {
         onCancel={() => setConfirmDeleteImageId(null)}
       />
       </div>
+
+      {modalPersonId !== null && (
+        <PersonModal personId={modalPersonId} onClose={() => setModalPersonId(null)} />
+      )}
     </>
   );
 }

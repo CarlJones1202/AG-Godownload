@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"gallery_api/logger"
 	"hash"
@@ -573,16 +574,145 @@ func buildVideoResult(destPath string, title string) (*DownloadImageResult, erro
 	}, nil
 }
 
-// RipPMVHaven extracts the video URL from a PMVHaven page
-func RipPMVHaven(pageURL string) (string, string, error) {
-	logger.Debugf("Starting RipPMVHaven for %s", pageURL)
+// extractVideoIDFromPMVHavenURL extracts the 24-character hex video ID from a PMVHaven URL.
+// URL format: https://pmvhaven.com/video/Slug_Name_66195f01d0f2168854325fd0
+func extractVideoIDFromPMVHavenURL(pageURL string) (string, error) {
+	re := regexp.MustCompile(`_([a-f0-9]{24})$`)
+	matches := re.FindStringSubmatch(pageURL)
+	if len(matches) < 2 {
+		return "", fmt.Errorf("could not extract video ID from URL: %s", pageURL)
+	}
+	return matches[1], nil
+}
 
-	client := &http.Client{}
+// nuxtDataLookup resolves a "pointer" value in the Nuxt data array.
+// In Nuxt's payload format, some values are stored as integers that index into
+// the top-level array. If val is an int, we look up data[val]; otherwise we
+// return val unchanged.
+func nuxtDataLookup(data []interface{}, val interface{}) interface{} {
+	if idx, ok := val.(float64); ok {
+		i := int(idx)
+		if i >= 0 && i < len(data) {
+			return data[i]
+		}
+	}
+	return val
+}
+
+// nuxtDataResolveString resolves a string pointer from the Nuxt data array.
+func nuxtDataResolveString(data []interface{}, val interface{}) string {
+	resolved := nuxtDataLookup(data, val)
+	if s, ok := resolved.(string); ok {
+		return s
+	}
+	return ""
+}
+
+// nuxtDataResolveMap resolves a map pointer from the Nuxt data array.
+func nuxtDataResolveMap(data []interface{}, val interface{}) map[string]interface{} {
+	resolved := nuxtDataLookup(data, val)
+	if m, ok := resolved.(map[string]interface{}); ok {
+		return m
+	}
+	return nil
+}
+
+// findStringInNuxtData walks the Nuxt data array looking for a string value
+// that matches a predicate. This is used to find video URLs buried in the
+// pointer-based structure.
+func findURLInNuxtData(data []interface{}) string {
+	// Walk all entries looking for URLs ending in .mp4 that look like
+	// actual download URLs (not preview thumbnails).
+	for _, item := range data {
+		switch v := item.(type) {
+		case string:
+			if strings.HasPrefix(v, "http") && strings.HasSuffix(v, ".mp4") && !strings.Contains(v, "/videoPreview/") && !strings.Contains(v, "/thumbnail/") {
+				return v
+			}
+		case map[string]interface{}:
+			for _, field := range v {
+				if s, ok := field.(string); ok {
+					if strings.HasPrefix(s, "http") && strings.HasSuffix(s, ".mp4") && !strings.Contains(s, "/videoPreview/") && !strings.Contains(s, "/thumbnail/") {
+						return s
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// pmvhavenAPIVideoInput calls the PMVHaven v2 API to get video details including
+// the download URL. Requires authentication cookies.
+func pmvhavenAPIVideoInput(videoID string, client *http.Client) (string, string, error) {
+	apiURL := "https://pmvhaven.com/api/v2/videoInput"
+	bodyStr := fmt.Sprintf(`{"mode":"getVideo","id":"%s"}`, videoID)
+
+	req, err := http.NewRequest("POST", apiURL, strings.NewReader(bodyStr))
+	if err != nil {
+		return "", "", fmt.Errorf("creating API request: %w", err)
+	}
+	req.Header.Set("Content-Type", "text/plain;charset=UTF-8")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Referer", "https://pmvhaven.com/")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 401 {
+		return "", "", fmt.Errorf("API returned 401 (unauthorized) — session cookies required for PMVHaven downloads; provide a cookies.txt file")
+	}
+	if resp.StatusCode != 200 {
+		return "", "", fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Video struct {
+			URL   string `json:"url"`
+			Title string `json:"title"`
+		} `json:"video"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", "", fmt.Errorf("decoding API response: %w", err)
+	}
+
+	if result.Video.URL == "" {
+		return "", "", fmt.Errorf("API response missing video URL")
+	}
+
+	return result.Video.URL, result.Video.Title, nil
+}
+
+// RipPMVHaven extracts the video URL from a PMVHaven page.
+//
+// PMVHaven was rebuilt as a Nuxt.js SPA (Nov 2025). Video download URLs are no
+// longer embedded in the HTML — they require an authenticated API call or a
+// click-to-reveal interaction. This function uses multiple strategies:
+//
+//  1. Parse __NUXT_DATA__ from the page to extract video metadata and try to
+//     find any embedded download URL
+//  2. If a pmvhaven_cookies.txt file exists, use it to authenticate with the
+//     PMVHaven v2 API and retrieve the download URL
+//  3. Fall back to og:video / og:video:url meta tags
+func RipPMVHaven(pageURL string) (string, string, error) {
+	logger.Infof("Starting RipPMVHaven for %s", pageURL)
+
+	videoID, err := extractVideoIDFromPMVHavenURL(pageURL)
+	if err != nil {
+		logger.Warnf("Could not extract video ID from URL, proceeding with fallback methods: %v", err)
+	}
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
 	req, err := http.NewRequest("GET", pageURL, nil)
 	if err != nil {
 		return "", "", fmt.Errorf("creating request: %w", err)
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -594,110 +724,152 @@ func RipPMVHaven(pageURL string) (string, string, error) {
 		return "", "", fmt.Errorf("page returned status %d", resp.StatusCode)
 	}
 
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", "", fmt.Errorf("reading page body: %w", err)
+	}
+	bodyStr := string(bodyBytes)
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(bodyStr))
 	if err != nil {
 		return "", "", fmt.Errorf("parsing HTML: %w", err)
 	}
 
+	// Extract title from <h1>
 	title := strings.TrimSpace(doc.Find("h1").First().Text())
 	title = strings.TrimSuffix(title, " - PMVHaven")
 	if title == "" {
 		title = "Unknown Video"
 	}
 
+	// Try to extract the __NUXT_DATA__ payload from a <script> tag with id="__NUXT_DATA__"
+	var nuxtData []interface{}
 	var videoURL string
 
-    // Method 1: Look for regex matches in all script tags
-    // Handle JSON-LD, JS-escaped slashes (\/), and protocol-relative URLs (//cdn...)
-    doc.Find("script").Each(func(i int, s *goquery.Selection) {
-        if videoURL != "" {
-            return
-        }
-        text := s.Text()
+	doc.Find("script#__NUXT_DATA__").Each(func(i int, s *goquery.Selection) {
+		if videoURL != "" {
+			return
+		}
+		raw := s.Text()
+		if raw == "" {
+			return
+		}
+		// Unescape JS-escaped Unicode sequences
+		raw = strings.NewReplacer(
+			`\/`, "/",
+			`\u002F`, "/",
+			`\u0026`, "&",
+			`\u003C`, "<",
+			`\u003E`, ">",
+			`\u0022`, `"`,
+		).Replace(raw)
 
-        // Normalize common JS-escaped slash sequences so regexes match
-        textUnescaped := strings.ReplaceAll(text, `\/`, "/")
-        textUnescaped = strings.ReplaceAll(textUnescaped, `\\/`, "/")
+		if err := json.Unmarshal([]byte(raw), &nuxtData); err != nil {
+			logger.Warnf("Failed to parse __NUXT_DATA__ JSON: %v", err)
+			return
+		}
+		logger.Infof("Parsed __NUXT_DATA__ array with %d elements", len(nuxtData))
 
-        // Try JSON-LD style contentUrl / url first
-        reJSON := regexp.MustCompile(`(?i)"contentUrl"\s*:\s*"([^"]+\.mp4)"`)
-        if m := reJSON.FindStringSubmatch(textUnescaped); len(m) > 1 {
-            candidate := m[1]
-            if strings.HasPrefix(candidate, "//") {
-                candidate = "https:" + candidate
-            }
-            videoURL = candidate
-            logger.Infof("Found JSON-LD contentUrl mp4: %s", videoURL)
-            return
-        }
-        reJSON2 := regexp.MustCompile(`(?i)"url"\s*:\s*"([^"]+\.mp4)"`)
-        if m := reJSON2.FindStringSubmatch(textUnescaped); len(m) > 1 {
-            candidate := m[1]
-            if strings.HasPrefix(candidate, "//") {
-                candidate = "https:" + candidate
-            }
-            videoURL = candidate
-            logger.Infof("Found JSON-LD url mp4: %s", videoURL)
-            return
-        }
+		// Try to find any download URLs in the raw text first
+		reURL := regexp.MustCompile(`https?://[^"'\s\\]+\.mp4`)
+		for _, match := range reURL.FindAllString(raw, -1) {
+			if !strings.Contains(match, "/videoPreview/") && !strings.Contains(match, "/thumbnail/") && !strings.Contains(match, "/previews/") {
+				videoURL = match
+				logger.Infof("Found mp4 URL in Nuxt data: %s", videoURL)
+				return
+			}
+		}
 
-        // General mp4 matcher accepting protocol-relative URLs
-        re := regexp.MustCompile(`(?i)(?:https?:)?//[^"'\\s<>]+\.mp4`)
-        matches := re.FindAllString(textUnescaped, -1)
+		// Walk the Nuxt data array for eligible URLs
+		if found := findURLInNuxtData(nuxtData); found != "" {
+			videoURL = found
+			logger.Infof("Found download URL by walking Nuxt data: %s", videoURL)
+			return
+		}
 
-        if len(matches) > 0 {
-            logger.Debugf("Script %d: Found %d potential mp4 matches", i, len(matches))
-        }
+		// Try to resolve the video metadata through Nuxt pointers
+		// Nuxt data[1] typically contains the page store data
+		if len(nuxtData) > 1 {
+			pageData := nuxtDataResolveMap(nuxtData, nuxtData[1])
+			if pageData != nil {
+				if dataRef, ok := pageData["data"]; ok {
+					dataMap := nuxtDataResolveMap(nuxtData, dataRef)
+					if dataMap != nil {
+						// Look for a key containing "video"
+						for k, v := range dataMap {
+							if strings.Contains(k, "video") || strings.Contains(k, "Video") {
+								videoMap := nuxtDataResolveMap(nuxtData, v)
+								if videoMap == nil {
+									continue
+								}
+								// Try to get URL from the video object
+								for _, field := range []string{"url", "sourceUrl", "downloadUrl", "file", "src"} {
+									if u, ok := videoMap[field]; ok {
+										if urlStr := nuxtDataResolveString(nuxtData, u); urlStr != "" && strings.HasPrefix(urlStr, "http") {
+											videoURL = urlStr
+											logger.Infof("Found video URL via Nuxt pointer resolution: %s", videoURL)
+											return
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	})
 
-        for _, raw := range matches {
-            match := raw
-            // Normalize protocol-relative URLs by adding https:
-            if strings.HasPrefix(match, "//") {
-                match = "https:" + match
-            }
+	// Try authenticated API if available (cookies file provides session auth)
+	if videoURL == "" {
+		cookieFile := "pmvhaven_cookies.txt"
+		if vidID := videoID; vidID != "" {
+			if _, err := os.Stat(cookieFile); err == nil {
+				logger.Infof("Found %s, attempting authenticated API call", cookieFile)
+				jar, _ := cookiejar.New(nil)
+				if loadErr := LoadCookies(jar, cookieFile); loadErr == nil {
+					apiClient := &http.Client{
+						Jar:     jar,
+						Timeout: 30 * time.Second,
+					}
+					// Apply the cookie jar to the pmvhaven domain
+					u, _ := url.Parse("https://pmvhaven.com")
+					jar.SetCookies(u, jar.Cookies(u))
 
-            logger.Debugf("Checking match: %s", match)
-            if !strings.HasSuffix(strings.ToLower(match), ".mp4") || match == pageURL {
-                continue
-            }
+					apiURL, apiTitle, apiErr := pmvhavenAPIVideoInput(vidID, apiClient)
+					if apiErr == nil {
+						logger.Infof("Successfully retrieved video URL from API")
+						if title == "Unknown Video" && apiTitle != "" {
+							title = apiTitle
+						}
+						return apiURL, title, nil
+					}
+					logger.Warnf("API call failed: %v", apiErr)
+				} else {
+					logger.Warnf("Failed to load cookie file %s: %v", cookieFile, loadErr)
+				}
+			} else {
+				logger.Debugf("No %s found (video ID: %s), API auth not available", cookieFile, vidID)
+			}
+		}
+	}
 
-            // Prefer pmvhaven-hosted files
-            if strings.Contains(match, "pmvhaven.com") {
-                videoURL = match
-                logger.Infof("Found candidate video URL in script: %s", videoURL)
-                return
-            }
-
-            // Accept known CDN/storage hosts
-            if strings.Contains(match, "cdn") || strings.Contains(match, "amazonaws.com") || strings.Contains(match, "cloudfront") || strings.Contains(match, "akamaized.net") || strings.Contains(match, "storage") {
-                videoURL = match
-                logger.Infof("Found candidate mp4 on CDN/storage: %s", videoURL)
-                return
-            }
-
-            // Last resort: accept first mp4 found
-            if videoURL == "" {
-                videoURL = match
-                logger.Infof("Found candidate mp4 (non-pmvhaven): %s", videoURL)
-                return
-            }
-        }
-    })
-
-	// Method 2: Check standard meta tags (fallback)
+	// Fallback: check standard meta tags
 	if videoURL == "" {
 		videoURL, _ = doc.Find("meta[property='og:video']").Attr("content")
 		if videoURL == "" {
 			videoURL, _ = doc.Find("meta[property='og:video:url']").Attr("content")
 		}
-		// PMVHaven might use og:video for the page URL, so verify it ends in .mp4
 		if videoURL != "" && !strings.HasSuffix(videoURL, ".mp4") {
 			logger.Debugf("Ignoring non-mp4 og:video: %s", videoURL)
 			videoURL = ""
 		}
+		if videoURL != "" {
+			logger.Infof("Found video URL via og:video meta: %s", videoURL)
+		}
 	}
 
-	// Method 3: Check for video source tags
+	// Fallback: check for video source tags
 	if videoURL == "" {
 		doc.Find("video source").Each(func(i int, s *goquery.Selection) {
 			if src, exists := s.Attr("src"); exists && strings.Contains(src, ".mp4") {
@@ -706,8 +878,9 @@ func RipPMVHaven(pageURL string) (string, string, error) {
 			}
 		})
 	}
+
 	if videoURL == "" {
-		return "", "", fmt.Errorf("could not find video URL on %s", pageURL)
+		return "", "", fmt.Errorf("could not find video URL on %s — PMVHaven now requires authentication; create a pmvhaven_cookies.txt file with your session cookies", pageURL)
 	}
 
 	return videoURL, title, nil

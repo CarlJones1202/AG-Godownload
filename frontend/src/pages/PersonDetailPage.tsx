@@ -15,6 +15,7 @@ import {
   Sparkles,
   Link2,
   Save,
+  Search,
   X,
   Check,
   User,
@@ -151,6 +152,7 @@ export function PersonDetailPage() {
 
   const [newAliasProvider, setNewAliasProvider] = useState('');
   const [newAliasName, setNewAliasName] = useState('');
+  const [galleryTab, setGalleryTab] = useState<'galleries' | 'missing'>('galleries');
   const [scanSource, setScanSource] = useState('MetArt');
   const [scanAlias, setScanAlias] = useState('');
   const [scanResults, setScanResults] = useState<PersonScanResponse | null>(null);
@@ -164,7 +166,6 @@ export function PersonDetailPage() {
   const { data: scans, refetch: refetchScans } = useQuery({
     queryKey: ['person-scans', personId],
     queryFn: () => people.getScans(personId),
-    enabled: showTools,
   });
 
   const addAliasMut = useMutation({
@@ -190,6 +191,16 @@ export function PersonDetailPage() {
       people.scanPerson(personId, data.source, data.alias),
     onSuccess: (result) => {
       setScanResults(result);
+    },
+  });
+
+  // Mutation: scrape a missing gallery from a provider into the DB
+  const linkFoundMut = useMutation({
+    mutationFn: (data: { provider: string; source_url: string; name: string; thumbnail_url?: string }) =>
+      people.linkFoundGallery(personId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['person', personId] });
+      refetchScans();
     },
   });
 
@@ -484,204 +495,23 @@ export function PersonDetailPage() {
                       {/* Scanners & Scans */}
                       <div className="space-y-6">
                         <div className="bg-zinc-950/40 p-4 rounded-lg border border-zinc-800/80 space-y-4">
-                          <h4 className="text-sm font-semibold text-zinc-300">Search Provider</h4>
-                          <div className="flex gap-2 items-end">
-                            <div className="flex-1">
-                              <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Provider</label>
-                              <select
-                                value={scanSource}
-                                onChange={(e) => {
-                                  setScanSource(e.target.value);
-                                  setScanResults(null);
-                                }}
-                                className="bg-zinc-900 border border-zinc-700 rounded px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none transition-all cursor-pointer w-full h-9"
-                              >
-                                {PROVIDER_LIST.map((p) => (
-                                  <option key={p} value={p}>{p}</option>
-                                ))}
-                              </select>
-                            </div>
-                            <div className="flex-1">
-                              <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Search Alias</label>
-                              <Input
-                                placeholder={scanAlias || (person?.name ?? '')}
-                                value={scanAlias}
-                                onChange={(e) => setScanAlias(e.target.value)}
-                                className="h-9"
-                              />
-                            </div>
-                            <Button
-                              size="sm"
-                              className="h-9"
-                              onClick={() => {
-                                searchMut.mutate({ source: scanSource, alias: scanAlias || undefined });
-                              }}
-                              disabled={searchMut.isPending}
-                            >
-                              {searchMut.isPending ? 'Searching...' : 'Search'}
-                            </Button>
-                          </div>
-
-                          {searchMut.isPending && (
-                            <div className="py-4 flex items-center justify-center">
-                              <span className="text-xs text-zinc-400 animate-pulse">Searching {scanSource}...</span>
-                            </div>
-                          )}
-
-                          {scanResults && (
-                            <div className="border-t border-zinc-700/50 pt-3 space-y-3">
-                              <div className="grid grid-cols-4 gap-2 text-[10px] text-zinc-400">
-                                <div>Found: <span className="text-zinc-200 font-medium">{scanResults.found_count}</span></div>
-                                <div>Existing: <span className="text-zinc-200 font-medium">{scanResults.existing_count}</span></div>
-                                <div>Unsure: <span className="text-zinc-200 font-medium">{scanResults.unsure_count}</span></div>
-                                <div>Missing: <span className="text-zinc-200 font-medium">{scanResults.missing_count}</span></div>
-                              </div>
-
-                              {scanResults.missing_galleries?.length > 0 && (
-                                <div>
-                                  <p className="text-[10px] uppercase font-bold text-zinc-400 mb-1.5">Missing galleries:</p>
-                                  <div className="space-y-1.5 max-h-64 overflow-y-auto">
-                                    {scanResults.missing_galleries.map((mg, idx) => (
-                                      <div key={idx} className="flex items-center justify-between bg-zinc-950 p-2 rounded border border-zinc-800/50">
-                                        <div className="min-w-0 flex-1 pr-2">
-                                          <p className="truncate text-zinc-300 font-medium text-xs" title={mg.title}>{mg.title}</p>
-                                          {mg.release_date && <p className="text-[9px] text-zinc-500">{mg.release_date}</p>}
-                                        </div>
-                                        <button
-                                          onClick={() => {
-                                            const alias = scanAlias || person?.name || '';
-                                            const query = encodeURIComponent(`"${alias}" "${mg.title}"`);
-                                            window.open(
-                                              `https://vipergirls.to/search.php?do=process&query=${query}&titleonly=1&forumchoice%5B%5D=235&childforums=1`,
-                                              '_blank'
-                                            );
-                                          }}
-                                          className="h-7 px-2 text-[10px] shrink-0 inline-flex items-center justify-center rounded-md bg-zinc-700 text-zinc-200 hover:bg-zinc-600 hover:text-white transition-colors cursor-pointer"
-                                          title="Search vipergirls.to"
-                                        >
-                                          VG
-                                        </button>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-
-                              {scanResults.unsure_galleries?.length > 0 && (
-                                <div>
-                                  <p className="text-[10px] uppercase font-bold text-amber-400 mb-1.5">Unsure matches (already in DB, different provider):</p>
-                                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                                    {scanResults.unsure_galleries.map((ug, idx) => (
-                                      <div key={idx} className="flex items-center justify-between bg-zinc-950 p-2 rounded border border-zinc-800/50">
-                                        <div className="min-w-0 flex-1 pr-2">
-                                          <p className="truncate text-zinc-300 font-medium text-xs" title={ug.title}>{ug.title}</p>
-                                          {ug.release_date && <p className="text-[9px] text-zinc-500">{ug.release_date}</p>}
-                                        </div>
-                                        <div className="flex gap-1.5 shrink-0">
-                                          <Button size="sm" className="h-7 px-2 text-[10px]" disabled={linkUnsureMut.isPending} onClick={() => {
-                                            if (ug.id) {
-                                              linkUnsureMut.mutate({ gallery_id: ug.id, provider: scanResults.provider, source_url: ug.url });
-                                            }
-                                          }}>
-                                            Link
-                                          </Button>
-                                          <Button size="sm" variant="secondary" className="h-7 px-2 text-[10px]" onClick={() => {
-                                            excludeScanResultMut.mutate({ provider: scanResults.provider, source_url: ug.url, title: ug.title });
-                                          }}>
-                                            Exclude
-                                          </Button>
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-
-                              {scanResults.missing_count === 0 && scanResults.unsure_count === 0 && (
-                                <p className="text-xs text-zinc-500 italic">All galleries from this provider are already in your database.</p>
-                              )}
-                            </div>
-                          )}
+                          <h4 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
+                            <Search size={14} /> Search Provider
+                          </h4>
+                          <p className="text-xs text-zinc-500">Use the <strong>Missing Galleries</strong> tab above to search providers and scrape new galleries.</p>
+                          <Button size="sm" variant="secondary" onClick={() => setGalleryTab('missing')}>
+                            <Search size={14} /> Open Missing Galleries
+                          </Button>
                         </div>
 
                         <div className="bg-zinc-950/40 p-4 rounded-lg border border-zinc-800/80 space-y-4">
-                          <h4 className="text-sm font-semibold text-zinc-300">Recent Scans & Results</h4>
-                          {scans && scans.length > 0 ? (
-                            <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
-                              {scans.map((scan) => {
-                                const res = scan.results;
-                                const missingGals = res?.missing_galleries || [];
-                                return (
-                                  <div key={scan.id} className="bg-zinc-900/80 border border-zinc-800 p-3 rounded text-xs space-y-2">
-                                    <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-1.5">
-                                        <Badge variant="info">{scan.provider || (scan as any).source}</Badge>
-                                        <span className="text-zinc-400">Alias: {scan.alias}</span>
-                                      </div>
-                                      <Badge variant={scan.status === 'completed' ? 'success' : 'warning'}>{scan.status}</Badge>
-                                    </div>
-                                    {res && (
-                                      <div className="grid grid-cols-2 gap-2 text-[10px] text-zinc-400">
-                                        <div>Found: <span className="text-zinc-200">{res.found_count ?? 0}</span></div>
-                                        <div>Existing: <span className="text-zinc-200">{res.existing_count ?? 0}</span></div>
-                                        <div>Unsure: <span className="text-zinc-200">{res.unsure_count ?? 0}</span></div>
-                                        <div>Missing: <span className="text-zinc-200">{res.missing_count ?? 0}</span></div>
-                                      </div>
-                                    )}
-                                    {missingGals.length > 0 && (
-                                      <div className="border-t border-zinc-800 pt-2 space-y-1.5">
-                                        <p className="text-[10px] uppercase font-bold text-zinc-400">Missing galleries from scan:</p>
-                                        <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                                      {missingGals.map((mg: any, idx: number) => (
-                                        <div key={idx} className="flex items-center justify-between bg-zinc-950 p-2 rounded border border-zinc-800/50">
-                                          <div className="min-w-0 flex-1 pr-2">
-                                            <p className="truncate text-zinc-300 font-medium" title={mg.title}>{mg.title}</p>
-                                            {mg.release_date && <p className="text-[9px] text-zinc-500">{mg.release_date}</p>}
-                                          </div>
-                                          <button
-                                            onClick={() => {
-                                              const alias = scan.alias || person?.name || '';
-                                              const query = encodeURIComponent(`"${alias}" "${mg.title || ''}"`);
-                                              window.open(
-                                                `https://vipergirls.to/search.php?do=process&query=${query}&titleonly=1&forumchoice%5B%5D=235&childforums=1`,
-                                                '_blank'
-                                              );
-                                            }}
-                                            className="h-7 px-2 text-[10px] shrink-0 inline-flex items-center justify-center rounded-md bg-zinc-700 text-zinc-200 hover:bg-zinc-600 hover:text-white transition-colors cursor-pointer"
-                                            title="Search vipergirls.to"
-                                          >
-                                            VG
-                                          </button>
-                                          {mg.unsure && (
-                                            <div className="ml-2 flex items-center gap-2">
-                                              <Button size="sm" className="h-7 px-2 text-[10px]" onClick={() => {
-                                                // mg is an unsure gallery result with gallery_id
-                                                if (mg.id || mg.gallery_id) {
-                                                  const gid = mg.gallery_id || mg.id;
-                                                  linkUnsureMut.mutate({ gallery_id: gid, provider: scan.provider ?? '', source_url: mg.url ?? '' });
-                                                }
-                                              }}>
-                                                Link Unsure
-                                              </Button>
-                                              <Button size="sm" variant="secondary" className="h-7 px-2 text-[10px]" onClick={() => {
-                                                excludeScanResultMut.mutate({ provider: scan.provider ?? '', source_url: mg.url ?? '', title: mg.title ?? '' });
-                                              }}>
-                                                Exclude
-                                              </Button>
-                                            </div>
-                                          )}
-                                        </div>
-                                      ))}
-                                        </div>
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <p className="text-xs text-zinc-500 italic">No scans run yet.</p>
-                          )}
+                          <h4 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
+                            <Search size={14} /> Search Provider
+                          </h4>
+                          <p className="text-xs text-zinc-500">Use the <strong>Missing Galleries</strong> tab above to search providers and scrape new galleries.</p>
+                          <Button size="sm" variant="secondary" onClick={() => setGalleryTab('missing')}>
+                            <Search size={14} /> Open Missing Galleries
+                          </Button>
                           {/* Exclusions list */}
                           {personExclusions && personExclusions.length > 0 && (
                             <div className="mt-3 border-t border-zinc-800 pt-3">
@@ -826,28 +656,278 @@ export function PersonDetailPage() {
           )}
 
           <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 md:p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                <Layers size={16} />
-                Galleries
-              </h2>
-              <Badge>{galleryList.length} total</Badge>
+            {/* Tabs */}
+            <div className="flex items-center border-b border-zinc-800 mb-4 -mx-4 md:-mx-5 px-4 md:px-5">
+              <button
+                onClick={() => setGalleryTab('galleries')}
+                className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium transition-colors border-b-2 -mb-[1px] ${galleryTab === 'galleries' ? 'text-white border-blue-500' : 'text-zinc-500 border-transparent hover:text-zinc-300'}`}
+              >
+                <Layers size={14} /> Galleries
+                <Badge className="ml-1 text-[9px]">{galleryList.length}</Badge>
+              </button>
+              <button
+                onClick={() => setGalleryTab('missing')}
+                className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium transition-colors border-b-2 -mb-[1px] ${galleryTab === 'missing' ? 'text-white border-blue-500' : 'text-zinc-500 border-transparent hover:text-zinc-300'}`}
+              >
+                <Search size={14} /> Missing Galleries
+              </button>
             </div>
 
-            {galleryList.length === 0 ? (
-              <EmptyState message="No galleries linked yet." />
-            ) : (
-              <CoverGrid
-                items={galleryList.map((g: any) => ({
-                  id: g.id,
-                  title: g.name ?? null,
-                  thumbnailPath: g.provider_thumbnail
-                    ? g.provider_thumbnail.replace(/\\/g, '/').split('/').pop()
-                    : g.images?.[0]?.filename,
-                  provider: g.provider ?? null,
-                  createdAt: g.created_at,
-                }))}
-              />
+            {galleryTab === 'galleries' && (
+              galleryList.length === 0 ? (
+                <EmptyState message="No galleries linked yet." />
+              ) : (
+                <CoverGrid
+                  items={galleryList.map((g: any) => ({
+                    id: g.id,
+                    title: g.name ?? null,
+                    thumbnailPath: g.provider_thumbnail
+                      ? g.provider_thumbnail.replace(/\\/g, '/').split('/').pop()
+                      : g.images?.[0]?.filename,
+                    provider: g.provider ?? null,
+                    createdAt: g.created_at,
+                  }))}
+                />
+              )
+            )}
+
+            {galleryTab === 'missing' && (
+              <div className="space-y-4">
+                {/* Scanner Controls */}
+                <div className="flex gap-2 items-end">
+                  <div className="flex-1">
+                    <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Provider</label>
+                    <select
+                      value={scanSource}
+                      onChange={(e) => { setScanSource(e.target.value); setScanResults(null); }}
+                      className="bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none transition-all cursor-pointer w-full h-9"
+                    >
+                      {PROVIDER_LIST.map((p) => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Search Alias</label>
+                    <Input
+                      placeholder={person?.name ?? ''}
+                      value={scanAlias}
+                      onChange={(e) => setScanAlias(e.target.value)}
+                      className="h-9"
+                    />
+                  </div>
+                  <Button
+                    size="sm"
+                    className="h-9"
+                    onClick={() => searchMut.mutate({ source: scanSource, alias: scanAlias || undefined })}
+                    disabled={searchMut.isPending}
+                  >
+                    {searchMut.isPending ? 'Searching...' : 'Search'}
+                  </Button>
+                </div>
+
+                {/* Loading */}
+                {searchMut.isPending && (
+                  <div className="py-8 flex items-center justify-center">
+                    <span className="text-xs text-zinc-400 animate-pulse">Searching {scanSource}...</span>
+                  </div>
+                )}
+
+                {/* Results */}
+                {scanResults && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-4 gap-2 text-[10px] text-zinc-400">
+                      <div>Found: <span className="text-zinc-200 font-medium">{scanResults.found_count}</span></div>
+                      <div>Existing: <span className="text-zinc-200 font-medium">{scanResults.existing_count}</span></div>
+                      <div>Unsure: <span className="text-zinc-200 font-medium">{scanResults.unsure_count}</span></div>
+                      <div>Missing: <span className="text-zinc-200 font-medium">{scanResults.missing_count}</span></div>
+                    </div>
+
+                    {scanResults.missing_galleries?.length > 0 && (
+                      <div>
+                        <p className="text-[10px] uppercase font-bold text-zinc-400 mb-2">Missing galleries:</p>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                          {scanResults.missing_galleries.map((mg, idx) => (
+                            <div key={idx} className="group relative flex flex-col rounded-lg overflow-hidden border border-zinc-800 bg-zinc-900/80 hover:border-zinc-700 transition-all">
+                              <div className="aspect-[3/4] bg-zinc-800 overflow-hidden">
+                                {mg.thumbnail ? (
+                                  <img src={mg.thumbnail} alt={mg.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-zinc-600 text-[10px]">No thumb</div>
+                                )}
+                              </div>
+                              <div className="p-2 flex-1 flex flex-col">
+                                <p className="text-[10px] text-zinc-200 font-medium leading-tight line-clamp-2 mb-1">{mg.title}</p>
+                                <div className="mt-auto flex items-center justify-between">
+                                  <span className="text-[8px] text-zinc-500">{mg.release_date ?? ''}</span>
+                                </div>
+                              </div>
+                              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
+                                <Button
+                                  size="sm"
+                                  className="h-7 px-2 text-[10px]"
+                                  disabled={linkFoundMut.isPending}
+                                  onClick={() => linkFoundMut.mutate({ provider: scanResults.provider, source_url: mg.url, name: mg.title, thumbnail_url: mg.thumbnail })}
+                                >
+                                  Scrape
+                                </Button>
+                                <button
+                                  onClick={() => {
+                                    const alias = scanAlias || person?.name || '';
+                                    const query = encodeURIComponent(`"${alias}" "${mg.title}"`);
+                                    window.open(
+                                      `https://vipergirls.to/search.php?do=process&query=${query}&titleonly=1&forumchoice%5B%5D=235&childforums=1`,
+                                      '_blank'
+                                    );
+                                  }}
+                                  className="h-7 px-2 text-[10px] shrink-0 inline-flex items-center justify-center rounded-md bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 border border-blue-500/30 transition-all cursor-pointer"
+                                  title="Search vipergirls.to"
+                                >
+                                  VG
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {scanResults.unsure_galleries?.length > 0 && (
+                      <div>
+                        <p className="text-[10px] uppercase font-bold text-amber-400 mb-2">Unsure matches (already in DB, different provider):</p>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                          {scanResults.unsure_galleries.map((ug, idx) => (
+                            <div key={idx} className="group relative flex flex-col rounded-lg overflow-hidden border border-amber-500/20 bg-zinc-900/80 hover:border-amber-500/40 transition-all">
+                              <div className="aspect-[3/4] bg-zinc-800 overflow-hidden">
+                                {ug.thumbnail ? (
+                                  <img src={ug.thumbnail} alt={ug.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-zinc-600 text-[10px]">No thumb</div>
+                                )}
+                              </div>
+                              <div className="p-2 flex-1 flex flex-col">
+                                <p className="text-[10px] text-zinc-200 font-medium leading-tight line-clamp-2 mb-1">{ug.title}</p>
+                                <div className="mt-auto flex items-center justify-between">
+                                  <span className="text-[8px] text-zinc-500">{ug.release_date ?? ''}</span>
+                                </div>
+                              </div>
+                              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
+                                <Button size="sm" className="h-7 px-2 text-[10px]" disabled={linkUnsureMut.isPending} onClick={() => {
+                                  if (ug.id) linkUnsureMut.mutate({ gallery_id: ug.id, provider: scanResults.provider, source_url: ug.url });
+                                }}>
+                                  Link
+                                </Button>
+                                <Button size="sm" variant="secondary" className="h-7 px-2 text-[10px]" onClick={() => {
+                                  excludeScanResultMut.mutate({ provider: scanResults.provider, source_url: ug.url, title: ug.title });
+                                }}>
+                                  Exclude
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {scanResults.missing_count === 0 && scanResults.unsure_count === 0 && (
+                      <p className="text-xs text-zinc-500 italic">All galleries from this provider are already in your database.</p>
+                    )}
+                  </div>
+                )}
+
+                {!scanResults && !searchMut.isPending && (
+                  <div className="py-8 text-center">
+                    <p className="text-xs text-zinc-500 italic">Select a provider and alias, then search to find missing galleries.</p>
+                  </div>
+                )}
+
+                {/* Recent Scans & Results */}
+                <div className="border-t border-zinc-800 pt-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-xs font-semibold text-zinc-300">Recent Scans & Results</h4>
+                    {scans && scans.length > 0 && (
+                      <span className="text-[10px] bg-white/5 text-zinc-500 px-2 py-0.5 rounded-full border border-white/5">
+                        {scans.length} total
+                      </span>
+                    )}
+                  </div>
+                  {scans && scans.length > 0 ? (
+                    <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                      {scans.slice().reverse().map((scan) => {
+                        const res = scan.results;
+                        const missingGals = res?.missing_galleries || [];
+                        return (
+                          <div key={scan.id} className="bg-zinc-900/80 border border-zinc-800 p-3 rounded text-xs space-y-2">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <Badge variant="info">{scan.provider || (scan as any).source}</Badge>
+                                <span className="text-zinc-400">Alias: {scan.alias}</span>
+                              </div>
+                              <Badge variant={scan.status === 'completed' ? 'success' : 'warning'}>{scan.status}</Badge>
+                            </div>
+                            {res && (
+                              <div className="grid grid-cols-2 gap-2 text-[10px] text-zinc-400">
+                                <div>Found: <span className="text-zinc-200">{res.found_count ?? 0}</span></div>
+                                <div>Existing: <span className="text-zinc-200">{res.existing_count ?? 0}</span></div>
+                                <div>Unsure: <span className="text-zinc-200">{res.unsure_count ?? 0}</span></div>
+                                <div>Missing: <span className="text-zinc-200">{res.missing_count ?? 0}</span></div>
+                              </div>
+                            )}
+                            {missingGals.length > 0 && (
+                              <div className="border-t border-zinc-800 pt-2 space-y-1.5">
+                                <p className="text-[10px] uppercase font-bold text-zinc-400">Missing galleries from scan:</p>
+                                <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                                  {missingGals.map((mg: any, idx: number) => (
+                                    <div key={idx} className="flex items-center justify-between bg-zinc-950 p-2 rounded border border-zinc-800/50">
+                                      <div className="min-w-0 flex-1 pr-2">
+                                        <p className="truncate text-zinc-300 font-medium" title={mg.title}>{mg.title}</p>
+                                        {mg.release_date && <p className="text-[9px] text-zinc-500">{mg.release_date}</p>}
+                                      </div>
+                                      <button
+                                        onClick={() => {
+                                          const alias = scan.alias || person?.name || '';
+                                          const query = encodeURIComponent(`"${alias}" "${mg.title || ''}"`);
+                                          window.open(
+                                            `https://vipergirls.to/search.php?do=process&query=${query}&titleonly=1&forumchoice%5B%5D=235&childforums=1`,
+                                            '_blank'
+                                          );
+                                        }}
+                                        className="h-7 px-2 text-[10px] shrink-0 inline-flex items-center justify-center rounded-md bg-zinc-700 text-zinc-200 hover:bg-zinc-600 hover:text-white transition-colors cursor-pointer"
+                                        title="Search vipergirls.to"
+                                      >
+                                        VG
+                                      </button>
+                                      {mg.unsure && (
+                                        <div className="ml-2 flex items-center gap-2">
+                                          <Button size="sm" className="h-7 px-2 text-[10px]" onClick={() => {
+                                            if (mg.id || mg.gallery_id) {
+                                              const gid = mg.gallery_id || mg.id;
+                                              linkUnsureMut.mutate({ gallery_id: gid, provider: scan.provider ?? '', source_url: mg.url ?? '' });
+                                            }
+                                          }}>
+                                            Link Unsure
+                                          </Button>
+                                          <Button size="sm" variant="secondary" className="h-7 px-2 text-[10px]" onClick={() => {
+                                            excludeScanResultMut.mutate({ provider: scan.provider ?? '', source_url: mg.url ?? '', title: mg.title ?? '' });
+                                          }}>
+                                            Exclude
+                                          </Button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-zinc-500 italic">No scans run yet.</p>
+                  )}
+                </div>
+              </div>
             )}
           </section>
 
