@@ -445,7 +445,7 @@ export function PersonDetailPage() {
                               <p className="text-[10px] text-zinc-200 font-medium line-clamp-2 mb-1">{mg.title}</p>
                               <span className="text-[8px] text-zinc-500 mt-auto">{mg.release_date ?? ''}</span>
                             </div>
-                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
+                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                               <Button size="sm" className="h-7 px-2 text-[10px]" disabled={linkFoundMut.isPending}
                                 onClick={() => linkFoundMut.mutate({ provider: scanResults.provider, source_url: mg.url, name: mg.title, thumbnail_url: mg.thumbnail })}>
                                 Scrape
@@ -494,15 +494,14 @@ export function PersonDetailPage() {
               <p className="text-xs text-zinc-500 italic text-center py-4">Select a provider and alias, then search to find missing galleries.</p>
             )}
 
-            {/* Recent Scans — now with thumbnails */}
+            {/* Recent Scans — compact list */}
             {scans && scans.length > 0 && (
               <div className="border-t border-zinc-800 pt-4">
                 <h4 className="text-xs font-semibold text-zinc-400 mb-3">Recent Scans ({scans.length})</h4>
-                <div className="space-y-3 max-h-96 overflow-y-auto">
+                <div className="space-y-3">
                   {scans.slice().reverse().map((scan) => {
                     const res = scan.results;
                     const missingGalsFiltered = (res?.missing_galleries || []).filter((mg: any) => !linkedSourceUrls.has(mg.url));
-                    const unsureGalsFiltered = (res?.unsure_galleries || []).filter((ug: any) => !linkedSourceUrls.has(ug.url));
                     return (
                       <div key={scan.id} className="bg-zinc-900/80 border border-zinc-800 p-3 rounded text-xs space-y-2">
                         <div className="flex items-center justify-between">
@@ -510,66 +509,44 @@ export function PersonDetailPage() {
                             <Badge variant="info">{scan.provider || (scan as any).source}</Badge>
                             <span className="text-zinc-400">Alias: {scan.alias}</span>
                           </div>
-                          <Badge variant={scan.status === 'completed' ? 'success' : 'warning'}>{scan.status}</Badge>
-                        </div>
-                        {res && (
-                          <div className="flex gap-2 text-[10px] text-zinc-400">
-                            <span>Found: <span className="text-zinc-200">{res.found_count ?? 0}</span></span>
-                            <span>Existing: <span className="text-zinc-200">{res.existing_count ?? 0}</span></span>
-                            <span>Missing: <span className="text-zinc-200">{missingGalsFiltered.length}</span></span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-zinc-500">{res ? `${res.found_count ?? 0} found, ${missingGalsFiltered.length} missing` : ''}</span>
+                            <Badge variant={scan.status === 'completed' ? 'success' : 'warning'}>{scan.status}</Badge>
                           </div>
-                        )}
-                        {/* Gallery thumbnails for missing galleries in this scan */}
+                        </div>
                         {missingGalsFiltered.length > 0 && (
-                          <div className="border-t border-zinc-800 pt-2">
-                            <p className="text-[10px] uppercase font-bold text-zinc-400 mb-2">Missing from this scan:</p>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                              {missingGalsFiltered.map((mg: any, idx: number) => (
-                                <div key={idx} className={`group relative flex flex-col rounded-lg overflow-hidden border transition-all ${mg.unsure ? 'border-amber-500/20 bg-zinc-900/80 hover:border-amber-500/40' : 'border-zinc-800 bg-zinc-900/80 hover:border-zinc-700'}`}>
-                                  <div className="aspect-[3/4] bg-zinc-800 overflow-hidden">
-                                    {mg.thumbnail ? (
-                                      <img src={mg.thumbnail} alt={mg.title} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-                                    ) : (
-                                      <div className="w-full h-full flex items-center justify-center text-zinc-600 text-[10px]">No thumb</div>
-                                    )}
-                                  </div>
-                                  <div className="p-2 flex-1 flex flex-col">
-                                    <p className="text-[10px] text-zinc-200 font-medium line-clamp-2 mb-1">{mg.title}</p>
-                                    <span className="text-[8px] text-zinc-500 mt-auto">{mg.release_date ?? ''}</span>
-                                  </div>
-                                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
-                                    {mg.unsure ? (
-                                      <>
-                                        <Button size="sm" className="h-7 px-2 text-[10px]" disabled={linkUnsureMut.isPending}
-                                          onClick={() => { const gid = mg.gallery_id || mg.id; if (gid) linkUnsureMut.mutate({ gallery_id: gid, provider: scan.provider ?? '', source_url: mg.url ?? '' }); }}>
-                                          Link
-                                        </Button>
-                                        <Button size="sm" variant="secondary" className="h-7 px-2 text-[10px]" disabled={excludeScanResultMut.isPending}
-                                          onClick={() => excludeScanResultMut.mutate({ provider: scan.provider ?? '', source_url: mg.url ?? '', title: mg.title ?? '' })}>
-                                          Exclude
-                                        </Button>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Button size="sm" className="h-7 px-2 text-[10px]" disabled={linkFoundMut.isPending}
-                                          onClick={() => linkFoundMut.mutate({ provider: scan.provider ?? '', source_url: mg.url, name: mg.title, thumbnail_url: mg.thumbnail })}>
-                                          Scrape
-                                        </Button>
-                                        <a
-                                          href={`https://vipergirls.to/search.php?do=process&query=${encodeURIComponent(`"${scan.alias || ''}" "${mg.title || ''}"`)}&titleonly=1&forumchoice%5B%5D=235&childforums=1`}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="h-7 px-2 text-[10px] inline-flex items-center justify-center rounded-md bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 border border-blue-500/30 transition-all"
-                                          title="Search vipergirls.to"
-                                        >
-                                          <ExternalLink size={10} />
-                                        </a>
-                                      </>
-                                    )}
-                                  </div>
+                          <div className="border-t border-zinc-800 pt-2 space-y-1">
+                            {missingGalsFiltered.map((mg: any, idx: number) => (
+                              <div key={idx} className={`flex items-center gap-3 p-2 rounded-lg border transition-all ${mg.unsure ? 'border-amber-500/20 hover:border-amber-500/40' : 'border-zinc-800 hover:border-zinc-700'} bg-zinc-900/50`}>
+                                <div className="w-10 h-14 rounded overflow-hidden bg-zinc-800 shrink-0">
+                                  {mg.thumbnail ? <img src={mg.thumbnail} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                                  : <div className="w-full h-full flex items-center justify-center text-zinc-600 text-[8px]">—</div>}
                                 </div>
-                              ))}
-                            </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs text-zinc-200 truncate">{mg.title}</p>
+                                  {mg.release_date && <p className="text-[10px] text-zinc-500">{mg.release_date}</p>}
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {mg.unsure ? (
+                                    <>
+                                      <Button size="sm" className="h-7 px-2 text-[10px]" disabled={linkUnsureMut.isPending}
+                                        onClick={() => { const gid = mg.gallery_id || mg.id; if (gid) linkUnsureMut.mutate({ gallery_id: gid, provider: scan.provider ?? '', source_url: mg.url ?? '' }); }}>Link</Button>
+                                      <Button size="sm" variant="secondary" className="h-7 px-2 text-[10px]" disabled={excludeScanResultMut.isPending}
+                                        onClick={() => excludeScanResultMut.mutate({ provider: scan.provider ?? '', source_url: mg.url ?? '', title: mg.title ?? '' })}>Exclude</Button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Button size="sm" className="h-7 px-2 text-[10px]" disabled={linkFoundMut.isPending}
+                                        onClick={() => linkFoundMut.mutate({ provider: scan.provider ?? '', source_url: mg.url, name: mg.title, thumbnail_url: mg.thumbnail })}>Scrape</Button>
+                                      <a href={`https://vipergirls.to/search.php?do=process&query=${encodeURIComponent(`"${scan.alias || ''}" "${mg.title || ''}"`)}&titleonly=1&forumchoice%5B%5D=235&childforums=1`}
+                                        target="_blank" rel="noopener noreferrer"
+                                        className="h-7 px-2 text-[10px] inline-flex items-center justify-center rounded-md bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 border border-blue-500/30 transition-all"
+                                        title="Search vipergirls.to"><ExternalLink size={10} /></a>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         )}
                       </div>

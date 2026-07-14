@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"gallery_api/database"
 	"gallery_api/logger"
 	"gallery_api/models"
@@ -74,6 +75,9 @@ func createSingleSource(name, location, sourceType string, priority int) (*model
 
 		// Try to auto-link to people based on source name
 		linkedPersonIDs := autoLinkPeopleToGallery(source.Name, gallery.ID)
+
+		// Auto-link galleries by matching source URL against all people's names/aliases
+		autoLinkGalleryToPeopleByURL(gallery.ID, source.Location)
 
 		// Check if this gallery matches any missing galleries by name (across all providers)
 		if len(linkedPersonIDs) > 0 {
@@ -425,4 +429,60 @@ func autoLinkPeopleToGallery(sourceName string, galleryID uint) []uint {
 	}
 
 	return linkedPersonIDs
+}
+
+// autoLinkGalleryToPeopleByURL checks the source URL against all people's names and aliases
+// and links matching galleries. This mirrors the logic of LinkPersonToGalleries but runs
+// automatically when a gallery is created from a source.
+func autoLinkGalleryToPeopleByURL(galleryID uint, sourceLocation string) {
+	if sourceLocation == "" {
+		return
+	}
+
+	locationLower := strings.ToLower(sourceLocation)
+
+	// Load all people with aliases
+	var people []models.Person
+	database.DB.Find(&people)
+
+	if len(people) == 0 {
+		return
+	}
+
+	var gallery models.Gallery
+	if err := database.DB.First(&gallery, galleryID).Error; err != nil {
+		return
+	}
+
+	for i := range people {
+		person := &people[i]
+
+		// Build search terms from name + aliases
+		var searchTerms []string
+		baseTerms := []string{person.Name}
+		if person.Aliases != "" {
+			var aliases []string
+			if err := json.Unmarshal([]byte(person.Aliases), &aliases); err == nil {
+				baseTerms = append(baseTerms, aliases...)
+			}
+		}
+
+		for _, term := range baseTerms {
+			term = strings.ToLower(term)
+			searchTerms = append(searchTerms, term)
+			if strings.Contains(term, " ") {
+				searchTerms = append(searchTerms, strings.ReplaceAll(term, " ", "-"))
+				searchTerms = append(searchTerms, strings.ReplaceAll(term, " ", "%20"))
+			}
+		}
+
+		// Check if any search term matches the source URL
+		for _, term := range searchTerms {
+			if strings.Contains(locationLower, term) {
+				database.DB.Model(person).Association("Galleries").Append(&gallery)
+				logger.Infof("Auto-linked gallery %d to person %s via URL match (term: %s)", galleryID, person.Name, term)
+				break
+			}
+		}
+	}
 }
