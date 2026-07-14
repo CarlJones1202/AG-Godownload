@@ -139,6 +139,38 @@ func addImageIndexes() {
 	logger.Info("Added composite index idx_images_deleted_created_id on images(deleted_at, created_at, id)")
 }
 
+// Shutdown performs a final WAL checkpoint and closes the database connection.
+// This should be called during graceful shutdown to prevent corruption from
+// interrupted writes. The TRUNCATE checkpoint moves all WAL data back into the
+// main database file, which is the safest state for a cold start after shutdown.
+func Shutdown() {
+	if DB == nil {
+		return
+	}
+	logger.Info("Database shutdown: running final WAL checkpoint...")
+	sqlDB, err := DB.DB()
+	if err != nil {
+		logger.Errorf("Failed to get underlying sql.DB for shutdown: %v", err)
+		return
+	}
+
+	// TRUNCATE waits for readers to finish, then moves WAL into main DB file.
+	// This is slower than PASSIVE but ensures zero WAL residue on next start.
+	if err := DB.Exec("PRAGMA wal_checkpoint(TRUNCATE)").Error; err != nil {
+		logger.Warnf("WAL truncate checkpoint failed: %v", err)
+		// Fallback: PASSIVE checkpoint is non-blocking and still flushes data
+		if err2 := DB.Exec("PRAGMA wal_checkpoint(PASSIVE)").Error; err2 != nil {
+			logger.Warnf("WAL passive checkpoint also failed: %v", err2)
+		}
+	}
+
+	if err := sqlDB.Close(); err != nil {
+		logger.Errorf("Failed to close database connection: %v", err)
+	} else {
+		logger.Info("Database connection closed cleanly")
+	}
+}
+
 func MigrateData() {
 	// Migrate existing one-to-many relationships to many-to-many
 	// We use raw SQL for performance and simplicity

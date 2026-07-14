@@ -1,11 +1,17 @@
 package main
 
 import (
+	"context"
 	"gallery_api/config"
 	"gallery_api/database"
 	"gallery_api/handlers"
 	"gallery_api/logger"
 	"gallery_api/services"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -31,11 +37,6 @@ func main() {
 	if err := services.EnsureUploadsDir(); err != nil {
 		logger.Fatal("Failed to create uploads directory:", err)
 	}
-
-	// // Migrate images to new directory structure
-	// if err := services.MigrateImagesToNewStructure(); err != nil {
-	// 	logger.Warn("Image migration had errors:", err)
-	// }
 
 	// Run startup verification tasks sequentially to avoid memory thrashing
 	go func() {
@@ -86,13 +87,6 @@ func main() {
 
 	// Start workers
 	services.StartCrawlerWorker()
-	// AI tagging service has been disabled/commented out. To re-enable,
-	// restore calls to services.StartAITagWorker and the related queueing code.
-	// if config.Global.AITagWorkers > 0 {
-	//     services.StartAITagWorker()
-	// } else {
-	//     logger.Infof("AI tagging worker disabled (AITAG_WORKERS=%d)", config.Global.AITagWorkers)
-	// }
 	services.StartWebSocketHub()
 	services.StartScanWorker()
 	services.StartDailyScanScheduler()
@@ -200,9 +194,41 @@ func main() {
 	// Static file serving
 	r.GET("/thumbnails/*filepath", handlers.ServeThumbnail)
 	r.GET("/images/*filepath", handlers.ServeImage)
-	// r.GET("/thumbnails/:filename", handlers.ServeThumbnail) // Deprecated
 	r.Static("/person-images", "./uploads/person_images")
 
-	logger.Info("Server starting on :" + config.Global.Port)
-	r.Run(":" + config.Global.Port)
+	srv := &http.Server{
+		Addr:         ":" + config.Global.Port,
+		Handler:      r,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 0, // no write timeout — crawls/uploads can be long
+	}
+
+	// Start server in a goroutine
+	go func() {
+		logger.Info("Server starting on :" + config.Global.Port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatalf("Server failed: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	sig := <-quit
+	logger.Infof("Received signal %v, shutting down gracefully...", sig)
+
+	// Step 1: Stop accepting new work (workers finish current item then exit)
+	services.StopWorkers()
+
+	// Step 2: Give HTTP server 5 seconds to drain in-flight requests
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.Errorf("HTTP server shutdown error: %v", err)
+	}
+
+	// Step 3: Close database — WAL checkpoint ensures no data loss
+	database.Shutdown()
+
+	logger.Info("Shutdown complete")
 }

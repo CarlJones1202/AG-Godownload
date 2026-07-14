@@ -1,21 +1,11 @@
 @import "tailwindcss";
 
-/* Remove padding only for People page cards */
-.person-card-flat {
-  padding: 0 !important;
-}
-
 @layer utilities {
-  .glass {
-    @apply bg-zinc-900/40 backdrop-blur-xl border border-white/10;
+  .scrollbar-none {
+    scrollbar-width: none;
   }
-  
-  .glass-card {
-    @apply bg-zinc-900/60 backdrop-blur-md border border-white/5 hover:border-white/10 transition-all duration-300;
-  }
-
-  .text-shadow-sm {
-    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
   }
 }
 
@@ -32,4 +22,26 @@
 
 .animate-fade-in-up {
   animation: fadeInUp 0.5s ease-out forwards;
+}
+
+/* Subtle custom scrollbar for dark theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(240 5% 26%);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(240 5% 34%);
+}
+
+/* Improve select element styling in dark mode */
+select option {
+  background: #18181b;
+  color: #e4e4e7;
 }

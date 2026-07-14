@@ -1,87 +1,83 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { sources, admin, maintenance, stats, /* adminApi included below */ } from '@/lib/api';
-import { adminApi } from '@/lib/api';
-import {
-  PageHeader,
-  StatCard,
-  Card,
-  Spinner,
-  Badge,
-  Button,
-  EmptyState,
-} from '@/components/UI';
+import { sources, admin, maintenance, stats, adminApi } from '@/lib/api';
+import { Spinner, Badge, Button } from '@/components/UI';
+import { Link } from 'react-router-dom';
 import {
   Globe,
   Images,
   Image,
   Film,
   Users,
-  ListChecks,
   Download,
   RefreshCw,
   Play,
   Loader2,
-  AlertCircle,
-  ChevronDown,
-  ChevronRight,
   Wrench,
+  ListChecks,
+  Settings2,
+  ChevronRight,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { cn } from '@/lib/utils';
 
-type SectionId = 'system-status' | 'sources' | 'missing-galleries' | 'maintenance' | 'failed-downloads';
+const quickLinks = [
+  { to: '/galleries', label: 'Galleries', icon: Images, desc: 'Browse collections', color: 'text-blue-400' },
+  { to: '/images', label: 'Images', icon: Image, desc: 'View all images', color: 'text-violet-400' },
+  { to: '/videos', label: 'Videos', icon: Film, desc: 'Watch videos', color: 'text-rose-400' },
+  { to: '/people', label: 'People', icon: Users, desc: 'Performer profiles', color: 'text-emerald-400' },
+  { to: '/sources', label: 'Sources', icon: Globe, desc: 'Manage crawlers', color: 'text-amber-400' },
+  { to: '/tags', label: 'Tags', icon: ListChecks, desc: 'Organize content', color: 'text-sky-400' },
+];
 
 export function DashboardPage() {
   const queryClient = useQueryClient();
-  const [expanded, setExpanded] = useState<Set<SectionId>>(new Set());
+  const [showAdmin, setShowAdmin] = useState(false);
 
-  const toggle = (id: SectionId) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const { data: dashboardStats } = useQuery({
+  const { data: d } = useQuery({
     queryKey: ['dashboard-stats'],
     queryFn: () => stats.dashboard(),
     refetchInterval: 5000,
   });
+
   const { data: sourceList } = useQuery({
     queryKey: ['sources', 'all'],
     queryFn: () => sources.list({ limit: 200 }),
-    enabled: expanded.has('sources'),
+    enabled: showAdmin,
   });
+
   const { data: missingData, isLoading: loadingMissing } = useQuery({
     queryKey: ['admin', 'missing-galleries'],
     queryFn: () => admin.missingGalleries({ limit: 50 }),
-    enabled: expanded.has('missing-galleries'),
+    enabled: showAdmin,
   });
+
   const { data: failedImagesData } = useQuery({
     queryKey: ['admin', 'failed-images'],
     queryFn: () => adminApi.getFailedImages(),
-    enabled: expanded.has('failed-downloads'),
+    enabled: showAdmin,
   });
+
   const { data: failedSourcesData } = useQuery({
     queryKey: ['admin', 'failed-sources'],
     queryFn: () => adminApi.getFailedSources(),
-    enabled: expanded.has('failed-downloads'),
+    enabled: showAdmin,
   });
 
   const retryImageMut = useMutation({
     mutationFn: (id: number) => adminApi.retryImage(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'failed-images'] }),
   });
+
   const retryAllImagesMut = useMutation({
     mutationFn: () => adminApi.retryAllImages(),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'failed-images'] }),
   });
+
   const retrySourceMut = useMutation({
     mutationFn: (id: number) => adminApi.retrySource(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'failed-sources'] }),
   });
+
   const retryAllSourcesMut = useMutation({
     mutationFn: () => adminApi.retryAllSources(),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'failed-sources'] }),
@@ -96,10 +92,10 @@ export function DashboardPage() {
   const cleanupMut = useMutation({
     mutationFn: (token: string) => maintenance.cleanupDupes(token),
     onSuccess: (data) => {
-      setCleanupStatus(`Deleted ${data.deleted} duplicates (${data.url_duplicates} URL-based, ${data.filename_duplicates} filename-based)`);
+      setCleanupStatus(`Deleted ${data.deleted} duplicates (${data.url_duplicates} URL, ${data.filename_duplicates} filename)`);
     },
     onError: (err: any) => {
-      setCleanupStatus(`Error: ${err.message || 'Unknown error'}`);
+      setCleanupStatus(`Error: ${err.message || 'Unknown'}`);
     },
   });
 
@@ -111,146 +107,179 @@ export function DashboardPage() {
     }
   };
 
-  if (!dashboardStats) return <Spinner />;
+  if (!d) return <Spinner />;
 
-  const d = dashboardStats;
   const activeCrawls = d.downloads?.crawler?.active_sources ?? [];
   const verificationActive = d.downloads?.verification?.is_running ?? false;
   const videosActive = d.downloads?.videos?.is_running ?? false;
-  const missingGalleries = missingData?.data ?? [];
+  const totalActive = activeCrawls.length + (verificationActive ? 1 : 0) + (videosActive ? 1 : 0);
   const sourceItems = sourceList?.data ?? [];
-
-  const SectionToggle = ({ id, label, count }: { id: SectionId; label: string; count?: number }) => (
-    <button
-      onClick={() => toggle(id)}
-      className="flex items-center gap-2 text-sm font-medium text-zinc-300 hover:text-white transition-colors"
-    >
-      {expanded.has(id) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-      {label}
-      {count !== undefined && <Badge>{count}</Badge>}
-    </button>
-  );
+  const missingGalleries = missingData?.data ?? [];
 
   return (
-    <>
-      <PageHeader title="Dashboard" description="System overview">
-        <Button variant="secondary" size="sm" onClick={() => queryClient.invalidateQueries()}>
-          <RefreshCw size={14} /> Refresh
-        </Button>
-      </PageHeader>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <StatCard label="Sources" value={d.sources} icon={<Globe size={20} />} />
-        <StatCard label="Galleries" value={d.galleries} icon={<Images size={20} />} />
-        <StatCard label="Images" value={d.images} icon={<Image size={20} />} />
-        <StatCard label="Videos" value={d.videos} icon={<Film size={20} />} />
-        <StatCard label="People" value={d.people} icon={<Users size={20} />} />
-        <StatCard label="Active Tasks" value={activeCrawls.length + (verificationActive ? 1 : 0) + (videosActive ? 1 : 0)} icon={<ListChecks size={20} />} />
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <Card>
-          <div className="flex items-center gap-2 mb-3">
-            <Download size={16} className="text-zinc-400" />
-            <h3 className="text-sm font-medium text-white">Download Activity</h3>
+    <div className="space-y-10">
+      {/* Hero stats */}
+      <section>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-3xl font-bold text-white tracking-tight">Overview</h1>
+            <p className="text-sm text-zinc-500 mt-1">Your media collection at a glance</p>
           </div>
-          <div className="space-y-2 text-sm">
-            {activeCrawls.length > 0 ? (
-              activeCrawls.slice(0, 5).map((src) => (
-                <div key={src.id} className="flex items-center justify-between">
-                  <span className="text-zinc-400 truncate">{src.name || src.location}</span>
-                  <Badge variant="info">{src.download_progress}%</Badge>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setShowAdmin(!showAdmin)}>
+              <Settings2 size={14} />
+              {showAdmin ? 'Hide Admin' : 'Admin'}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => queryClient.invalidateQueries()}>
+              <RefreshCw size={14} /> Refresh
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4">
+            <div className="flex items-center gap-2 text-zinc-500 mb-1">
+              <Globe size={14} />
+              <span className="text-xs font-medium uppercase tracking-wider">Sources</span>
+            </div>
+            <p className="text-2xl font-bold text-white">{d.sources}</p>
+          </div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4">
+            <div className="flex items-center gap-2 text-zinc-500 mb-1">
+              <Images size={14} />
+              <span className="text-xs font-medium uppercase tracking-wider">Galleries</span>
+            </div>
+            <p className="text-2xl font-bold text-white">{d.galleries}</p>
+          </div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4">
+            <div className="flex items-center gap-2 text-zinc-500 mb-1">
+              <Image size={14} />
+              <span className="text-xs font-medium uppercase tracking-wider">Images</span>
+            </div>
+            <p className="text-2xl font-bold text-white">{d.images}</p>
+          </div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4">
+            <div className="flex items-center gap-2 text-zinc-500 mb-1">
+              <Film size={14} />
+              <span className="text-xs font-medium uppercase tracking-wider">Videos</span>
+            </div>
+            <p className="text-2xl font-bold text-white">{d.videos}</p>
+          </div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4">
+            <div className="flex items-center gap-2 text-zinc-500 mb-1">
+              <Users size={14} />
+              <span className="text-xs font-medium uppercase tracking-wider">People</span>
+            </div>
+            <p className="text-2xl font-bold text-white">{d.people}</p>
+          </div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4">
+            <div className="flex items-center gap-2 text-zinc-500 mb-1">
+              <Download size={14} />
+              <span className="text-xs font-medium uppercase tracking-wider">Active</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <p className="text-2xl font-bold text-white">{totalActive}</p>
+              {totalActive > 0 && (
+                <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Quick navigation */}
+      <section>
+        <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-4">Quick Access</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {quickLinks.map((link) => (
+            <Link
+              key={link.to}
+              to={link.to}
+              className="group rounded-lg border border-zinc-800 bg-zinc-900/20 hover:bg-zinc-900/60 hover:border-zinc-700 p-4 transition-all"
+            >
+              <link.icon size={20} className={cn('mb-2', link.color)} />
+              <p className="text-sm font-medium text-zinc-200 group-hover:text-white transition-colors">{link.label}</p>
+              <p className="text-xs text-zinc-500 mt-0.5">{link.desc}</p>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      {/* Activity bar */}
+      <section className="rounded-lg border border-zinc-800 bg-zinc-900/20">
+        <div className="p-4 border-b border-zinc-800">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Download Activity</h2>
+          </div>
+        </div>
+        <div className="p-4">
+          {totalActive > 0 ? (
+            <div className="space-y-3">
+              {activeCrawls.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-zinc-500 mb-2">Active crawls</p>
+                  <div className="space-y-2">
+                    {activeCrawls.slice(0, 5).map((src) => (
+                      <div key={src.id} className="flex items-center justify-between">
+                        <span className="text-sm text-zinc-300 truncate">{src.name || src.location}</span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-24 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+                            <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${src.download_progress}%` }} />
+                          </div>
+                          <span className="text-xs text-zinc-500 w-8 text-right">{src.download_progress}%</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))
-            ) : (
-              <p className="text-zinc-500 italic">No active downloads</p>
-            )}
-          </div>
-        </Card>
-
-        <Card>
-          <div className="flex items-center gap-2 mb-3">
-            <ListChecks size={16} className="text-zinc-400" />
-            <h3 className="text-sm font-medium text-white">Queue Status</h3>
-          </div>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-zinc-400">Active Crawls</span>
-              <Badge variant="info">{activeCrawls.length}</Badge>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-zinc-400">Verification Running</span>
-              <Badge variant={verificationActive ? 'warning' : 'success'}>
-                {verificationActive ? 'Yes' : 'No'}
-              </Badge>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-zinc-400">Video Verification</span>
-              <Badge variant={videosActive ? 'warning' : 'success'}>
-                {videosActive ? 'Yes' : 'No'}
-              </Badge>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-zinc-400">Missing Images</span>
-              <Badge variant="danger">{d.downloads?.verification?.missing_found ?? 0}</Badge>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      {/* Collapsible Admin Sections */}
-      <div className="space-y-2 mb-6">
-        {/* System Status */}
-        <Card>
-          <SectionToggle id="system-status" label="System Status" />
-          {expanded.has('system-status') && (
-            <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-              <div className="flex items-center gap-2">
-                <ListChecks size={14} className="text-zinc-400" />
-                <span className="text-zinc-400">Crawlers:</span>
-                <Badge variant={activeCrawls.length > 0 ? 'warning' : 'default'}>
-                  {activeCrawls.length} active
-                </Badge>
-              </div>
-              <div className="flex items-center gap-2">
-                <Loader2 size={14} className="text-zinc-400" />
-                <span className="text-zinc-400">Verification:</span>
-                <Badge variant={verificationActive ? 'warning' : 'default'}>
-                  {verificationActive ? 'Running' : 'Idle'}
-                </Badge>
-              </div>
-              <div className="flex items-center gap-2">
-                <AlertCircle size={14} className="text-zinc-400" />
-                <span className="text-zinc-400">Missing:</span>
-                <Badge variant="danger">{d.downloads?.verification?.missing_found ?? 0}</Badge>
-              </div>
-              <div className="flex items-center gap-2">
-                <Play size={14} className="text-zinc-400" />
-                <span className="text-zinc-400">Videos:</span>
-                <Badge variant={videosActive ? 'warning' : 'default'}>
-                  {videosActive ? 'Running' : 'Idle'}
-                </Badge>
+              )}
+              <div className="flex flex-wrap gap-3 text-xs text-zinc-500">
+                {verificationActive && (
+                  <span className="flex items-center gap-1.5">
+                    <Loader2 size={12} className="animate-spin text-blue-400" />
+                    Verification running
+                  </span>
+                )}
+                {videosActive && (
+                  <span className="flex items-center gap-1.5">
+                    <Loader2 size={12} className="animate-spin text-blue-400" />
+                    Video processing
+                  </span>
+                )}
               </div>
             </div>
+          ) : (
+            <p className="text-sm text-zinc-500">No active downloads</p>
           )}
-        </Card>
+        </div>
+        <div className="px-4 pb-4 flex gap-4 text-xs text-zinc-500">
+          <span>Missing: <span className="text-zinc-300 font-medium">{d.downloads?.verification?.missing_found ?? 0}</span></span>
+          <span>Verified: <span className="text-zinc-300 font-medium">{d.downloads?.verification?.processed ?? 0}</span></span>
+        </div>
+      </section>
 
-        {/* Sources */}
-        <Card>
-          <SectionToggle id="sources" label="Sources" count={sourceItems.length} />
-          {expanded.has('sources') && (
-            <div className="mt-3">
+      {/* Admin section (collapsible) */}
+      {showAdmin && (
+        <section className="space-y-4">
+          <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Administration</h2>
+
+          {/* Sources */}
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/20">
+            <div className="p-4 border-b border-zinc-800">
+              <h3 className="text-sm font-medium text-zinc-200">Sources ({sourceItems.length})</h3>
+            </div>
+            <div className="p-4">
               {sourceItems.length === 0 ? (
-                <EmptyState message="No sources configured." />
+                <p className="text-sm text-zinc-500">No sources configured.</p>
               ) : (
-                <div className="space-y-2 max-h-64 overflow-y-auto">
+                <div className="space-y-2">
                   {sourceItems.map((src) => (
-                    <div key={src.id} className="flex items-center justify-between p-2 rounded bg-zinc-800/50">
+                    <div key={src.id} className="flex items-center justify-between py-2">
                       <div className="min-w-0 flex-1">
                         <span className="text-sm text-zinc-300 truncate block">{src.name}</span>
                         <span className="text-xs text-zinc-500">{src.location}</span>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 shrink-0">
                         <Badge variant={src.status === 'crawling' ? 'warning' : 'default'}>{src.status}</Badge>
                         <Button variant="ghost" size="sm" onClick={() => crawlMut.mutate(src.id)} disabled={crawlMut.isPending}>
                           <Play size={12} />
@@ -260,109 +289,79 @@ export function DashboardPage() {
                   ))}
                 </div>
               )}
-              <div className="mt-3">
-                <Link to="/sources" className="text-xs text-blue-400 hover:text-blue-300 transition-colors">
-                  Manage all sources &rarr;
-                </Link>
-              </div>
+              <Link to="/sources" className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 mt-3">
+                Manage all sources <ChevronRight size={12} />
+              </Link>
             </div>
-          )}
-        </Card>
+          </div>
 
-        {/* Missing Galleries */}
-        <Card>
-          <SectionToggle id="missing-galleries" label="Missing Galleries" count={missingGalleries.length} />
-          {expanded.has('missing-galleries') && (
-            <div className="mt-3">
+          {/* Missing Galleries */}
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/20">
+            <div className="p-4 border-b border-zinc-800">
+              <h3 className="text-sm font-medium text-zinc-200">Missing Galleries ({missingGalleries.length})</h3>
+            </div>
+            <div className="p-4">
               {loadingMissing ? (
-                <Spinner />
+                <Spinner size="sm" />
               ) : missingGalleries.length === 0 ? (
-                <EmptyState message="No missing galleries found." />
+                <p className="text-sm text-zinc-500">No missing galleries found.</p>
               ) : (
-                <div className="space-y-2 max-h-96 overflow-y-auto">
+                <div className="space-y-2 max-h-64 overflow-y-auto">
                   {missingGalleries.map((mg: any, i: number) => (
-                    <div key={i} className="flex items-center justify-between p-2 rounded bg-zinc-800/50">
+                    <div key={i} className="flex items-center justify-between py-2">
                       <div className="min-w-0 flex-1">
                         <span className="text-sm text-zinc-300 truncate block">{mg.gallery_url || mg.gallery_name || `Missing #${i + 1}`}</span>
-                        <span className="text-xs text-zinc-500">
-                          {mg.provider && `${mg.provider} · `}
-                          {mg.person_name && (
-                            <Link to={`/people/${mg.person_id}`} className="hover:text-blue-400 transition-colors">
-                              Person: {mg.person_name}
-                            </Link>
-                          )}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {mg.person_id && (
-                          <Link to={`/people/${mg.person_id}`}>
-                            <Badge variant="info">Person #{mg.person_id}</Badge>
-                          </Link>
-                        )}
-                        {mg.alias && <Badge variant="default">{mg.alias}</Badge>}
+                        <span className="text-xs text-zinc-500">{mg.provider && `${mg.provider} · `}{mg.person_name && <Link to={`/people/${mg.person_id}`} className="hover:text-blue-400">{mg.person_name}</Link>}</span>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-          )}
-        </Card>
+          </div>
 
-        {/* Failed Downloads (images + sources) */}
-        <Card>
-          <SectionToggle id="failed-downloads" label="Failed Downloads" />
-          {expanded.has('failed-downloads') && (
-            <div className="mt-3 space-y-3">
+          {/* Failed Downloads */}
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/20">
+            <div className="p-4 border-b border-zinc-800">
+              <h3 className="text-sm font-medium text-zinc-200">Failed Downloads</h3>
+            </div>
+            <div className="p-4 space-y-4">
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-sm font-medium text-white">Images (missing files)</h4>
-                  <div className="flex items-center gap-2">
-                    <Button size="sm" variant="ghost" onClick={() => retryAllImagesMut.mutate()} disabled={retryAllImagesMut.isPending}>
-                      Retry All
-                    </Button>
-                  </div>
+                  <h4 className="text-xs font-medium text-zinc-400">Images (missing files)</h4>
+                  <Button size="sm" variant="ghost" onClick={() => retryAllImagesMut.mutate()} disabled={retryAllImagesMut.isPending}>
+                    Retry All
+                  </Button>
                 </div>
-                <div className="space-y-2 max-h-48 overflow-y-auto">
+                <div className="space-y-1 max-h-40 overflow-y-auto">
                   {(failedImagesData?.data ?? []).length === 0 ? (
-                    <p className="text-xs text-zinc-500">No missing images found.</p>
+                    <p className="text-xs text-zinc-500">No missing images.</p>
                   ) : (
                     (failedImagesData?.data ?? []).map((img: any) => (
-                      <div key={img.id} className="flex items-center justify-between p-2 rounded bg-zinc-800/50">
-                        <div className="min-w-0 flex-1">
-                          <span className="text-sm text-zinc-300 truncate block">{img.filename || img.original_url || `#${img.id}`}</span>
-                          <span className="text-xs text-zinc-500">ID: {img.id} · {img.type}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button size="sm" variant="ghost" onClick={() => retryImageMut.mutate(img.id)} disabled={retryImageMut.isPending}>
-                            Retry
-                          </Button>
-                        </div>
+                      <div key={img.id} className="flex items-center justify-between py-1.5">
+                        <span className="text-sm text-zinc-300 truncate">{img.filename || img.original_url || `#${img.id}`}</span>
+                        <Button size="sm" variant="ghost" onClick={() => retryImageMut.mutate(img.id)} disabled={retryImageMut.isPending}>
+                          Retry
+                        </Button>
                       </div>
                     ))
                   )}
                 </div>
               </div>
-
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-sm font-medium text-white">Sources (errored)</h4>
-                  <div className="flex items-center gap-2">
-                    <Button size="sm" variant="ghost" onClick={() => retryAllSourcesMut.mutate()} disabled={retryAllSourcesMut.isPending}>
-                      Retry All
-                    </Button>
-                  </div>
+                  <h4 className="text-xs font-medium text-zinc-400">Sources (errored)</h4>
+                  <Button size="sm" variant="ghost" onClick={() => retryAllSourcesMut.mutate()} disabled={retryAllSourcesMut.isPending}>
+                    Retry All
+                  </Button>
                 </div>
-                <div className="space-y-2 max-h-48 overflow-y-auto">
+                <div className="space-y-1 max-h-40 overflow-y-auto">
                   {(failedSourcesData?.data ?? []).length === 0 ? (
                     <p className="text-xs text-zinc-500">No errored sources.</p>
                   ) : (
                     (failedSourcesData?.data ?? []).map((s: any) => (
-                      <div key={s.id} className="flex items-center justify-between p-2 rounded bg-zinc-800/50">
-                        <div className="min-w-0 flex-1">
-                          <span className="text-sm text-zinc-300 truncate block">{s.name || s.location}</span>
-                          <span className="text-xs text-zinc-500">{s.location}</span>
-                        </div>
+                      <div key={s.id} className="flex items-center justify-between py-1.5">
+                        <span className="text-sm text-zinc-300 truncate">{s.name || s.location}</span>
                         <div className="flex items-center gap-2">
                           <Badge variant="danger">{s.status}</Badge>
                           <Button size="sm" variant="ghost" onClick={() => retrySourceMut.mutate(s.id)} disabled={retrySourceMut.isPending}>
@@ -375,31 +374,32 @@ export function DashboardPage() {
                 </div>
               </div>
             </div>
-          )}
-        </Card>
+          </div>
 
-        {/* Maintenance */}
-        <Card>
-          <SectionToggle id="maintenance" label="Maintenance" />
-          {expanded.has('maintenance') && (
-            <div className="mt-3 space-y-3">
-              <p className="text-xs text-zinc-500">Remove duplicate images across all galleries. Requires maintenance token.</p>
+          {/* Maintenance */}
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/20">
+            <div className="p-4 border-b border-zinc-800">
+              <h3 className="text-sm font-medium text-zinc-200">Maintenance</h3>
+            </div>
+            <div className="p-4 space-y-3">
+              <p className="text-xs text-zinc-500">Remove duplicate images. Requires maintenance token.</p>
               <Button size="sm" variant="danger" onClick={handleCleanupDupes} disabled={cleanupMut.isPending}>
                 <Wrench size={14} /> {cleanupMut.isPending ? 'Running...' : 'Clean Up Duplicates'}
               </Button>
               {cleanupStatus && (
-                <div className={`p-2.5 rounded text-xs border ${
+                <div className={cn(
+                  'p-2.5 rounded text-xs border',
                   cleanupStatus.startsWith('Error')
                     ? 'bg-red-950/50 text-red-400 border-red-800/80'
-                    : 'bg-emerald-950/50 text-emerald-400 border-emerald-800/80'
-                }`}>
+                    : 'bg-emerald-950/50 text-emerald-400 border-emerald-800/80',
+                )}>
                   {cleanupStatus}
                 </div>
               )}
             </div>
-          )}
-        </Card>
-      </div>
-    </>
+          </div>
+        </section>
+      )}
+    </div>
   );
 }

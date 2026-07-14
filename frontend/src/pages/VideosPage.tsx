@@ -4,7 +4,6 @@ import { videos, images as imagesApi, people } from '@/lib/api';
 import { formatDate, formatDuration, thumbnailUrl } from '@/lib/utils';
 import {
   PageHeader,
-  Card,
   Spinner,
   EmptyState,
   Badge,
@@ -84,11 +83,8 @@ export function VideosPage() {
             {videosData.map((vid) => (
               <div
                 key={vid.id}
-                className="group cursor-pointer"
+                className="group cursor-pointer rounded-lg border border-zinc-800 bg-zinc-900/30 hover:border-zinc-700 overflow-hidden transition-all"
                 onClick={() => setActiveVideo(vid)}
-              >
-              <Card
-                className="overflow-hidden"
               >
                 <div className="relative aspect-video bg-zinc-800 overflow-hidden">
                   <img
@@ -96,9 +92,7 @@ export function VideosPage() {
                     alt={vid.filename}
                     className="w-full h-full object-cover"
                     loading="lazy"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = 'none';
-                    }}
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                   />
                   <div className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity">
                     <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center">
@@ -117,50 +111,27 @@ export function VideosPage() {
                     {vid.width != null && vid.height != null && (
                       <Badge variant="info">{vid.width}x{vid.height}</Badge>
                     )}
-                    {vid.vr_mode !== 'none' && (
-                      <Badge variant="warning">VR {vid.vr_mode}</Badge>
-                    )}
+                    {vid.vr_mode !== 'none' && <Badge variant="warning">VR {vid.vr_mode}</Badge>}
                     <span className="text-xs text-zinc-500 ml-auto">{formatDate(vid.created_at)}</span>
                   </div>
-                   <div className="flex items-center justify-between mt-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                  <div className="flex items-center justify-between mt-2 opacity-0 group-hover:opacity-100 transition-opacity"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        title={vid.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
-                        onClick={() => favMut.mutate(vid.id)}
-                      >
-                        <Heart
-                          size={14}
-                          className={vid.is_favorite ? 'text-red-400 fill-red-400' : 'text-zinc-500 hover:text-red-400'}
-                        />
+                      <Button variant="ghost" size="sm" title={vid.is_favorite ? 'Remove from favorites' : 'Add to favorites'} onClick={() => favMut.mutate(vid.id)}>
+                        <Heart size={14} className={vid.is_favorite ? 'text-red-400 fill-red-400' : 'text-zinc-500 hover:text-red-400'} />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        title="Link to person"
-                        onClick={() => {
-                          setLinkPersonImageId(vid.id);
-                          setPersonSearch('');
-                        }}
-                      >
+                      <Button variant="ghost" size="sm" title="Link to person" onClick={() => { setLinkPersonImageId(vid.id); setPersonSearch(''); }}>
                         <UserPlus size={14} className="text-zinc-500 hover:text-blue-400" />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        title="Delete video"
-                        onClick={() => setConfirmDeleteId(vid.id)}
-                      >
+                      <Button variant="ghost" size="sm" title="Delete video" onClick={() => setConfirmDeleteId(vid.id)}>
                         <Trash2 size={14} className="text-zinc-500 hover:text-red-400" />
                       </Button>
                     </div>
                     <select
                       value={vid.vr_mode || 'none'}
                       onChange={(e) => vrModeMut.mutate({ id: vid.id, mode: e.target.value })}
-                      className="bg-zinc-800 border border-zinc-700 hover:border-zinc-600 rounded px-2 py-1 text-xs text-zinc-300 focus:outline-none transition-all cursor-pointer mr-1"
+                      className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-300 focus:outline-none cursor-pointer"
                     >
                       <option value="none">Flat</option>
                       <option value="180">VR 180</option>
@@ -168,7 +139,6 @@ export function VideosPage() {
                     </select>
                   </div>
                 </div>
-              </Card>
               </div>
             ))}
           </div>
@@ -188,24 +158,15 @@ export function VideosPage() {
       )}
 
       {linkPersonImageId !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setLinkPersonImageId(null)}>
-          <div
-            className="w-full max-w-sm bg-zinc-900 border border-zinc-700 rounded-xl p-4 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setLinkPersonImageId(null)}>
+          <div className="w-full max-w-sm bg-zinc-900 border border-zinc-700 rounded-lg p-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-white">Link Video to Person</h3>
               <button onClick={() => setLinkPersonImageId(null)} className="text-zinc-500 hover:text-white transition-colors">
                 <X size={16} />
               </button>
             </div>
-            <Input
-              placeholder="Search person by name..."
-              value={personSearch}
-              onChange={(e) => setPersonSearch(e.target.value)}
-              autoFocus
-              className="mb-3"
-            />
+            <Input placeholder="Search person by name..." value={personSearch} onChange={(e) => setPersonSearch(e.target.value)} autoFocus className="mb-3" />
             {personResults && personResults.data.length > 0 && (
               <div className="space-y-1 max-h-48 overflow-y-auto">
                 {personResults.data.map((p: Person) => (
@@ -213,11 +174,10 @@ export function VideosPage() {
                     key={p.id}
                     onClick={() => linkPersonMut.mutate(p.id)}
                     disabled={linkPersonMut.isPending}
-                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 transition-all text-left text-sm"
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-left text-sm"
                   >
                     <UserPlus size={14} className="text-zinc-400 shrink-0" />
                     <span className="text-zinc-200 flex-1 truncate">{p.name}</span>
-                    {p.aliases && <span className="text-[10px] text-zinc-500 truncate max-w-[100px]">{p.aliases}</span>}
                   </button>
                 ))}
               </div>
@@ -234,11 +194,7 @@ export function VideosPage() {
         title="Delete Video"
         message="Delete this video? The file will be removed from disk. This cannot be undone."
         confirmLabel="Delete Video"
-        onConfirm={() => {
-          if (confirmDeleteId !== null) {
-            deleteMut.mutate(confirmDeleteId);
-          }
-        }}
+        onConfirm={() => { if (confirmDeleteId !== null) deleteMut.mutate(confirmDeleteId); }}
         onCancel={() => setConfirmDeleteId(null)}
       />
     </>

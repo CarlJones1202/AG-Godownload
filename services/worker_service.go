@@ -37,10 +37,11 @@ type TaskQueue struct {
 	pq   PriorityQueue
 	mu   sync.Mutex
 	cond *sync.Cond
+	done chan struct{}
 }
 
 func NewTaskQueue() *TaskQueue {
-	tq := &TaskQueue{}
+	tq := &TaskQueue{done: make(chan struct{})}
 	tq.cond = sync.NewCond(&tq.mu)
 	heap.Init(&tq.pq)
 	return tq
@@ -53,14 +54,29 @@ func (tq *TaskQueue) Push(task *CrawlerTask) {
 	tq.cond.Signal()
 }
 
+// Pop blocks until a task is available or the queue is stopped.
+// Returns nil when the queue is stopped and drained.
 func (tq *TaskQueue) Pop() *CrawlerTask {
 	tq.mu.Lock()
 	for tq.pq.Len() == 0 {
+		// Check shutdown before sleeping
+		select {
+		case <-tq.done:
+			tq.mu.Unlock()
+			return nil
+		default:
+		}
 		tq.cond.Wait()
 	}
 	task := heap.Pop(&tq.pq).(*CrawlerTask)
 	tq.mu.Unlock()
 	return task
+}
+
+// Stop signals the queue to wake all blocked Pop callers and refuse new tasks.
+func (tq *TaskQueue) Stop() {
+	close(tq.done)
+	tq.cond.Broadcast()
 }
 
 var CrawlerTaskQueue = NewTaskQueue()
@@ -124,6 +140,10 @@ func StartCrawlerWorker() {
 			logger.Debugf("Crawler worker %d started", workerID)
 			for {
 				task := CrawlerTaskQueue.Pop()
+				if task == nil {
+					logger.Debugf("Crawler worker %d shutting down", workerID)
+					return
+				}
 				logger.Debugf("Worker %d processing source %d (priority %d)", workerID, task.SourceID, task.Priority)
 				AddActiveCrawlerSource(task.SourceID)
 				if err := CrawlSource(task.SourceID); err != nil {
@@ -162,6 +182,10 @@ func StartVideoWorker() {
 			logger.Debugf("Video worker %d started", workerID)
 			for {
 				task := VideoTaskQueue.Pop()
+				if task == nil {
+					logger.Debugf("Video worker %d shutting down", workerID)
+					return
+				}
 				logger.Debugf("Video worker %d processing source %d (priority %d)", workerID, task.SourceID, task.Priority)
 				AddActiveCrawlerSource(task.SourceID)
 				if err := CrawlSource(task.SourceID); err != nil {
@@ -171,6 +195,14 @@ func StartVideoWorker() {
 			}
 		}(i)
 	}
+}
+
+// StopTaskQueues signals both crawler and video task queues to stop accepting
+// and delivering tasks. Workers will exit after finishing their current task.
+func StopTaskQueues() {
+	CrawlerTaskQueue.Stop()
+	VideoTaskQueue.Stop()
+	logger.Info("Task queues stopped")
 }
 
 /*

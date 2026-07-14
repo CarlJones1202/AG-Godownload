@@ -17,12 +17,10 @@ interface CoverGridProps {
 }
 
 export function CoverGrid({ items, onDelete }: CoverGridProps) {
-  if (items.length === 0) {
-    return null;
-  }
+  if (items.length === 0) return null;
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
       {items.map((item) => (
         <CoverGridCard key={item.id} item={item} onDelete={onDelete} />
       ))}
@@ -39,11 +37,9 @@ function CoverGridCard({ item, onDelete }: CoverGridCardProps) {
   return (
     <Link
       to={`/galleries/${item.id}`}
-      className="group relative block aspect-[3/2] rounded-lg overflow-hidden bg-zinc-900 hover:scale-[1.02] transition-transform duration-200"
+      className="group relative block aspect-[3/2] rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-zinc-700 transition-all"
     >
       {item.thumbnailPath ? (
-        // If thumbnailPath looks like an absolute URL/path (starts with '/'), use it directly.
-        // Otherwise treat it as a thumbnail filename and pass to thumbnailUrl helper.
         /^\//.test(item.thumbnailPath) ? (
           <img
             src={item.thumbnailPath}
@@ -63,14 +59,10 @@ function CoverGridCard({ item, onDelete }: CoverGridCardProps) {
         </div>
       )}
 
-      {/* Gradient overlay at bottom */}
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent pt-16 pb-3 px-3">
-        {/* Title */}
         <p className="text-sm font-medium text-white truncate mb-1">
           {item.title || `Gallery #${item.id}`}
         </p>
-
-        {/* Metadata row */}
         <div className="flex items-center justify-between">
           {item.provider && (
             <span className="text-[10px] uppercase tracking-wider text-zinc-300 bg-black/50 px-1.5 py-0.5 rounded">
@@ -83,12 +75,9 @@ function CoverGridCard({ item, onDelete }: CoverGridCardProps) {
         </div>
       </div>
 
-      {/* Hover overlay with actions */}
-      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-3">
-        <div
-          className="p-3 bg-white/10 hover:bg-white/20 rounded-full transition-colors"
-        >
-          <Eye size={20} className="text-white" />
+      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+        <div className="p-2.5 bg-white/10 hover:bg-white/20 rounded-full transition-colors">
+          <Eye size={18} className="text-white" />
         </div>
         {onDelete && (
           <button
@@ -97,9 +86,9 @@ function CoverGridCard({ item, onDelete }: CoverGridCardProps) {
               e.stopPropagation();
               onDelete(item.id);
             }}
-            className="p-3 bg-white/10 hover:bg-red-500/80 rounded-full transition-colors"
+            className="p-2.5 bg-white/10 hover:bg-red-500/80 rounded-full transition-colors"
           >
-            <Trash2 size={20} className="text-white" />
+            <Trash2 size={18} className="text-white" />
           </button>
         )}
       </div>

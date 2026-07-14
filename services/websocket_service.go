@@ -27,6 +27,7 @@ type Hub struct {
 	broadcast  chan interface{}
 	register   chan *Client
 	unregister chan *Client
+	done       chan struct{}
 	mu         sync.Mutex
 }
 
@@ -35,12 +36,16 @@ var globalHub = &Hub{
 	broadcast:  make(chan interface{}),
 	register:   make(chan *Client),
 	unregister: make(chan *Client),
+	done:       make(chan struct{}),
 }
 
 func StartWebSocketHub() {
 	go func() {
 		for {
 			select {
+			case <-globalHub.done:
+				logger.Info("WebSocket hub shutting down")
+				return
 			case client := <-globalHub.register:
 				globalHub.mu.Lock()
 				globalHub.clients[client] = true
@@ -118,4 +123,9 @@ func BroadcastStatus(status interface{}) {
 	default:
 		// Drop message if hub is busy
 	}
+}
+
+// StopWebSocketHub closes the hub so its goroutine exits.
+func StopWebSocketHub() {
+	close(globalHub.done)
 }

@@ -7,13 +7,12 @@ import {
   EmptyState,
   Input,
   Button,
-  Card,
   Textarea,
   Pagination,
   ConfirmDialog,
 } from '@/components/UI';
 import { CoverGrid } from '@/components/CoverGrid';
-import { Search, Grid3X3, Plus } from 'lucide-react';
+import { Search, Plus } from 'lucide-react';
 import { usePagination } from '@/hooks/usePagination';
 
 export function GalleriesPage() {
@@ -61,14 +60,9 @@ export function GalleriesPage() {
     },
   });
 
-  const handleDelete = (id: number) => {
-    setConfirmDeleteId(id);
-  };
-
   const coverItems = galleryList?.data.map((g) => ({
     id: g.id,
     title: g.name || null,
-    // Prefer provider thumbnail, then gallery cover image, then first image filename
     thumbnailPath: g.provider_thumbnail
       ? g.provider_thumbnail.replace(/\\/g, '/').split('/').pop()
       : g.images?.[0]?.thumbnail_path ?? g.images?.[0]?.filename,
@@ -79,17 +73,14 @@ export function GalleriesPage() {
 
   return (
     <>
-      <PageHeader title="Galleries" description="Your image gallery collection">
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant={showCreate ? 'primary' : 'secondary'} onClick={() => setShowCreate(!showCreate)}>
-            <Plus size={14} /> Create
-          </Button>
-          <Grid3X3 size={18} className="text-zinc-400" />
-        </div>
+      <PageHeader title="Galleries" description="Browse your image gallery collection">
+        <Button size="sm" variant={showCreate ? 'primary' : 'secondary'} onClick={() => setShowCreate(!showCreate)}>
+          <Plus size={14} /> Create
+        </Button>
       </PageHeader>
 
       {showCreate && (
-        <Card className="mb-4">
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 mb-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Input
               label="Name"
@@ -124,15 +115,11 @@ export function GalleriesPage() {
               {createMut.isPending ? 'Creating...' : 'Create Gallery'}
             </Button>
           </div>
-        </Card>
+        </div>
       )}
 
-      {/* Search bar */}
-      <div className="mb-6 relative">
-        <Search
-          size={16}
-          className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
-        />
+      <div className="relative mb-6">
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
         <Input
           placeholder="Search galleries..."
           value={search}
@@ -150,8 +137,7 @@ export function GalleriesPage() {
         <EmptyState message="No galleries found." />
       ) : (
         <>
-          <CoverGrid items={coverItems} onDelete={handleDelete} />
-
+          <CoverGrid items={coverItems} onDelete={(id) => setConfirmDeleteId(id)} />
           <Pagination
             page={galleryList.meta.current_page}
             totalPages={galleryList.meta.total_pages}
@@ -168,9 +154,7 @@ export function GalleriesPage() {
         message="Delete this gallery and all its images? Files will be removed from disk. This cannot be undone."
         confirmLabel="Delete Gallery"
         onConfirm={() => {
-          if (confirmDeleteId !== null) {
-            deleteMut.mutate(confirmDeleteId);
-          }
+          if (confirmDeleteId !== null) deleteMut.mutate(confirmDeleteId);
         }}
         onCancel={() => setConfirmDeleteId(null)}
       />

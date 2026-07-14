@@ -7,12 +7,6 @@ import {
   Film,
   Users,
   Tag,
-  Loader2,
-  CheckCircle2,
-  AlertCircle,
-  Clock,
-  Wifi,
-  WifiOff,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useWebSocket } from '@/hooks/useWebSocket';
@@ -36,74 +30,86 @@ export function Layout() {
   const totalActive = activeCrawls + (verificationActive ? 1 : 0) + (videosActive ? 1 : 0);
 
   return (
-    <div className="flex h-screen">
-      <aside className="w-56 shrink-0 border-r border-zinc-800 bg-zinc-900 flex flex-col">
-        <div className="p-4 border-b border-zinc-800">
-          <h1 className="text-lg font-semibold text-white tracking-tight">GoDownload</h1>
+    <div className="min-h-screen bg-zinc-950">
+      <header className="sticky top-0 z-40 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-lg">
+        <div className="flex items-center justify-between h-14 px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center gap-8">
+            <NavLink to="/dashboard" className="text-base font-semibold text-white tracking-tight shrink-0">
+              GoDownload
+            </NavLink>
+            <nav className="hidden md:flex items-center gap-1">
+              {navItems.map(({ to, label, icon: Icon }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  className={({ isActive }) =>
+                    cn(
+                      'flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-colors',
+                      isActive
+                        ? 'text-white bg-zinc-800'
+                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50',
+                    )
+                  }
+                >
+                  <Icon size={15} />
+                  {label}
+                </NavLink>
+              ))}
+            </nav>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {status && (
+              <div className="hidden sm:flex items-center gap-3 text-xs text-zinc-500">
+                <span className={cn(
+                  'flex items-center gap-1',
+                  totalActive > 0 ? 'text-blue-400' : 'text-zinc-500',
+                )}>
+                  <span className={cn(
+                    'w-1.5 h-1.5 rounded-full',
+                    totalActive > 0 ? 'bg-blue-400 animate-pulse' : 'bg-zinc-600',
+                  )} />
+                  {totalActive > 0 ? `${totalActive} active` : 'Idle'}
+                </span>
+              </div>
+            )}
+            <span className={cn(
+              'flex items-center gap-1.5 text-xs',
+              connected ? 'text-zinc-500' : 'text-zinc-600',
+            )}>
+              <span className={cn(
+                'w-1.5 h-1.5 rounded-full',
+                connected ? 'bg-emerald-500' : 'bg-zinc-600',
+              )} />
+              <span className="hidden sm:inline">{connected ? 'Connected' : 'Offline'}</span>
+            </span>
+          </div>
         </div>
-        <nav className="flex-1 p-2 space-y-0.5">
+
+        {/* Mobile nav */}
+        <nav className="md:hidden flex items-center gap-1 px-4 pb-2 overflow-x-auto scrollbar-none">
           {navItems.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
               className={({ isActive }) =>
                 cn(
-                  'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors',
+                  'flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap',
                   isActive
-                    ? 'bg-zinc-800 text-white'
+                    ? 'text-white bg-zinc-800'
                     : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50',
                 )
               }
             >
-              <Icon size={16} />
+              <Icon size={13} />
               {label}
             </NavLink>
           ))}
         </nav>
+      </header>
 
-        <div className="border-t border-zinc-800 p-3 space-y-2">
-          <div className="flex items-center gap-1.5 text-xs">
-            {connected ? (
-              <Wifi size={12} className="text-emerald-500" />
-            ) : (
-              <WifiOff size={12} className="text-zinc-500" />
-            )}
-            <span className={connected ? 'text-zinc-400' : 'text-zinc-600'}>
-              {connected ? 'Live' : 'Disconnected'}
-            </span>
-          </div>
-
-          {status && (
-            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-              <div className="flex items-center gap-1 text-zinc-400">
-                <Loader2 size={11} className={cn(
-                  totalActive > 0 ? 'text-blue-400 animate-spin' : 'text-zinc-500',
-                )} />
-                <span>{totalActive} active</span>
-              </div>
-              <div className="flex items-center gap-1 text-zinc-400">
-                <Clock size={11} className="text-zinc-500" />
-                <span>{activeCrawls} crawls</span>
-              </div>
-              <div className="flex items-center gap-1 text-zinc-400">
-                <CheckCircle2 size={11} className="text-emerald-500" />
-                <span>{status?.verification?.processed ?? 0} verified</span>
-              </div>
-              <div className="flex items-center gap-1 text-zinc-400">
-                <AlertCircle size={11} className={cn(
-                  (status?.crawler?.active_sources?.length ?? 0) > 0 ? 'text-red-400' : 'text-zinc-500',
-                )} />
-                <span>{status?.verification?.missing_found ?? 0} missing</span>
-              </div>
-            </div>
-          )}
-        </div>
-      </aside>
-
-      <main className="flex-1 overflow-y-auto">
-        <div className="max-w-7xl mx-auto p-6">
-          <Outlet />
-        </div>
+      <main className="mx-auto max-w-[1440px] px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
+        <Outlet />
       </main>
     </div>
   );

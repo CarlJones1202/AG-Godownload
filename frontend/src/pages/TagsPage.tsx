@@ -4,8 +4,6 @@ import { tagsApi } from '@/lib/api';
 import {
   PageHeader,
   Button,
-  Card,
-  Badge,
   Spinner,
   EmptyState,
   Input,
@@ -47,7 +45,7 @@ export function TagsPage() {
               placeholder="Search tags..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-48 h-9 pl-8"
+              className="w-44 h-9 pl-8"
             />
           </div>
           <div className="flex gap-2">
@@ -56,7 +54,7 @@ export function TagsPage() {
               value={newTagName}
               onChange={(e) => setNewTagName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && newTagName.trim() && createMut.mutate(newTagName.trim())}
-              className="w-40 h-9"
+              className="w-36 h-9"
             />
             <Button
               size="sm"
@@ -70,25 +68,25 @@ export function TagsPage() {
       </PageHeader>
 
       {topTags && topTags.length > 0 && !search && (
-        <Card className="mb-4">
+        <div className="mb-6">
           <div className="flex items-center gap-2 mb-3">
-            <TrendingUp size={16} className="text-zinc-400" />
-            <h3 className="text-sm font-medium text-white">Top Tags</h3>
+            <TrendingUp size={14} className="text-zinc-500" />
+            <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Top Tags</h3>
           </div>
           <div className="flex flex-wrap gap-2">
             {topTags.map((t) => (
               <button
                 key={t.id}
                 onClick={() => setSearch(t.name)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 transition-all text-xs"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 transition-all text-xs"
               >
                 <Tag size={11} className="text-zinc-400" />
                 <span className="text-zinc-200">{t.name}</span>
-                <Badge>{t.count}</Badge>
+                <span className="text-[10px] text-zinc-500 ml-0.5">({t.count})</span>
               </button>
             ))}
           </div>
-        </Card>
+        </div>
       )}
 
       {isLoading ? (
@@ -98,11 +96,11 @@ export function TagsPage() {
       ) : (
         <div className="flex flex-wrap gap-2">
           {displayTags.map((t) => (
-            <Card key={t.id} className="flex items-center gap-2 px-3 py-2">
-              <Tag size={14} className="text-zinc-400" />
+            <div key={t.id} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900/50">
+              <Tag size={13} className="text-zinc-400" />
               <span className="text-sm text-zinc-200">{t.name}</span>
-              {t.count > 0 && <Badge>{t.count}</Badge>}
-            </Card>
+              {t.count > 0 && <span className="text-[10px] text-zinc-500 ml-0.5">({t.count})</span>}
+            </div>
           ))}
         </div>
       )}

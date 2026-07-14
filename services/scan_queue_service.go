@@ -16,13 +16,17 @@ type ScanQueue struct {
 	mu            sync.Mutex
 	queue         []uint // IDs of PersonScanQueue
 	cond          *sync.Cond
+	done          chan struct{}
 	running       bool
 	providerLocks map[string]*sync.Mutex
 }
 
 var scanQueue *ScanQueue = &ScanQueue{
 	providerLocks: make(map[string]*sync.Mutex),
+	done:          make(chan struct{}),
 }
+
+var dailyCron *cron.Cron
 
 func init() {
 	scanQueue.cond = sync.NewCond(&scanQueue.mu)
@@ -127,6 +131,14 @@ func StartScanWorker() {
 		for {
 			scanQueue.mu.Lock()
 			for len(scanQueue.queue) == 0 {
+				// Check shutdown before sleeping
+				select {
+				case <-scanQueue.done:
+					scanQueue.mu.Unlock()
+					logger.Info("Scan worker shutting down")
+					return
+				default:
+				}
 				scanQueue.cond.Wait()
 			}
 			scanID := scanQueue.queue[0]
@@ -139,6 +151,15 @@ func StartScanWorker() {
 			time.Sleep(500 * time.Millisecond)
 		}
 	}()
+}
+
+// StopScanQueue signals the scan worker to exit after finishing its current job.
+func StopScanQueue() {
+	close(scanQueue.done)
+	scanQueue.cond.Broadcast()
+	if dailyCron != nil {
+		dailyCron.Stop()
+	}
 }
 
 func processScan(scanID uint) {
@@ -201,9 +222,9 @@ func processScan(scanID uint) {
 
 // StartDailyScanScheduler starts a daily cron job that scans all people with provider aliases
 func StartDailyScanScheduler() {
-	c := cron.New()
+	dailyCron = cron.New()
 	// Run daily at 3 AM
-	_, err := c.AddFunc("0 3 * * *", func() {
+	_, err := dailyCron.AddFunc("0 3 * * *", func() {
 		logger.Info("Starting daily scan of all people with provider aliases")
 		if err := AddAllPeopleToScanQueue(); err != nil {
 			logger.Errorf("Daily scan failed: %v", err)
@@ -213,7 +234,7 @@ func StartDailyScanScheduler() {
 		logger.Errorf("Failed to setup daily scan scheduler: %v", err)
 		return
 	}
-	c.Start()
+	dailyCron.Start()
 	logger.Info("Daily scan scheduler started (runs at 3 AM)")
 }
 

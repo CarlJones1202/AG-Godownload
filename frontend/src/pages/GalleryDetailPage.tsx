@@ -28,20 +28,12 @@ import {
   FileText,
   Star,
   Settings2,
-  Search,
-  Download,
-  Upload,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 function parsePhotos(photos?: string): string[] {
   if (!photos) return [];
-  try {
-    const parsed = JSON.parse(photos);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  try { const p = JSON.parse(photos); return Array.isArray(p) ? p : []; } catch { return []; }
 }
 
 export function GalleryDetailPage() {
@@ -74,12 +66,12 @@ export function GalleryDetailPage() {
     queryKey: ['images', { gallery_id: galleryId, sort_by: sortBy }],
     queryFn: () => imagesApi.list({ gallery_id: galleryId, limit: 200, sort_by: sortBy }),
   });
+
   const { data: linkedPeople } = useQuery({
     queryKey: ['gallery-people', galleryId],
     queryFn: () => galleries.people(galleryId),
   });
 
-  // Smart suggestions: find people whose name appears in this gallery's title, fetch their scans
   const { data: allPeople } = useQuery({
     queryKey: ['people-all'],
     queryFn: () => people.list({ limit: 5000 }),
@@ -91,8 +83,7 @@ export function GalleryDetailPage() {
     const galleryNameLower = gallery.name.toLowerCase();
     const linkedIds = new Set((linkedPeople ?? []).map((p: any) => p.id));
     return allPeople.data.filter((p) => {
-      if (linkedIds.has(p.id)) return true; // always include linked people
-      // Check if person's name appears in the gallery title
+      if (linkedIds.has(p.id)) return true;
       return galleryNameLower.includes(p.name.toLowerCase());
     });
   }, [gallery?.name, allPeople?.data, linkedPeople]);
@@ -105,22 +96,17 @@ export function GalleryDetailPage() {
     })),
   });
 
-  interface AutoSuggestion extends GallerySearchResult {
-    personId: number;
-    personName: string;
-  }
+  interface AutoSuggestion extends GallerySearchResult { personId: number; personName: string; }
 
   const autoSuggestions = useMemo(() => {
     if (!gallery?.name) return [] as AutoSuggestion[];
     const suggestions: AutoSuggestion[] = [];
     const seenUrls = new Set<string>();
     const galleryNameNorm = gallery.name.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
-
     for (let i = 0; i < candidatePeople.length; i++) {
       const person = candidatePeople[i];
       const query = candidateScansQueries[i];
       if (!query?.data) continue;
-
       for (const scan of query.data) {
         const missingGals = scan.results?.missing_galleries || [];
         for (const mg of missingGals) {
@@ -129,12 +115,7 @@ export function GalleryDetailPage() {
           const match = galleryNameNorm === mgNorm || galleryNameNorm.includes(mgNorm) || mgNorm.includes(galleryNameNorm);
           if (match && mg.url !== gallery.source_url && !seenUrls.has(mg.url)) {
             seenUrls.add(mg.url);
-            suggestions.push({
-              ...mg,
-              provider: scan.provider || mg.provider || '',
-              personId: person.id,
-              personName: person.name,
-            });
+            suggestions.push({ ...mg, provider: scan.provider || mg.provider || '', personId: person.id, personName: person.name });
           }
         }
       }
@@ -144,112 +125,62 @@ export function GalleryDetailPage() {
 
   const favMut = useMutation({
     mutationFn: (imgId: number) => imagesApi.toggleFavorite(imgId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['images', { gallery_id: galleryId }] });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['images', { gallery_id: galleryId }] }),
   });
 
   const deleteGalleryMut = useMutation({
     mutationFn: () => galleries.delete(galleryId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['galleries'] });
-      navigate('/galleries');
-    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['galleries'] }); navigate('/galleries'); },
   });
 
   const updateTitleMut = useMutation({
     mutationFn: (name: string) => galleries.update(galleryId, { name }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['gallery', galleryId] });
-      setIsEditingTitle(false);
-    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['gallery', galleryId] }); setIsEditingTitle(false); },
   });
-
-  const startEditTitle = () => {
-    setEditedTitle(gallery?.name || '');
-    setIsEditingTitle(true);
-  };
-
-  const saveTitle = () => {
-    updateTitleMut.mutate(editedTitle);
-  };
-
-  const cancelEditTitle = () => {
-    setIsEditingTitle(false);
-    setEditedTitle('');
-  };
 
   const deleteImageMut = useMutation({
     mutationFn: (imgId: number) => imagesApi.delete(imgId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['images', { gallery_id: galleryId }] });
-      setConfirmDeleteImageId(null);
-    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['images', { gallery_id: galleryId }] }); setConfirmDeleteImageId(null); },
   });
 
   const unlinkPersonMut = useMutation({
     mutationFn: (personId: number) => people.unlinkGallery(personId, galleryId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['gallery-people', galleryId] });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['gallery-people', galleryId] }),
   });
 
   const searchMetaMut = useMutation({
     mutationFn: () => galleries.searchMetadata(galleryId),
-    onSuccess: (data) => {
-      setSearchResults(data.results);
-    },
+    onSuccess: (data) => setSearchResults(data.results),
   });
 
   const scrapeMetaMut = useMutation({
-    mutationFn: (params: { provider: string; source_url: string }) =>
-      galleries.scrapeMetadata(galleryId, { provider: params.provider, source_url: params.source_url }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['gallery', galleryId] });
-      searchMetaMut.mutate();
-    },
+    mutationFn: (params: { provider: string; source_url: string }) => galleries.scrapeMetadata(galleryId, params),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['gallery', galleryId] }); searchMetaMut.mutate(); },
   });
 
-  // Scrape metadata AND auto-link the person to this gallery
   const scrapeAndLinkMut = useMutation({
     mutationFn: async (params: { provider: string; source_url: string; personId: number }) => {
       await galleries.scrapeMetadata(galleryId, { provider: params.provider, source_url: params.source_url });
       await people.linkGallery(params.personId, galleryId);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['gallery', galleryId] });
-      queryClient.invalidateQueries({ queryKey: ['gallery-people', galleryId] });
-      queryClient.invalidateQueries({ queryKey: ['person-scans'] });
-    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['gallery', galleryId] }); queryClient.invalidateQueries({ queryKey: ['gallery-people', galleryId] }); queryClient.invalidateQueries({ queryKey: ['person-scans'] }); },
   });
 
   const updateProviderMut = useMutation({
     mutationFn: () => galleries.updateProvider(galleryId, { provider: updateProvider, source_url: updateSourceUrl || undefined }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['gallery', galleryId] });
-      setUpdateProvider('');
-      setUpdateSourceUrl('');
-    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['gallery', galleryId] }); setUpdateProvider(''); setUpdateSourceUrl(''); },
   });
 
   const setCoverMut = useMutation({
     mutationFn: (imageId: number) => galleries.update(galleryId, { cover_image_id: imageId }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['gallery', galleryId] });
-      queryClient.invalidateQueries({ queryKey: ['galleries'] });
-      queryClient.invalidateQueries({ queryKey: ['images', { gallery_id: galleryId }] });
-    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['gallery', galleryId] }); queryClient.invalidateQueries({ queryKey: ['galleries'] }); queryClient.invalidateQueries({ queryKey: ['images', { gallery_id: galleryId }] }); },
   });
 
   const addImageMut = useMutation({
     mutationFn: () => galleries.addImage(galleryId, { url: addImageUrl }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['images', { gallery_id: galleryId }] });
-      setAddImageUrl('');
-    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['images', { gallery_id: galleryId }] }); setAddImageUrl(''); },
   });
 
-  // Build justified grid items from image list.
   const gridItems: JustifiedItem[] = useMemo(() => {
     if (!imageList) return [];
     return imageList.data.map((img) => {
@@ -258,17 +189,10 @@ export function GalleryDetailPage() {
         id: img.id,
         src: imageUrl(img.filename),
         thumbSrc: thumbnailUrl(img.filename),
-        width: img.width,
-        height: img.height,
+        width: img.width, height: img.height,
         persistentOverlay: img.is_favorite ? (
           <div className="absolute bottom-0 left-0 p-2 pointer-events-auto">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                favMut.mutate(img.id);
-              }}
-              className="p-1"
-            >
+            <button onClick={(e) => { e.stopPropagation(); favMut.mutate(img.id); }} className="p-1">
               <Heart size={16} className="fill-red-500 text-red-500" />
             </button>
           </div>
@@ -277,50 +201,24 @@ export function GalleryDetailPage() {
           <div className="flex flex-col justify-end h-full bg-gradient-to-t from-black/60 to-transparent p-2">
             <div className="flex items-center justify-between w-full">
               <div className="flex items-center gap-1">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    favMut.mutate(img.id);
-                  }}
-                  className="p-1"
-                >
-                  <Heart
-                    size={16}
-                    className={cn(
-                      img.is_favorite ? 'fill-red-500 text-red-500' : 'text-white',
-                    )}
-                  />
+                <button onClick={(e) => { e.stopPropagation(); favMut.mutate(img.id); }} className="p-1">
+                  <Heart size={16} className={cn(img.is_favorite ? 'fill-red-500 text-red-500' : 'text-white')} />
                 </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setConfirmDeleteImageId(img.id);
-                  }}
-                  className="p-1"
-                  title="Delete image"
-                >
+                <button onClick={(e) => { e.stopPropagation(); setConfirmDeleteImageId(img.id); }} className="p-1" title="Delete image">
                   <Trash2 size={16} className="text-white hover:text-red-400" />
                 </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (img.id === gallery.cover_image_id) return;
-                    setCoverMut.mutate(img.id);
-                  }}
-                  className={cn('p-1', img.id === gallery.cover_image_id ? 'opacity-100' : '')}
-                  title={img.id === gallery.cover_image_id ? 'Gallery cover' : 'Set as gallery cover'}
-                  disabled={setCoverMut.isLoading}
-                >
-                  <Star size={16} className={cn(img.id === gallery.cover_image_id ? 'text-amber-400 fill-amber-400' : 'text-white')} />
+                <button onClick={(e) => { e.stopPropagation(); if (img.id === gallery?.cover_image_id) return; setCoverMut.mutate(img.id); }}
+                  className={cn('p-1', img.id === gallery?.cover_image_id ? 'opacity-100' : '')}
+                  title={img.id === gallery?.cover_image_id ? 'Gallery cover' : 'Set as gallery cover'}
+                  disabled={setCoverMut.isPending}>
+                  <Star size={16} className={cn(img.id === gallery?.cover_image_id ? 'text-amber-400 fill-amber-400' : 'text-white')} />
                 </button>
               </div>
               <div className="flex items-center gap-1">
                 {img.is_video && <Badge variant="info">Video</Badge>}
                 {colors.length > 0 && (
                   <div className="flex h-2 rounded overflow-hidden">
-                    {colors.map((c, i) => (
-                      <div key={i} className="w-2" style={{ backgroundColor: c }} />
-                    ))}
+                    {colors.map((c, i) => <div key={i} className="w-2" style={{ backgroundColor: c }} />)}
                   </div>
                 )}
               </div>
@@ -329,515 +227,309 @@ export function GalleryDetailPage() {
         ),
       };
     });
-  }, [imageList, favMut]);
+  }, [imageList, favMut, gallery]);
 
-  // Build lightbox images (full-size URLs).
   const lightboxImages = useMemo(() => {
     if (!imageList) return [];
-    return imageList.data.map((img) => ({
-      src: imageUrl(img.filename),
-      alt: img.filename,
-    }));
+    return imageList.data.map((img) => ({ src: imageUrl(img.filename), alt: img.filename }));
   }, [imageList]);
 
   if (loadingGallery) return <Spinner />;
   if (!gallery) return <EmptyState message="Gallery not found." />;
 
-  // Determine gallery cover image source (preference: provider thumbnail -> manual cover image -> first image)
   const coverImageSrc = (() => {
-    // Provider thumbnail (stored as local path to gallery_thumbnails)
     if (gallery.provider_thumbnail) {
       const filename = gallery.provider_thumbnail.replace(/\\/g, '/').split('/').pop()!;
-      return { type: 'provider', src: thumbnailUrl(filename) };
+      return { type: 'provider' as const, src: thumbnailUrl(filename) };
     }
-
-    // Manual cover image (cover_image_id) - try to find in imageList
-    if (gallery.cover_image_id && imageList && imageList.data) {
+    if (gallery.cover_image_id && imageList?.data) {
       const img = imageList.data.find((i) => i.id === gallery.cover_image_id);
       if (img) {
-        // Use thumbnail_path if present (absolute path), otherwise construct via thumbnailUrl
-        const thumb = img.thumbnail_path && img.thumbnail_path.startsWith('/') ? img.thumbnail_path : thumbnailUrl(img.filename);
-        return { type: 'image', src: thumb };
+        const thumb = img.thumbnail_path?.startsWith('/') ? img.thumbnail_path : thumbnailUrl(img.filename);
+        return { type: 'image' as const, src: thumb };
       }
     }
-
-    // Fallback to first image in gallery
-    if (imageList && imageList.data && imageList.data.length > 0) {
+    if (imageList?.data?.length > 0) {
       const img = imageList.data[0];
-      const thumb = img.thumbnail_path && img.thumbnail_path.startsWith('/') ? img.thumbnail_path : thumbnailUrl(img.filename);
-      return { type: 'image', src: thumb };
+      const thumb = img.thumbnail_path?.startsWith('/') ? img.thumbnail_path : thumbnailUrl(img.filename);
+      return { type: 'image' as const, src: thumb };
     }
-
     return null;
   })();
 
   return (
     <>
-    <div className="relative">
-      {/* Immersive Background Layer with Masked Fade */}
-      <div className="absolute inset-x-0 -top-6 -mx-6 h-[800px] pointer-events-none select-none overflow-hidden">
-        {coverImageSrc ? (
-          <div
-            className="h-full w-full"
-            style={{
-              maskImage: 'linear-gradient(to bottom, black 0%, transparent 100%)',
-              WebkitMaskImage: 'linear-gradient(to bottom, black 0%, transparent 100%)'
-            }}
-          >
-            <img
-              src={coverImageSrc.src}
-              alt=""
-              className="h-full w-full object-cover scale-150 blur-[120px] opacity-60"
-            />
-          </div>
-        ) : (
-          <div className="h-full w-full bg-zinc-900" />
-        )}
-      </div>
+      <div className="relative">
+        {/* Immersive Background */}
+        <div className="absolute inset-x-0 -top-6 -mx-6 sm:-mx-8 h-[800px] pointer-events-none select-none overflow-hidden">
+          {coverImageSrc ? (
+            <div className="h-full w-full" style={{ maskImage: 'linear-gradient(to bottom, black 0%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 0%, transparent 100%)' }}>
+              <img src={coverImageSrc.src} alt="" className="h-full w-full object-cover scale-150 blur-[120px] opacity-60" />
+            </div>
+          ) : (
+            <div className="h-full w-full bg-zinc-900" />
+          )}
+        </div>
 
-      <div className="relative z-10">
-        <Link
-          to="/galleries"
-          className="group text-sm text-zinc-400 hover:text-white transition-colors inline-flex items-center gap-1.5 mb-8"
-        >
-          <div className="p-1.5 rounded-full bg-white/5 group-hover:bg-white/10 transition-colors">
+        <div className="relative z-10">
+          <Link to="/galleries" className="inline-flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors mb-8">
             <ArrowLeft size={16} />
-          </div>
-          Back to galleries
-        </Link>
+            Back to galleries
+          </Link>
 
-        <div className="flex flex-col md:flex-row gap-8 items-start md:items-end mb-12">
-          {/* Main Cover Image */}
-          <div className="relative group shrink-0">
-            <div className="absolute -inset-1 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl blur opacity-25 group-hover:opacity-50 transition duration-1000 group-hover:duration-200" />
-            <div className="relative w-48 h-64 md:w-56 md:h-80 rounded-xl overflow-hidden bg-zinc-800 shadow-2xl ring-1 ring-white/10">
-              {coverImageSrc ? (
-                <img
-                  src={coverImageSrc.src}
-                  alt={gallery.name}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-zinc-600">
-                  <FileText size={48} />
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="flex-1 min-w-0 animate-fade-in-up">
-            <div className="flex flex-wrap items-center gap-2 mb-3">
-              {gallery.provider && (
-                <Badge variant="info" className="px-2.5 py-1 text-[10px] uppercase tracking-wider font-bold">
-                  {gallery.provider}
-                </Badge>
-              )}
-              {imageList && (
-                <Badge variant="default" className="bg-white/5 text-zinc-300 border border-white/10 px-2.5 py-1">
-                  {imageList.meta.total_items} Images
-                </Badge>
-              )}
-            </div>
-
-            {isEditingTitle ? (
-              <div className="flex items-center gap-2 mb-4 max-w-xl">
-                <Input
-                  value={editedTitle}
-                  onChange={(e) => setEditedTitle(e.target.value)}
-                  className="text-xl md:text-2xl font-bold bg-white/5 border-white/10 h-12"
-                  autoFocus
-                  onKeyDown={(e) => e.key === 'Enter' && saveTitle()}
-                />
-                <Button size="md" onClick={saveTitle} disabled={updateTitleMut.isPending} className="h-12 w-12 shrink-0">
-                  <Save size={20} />
-                </Button>
-                <Button size="md" variant="ghost" onClick={cancelEditTitle} className="h-12 w-12 shrink-0">
-                  <X size={20} />
-                </Button>
-              </div>
-            ) : (
-              <h1 className="text-3xl md:text-5xl font-bold text-white mb-4 tracking-tight drop-shadow-lg break-words">
-                {gallery.name || `Gallery #${gallery.id}`}
-              </h1>
-            )}
- 
-            <div className="flex flex-wrap items-center gap-3">
-              {!isEditingTitle && (
-                <button
-                  onClick={startEditTitle}
-                  className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-all"
-                  title="Edit title"
-                >
-                  <Edit2 size={18} />
-                </button>
-              )}
-              <div className="h-4 w-[1px] bg-white/10 mx-1" />
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 border border-white/5 text-xs text-zinc-400">
-                <Calendar size={14} />
-                <span>Added {formatDate(gallery.created_at)}</span>
-              </div>
-              {gallery.release_date && (
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 border border-white/5 text-xs text-zinc-400">
-                  <Star size={14} className="text-amber-400" />
-                  <span>Released {gallery.release_date}</span>
-                </div>
-              )}
-            </div>
-          </div>
- 
-          {/* Floating Action Bar */}
-          <div className="flex items-center gap-2 glass p-1.5 rounded-xl shadow-xl ring-1 ring-white/10">
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-              className="bg-white/5 border border-transparent hover:border-white/10 rounded-lg px-3 py-1.5 text-xs text-zinc-200 focus:outline-none transition-all cursor-pointer"
-            >
-              <option value="newest">Newest first</option>
-              <option value="oldest">Oldest first</option>
-              <option value="largest">Largest first</option>
-              <option value="smallest">Smallest first</option>
-            </select>
-            <div className="w-[1px] h-6 bg-white/10 mx-1" />
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => setConfirmDeleteGallery(true)}
-              className="bg-red-500/10 text-red-400 border-transparent hover:bg-red-500/20"
-            >
-              <Trash2 size={16} />
-            </Button>
-          </div>
-        </div>
-      </div>
- 
-    {/* Info Cards Grid */}
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 px-6 mb-12">
-        {/* Source Card */}
-        <div className="glass-card p-5 rounded-2xl flex flex-col gap-3">
-          <div className="flex items-center gap-2 text-zinc-400 text-xs font-bold uppercase tracking-wider">
-            <ExternalLink size={14} /> Source Information
-          </div>
-          {gallery.source_url ? (
-            <div className="space-y-2">
-              <a
-                href={gallery.source_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group flex items-center gap-2 p-2.5 rounded-xl bg-white/5 border border-white/5 hover:bg-blue-500/10 hover:border-blue-500/30 transition-all"
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-zinc-500 mb-0.5">Gallery URL</p>
-                  <p className="text-sm text-blue-400 truncate">{gallery.source_url}</p>
-                </div>
-                <ExternalLink size={14} className="text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </a>
-            </div>
-          ) : (
-            <p className="text-sm text-zinc-500 italic py-4">No source URL available.</p>
-          )}
-        </div>
-
-        {/* Metadata Card */}
-        <div className="md:col-span-2 glass-card p-5 rounded-2xl flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-zinc-400 text-xs font-bold uppercase tracking-wider">
-              <FileText size={14} /> Description & Details
-            </div>
-            {gallery.rating != null && gallery.rating > 0 && (
-              <div className="flex items-center gap-1 bg-amber-400/10 text-amber-400 px-2 py-0.5 rounded text-xs font-bold ring-1 ring-amber-400/20">
-                <Star size={12} className="fill-amber-400" />
-                {gallery.rating.toFixed(1)}
-              </div>
-            )}
-          </div>
-          {gallery.description ? (
-            <div className="relative">
-              <p className="text-sm text-zinc-300 leading-relaxed max-h-[120px] overflow-y-auto pr-2 custom-scrollbar">
-                {gallery.description}
-              </p>
-            </div>
-          ) : (
-            <div className="flex-1 flex items-center justify-center border border-dashed border-white/5 rounded-xl py-6">
-              <p className="text-sm text-zinc-500">No description provided for this gallery.</p>
-            </div>
-          )}
-        </div>
-
-        {/* People Card */}
-        <div className="md:col-span-3 glass-card p-5 rounded-2xl">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2 text-zinc-400 text-xs font-bold uppercase tracking-wider">
-              <Heart size={14} /> Linked People
-            </div>
-            <span className="text-[10px] bg-white/5 text-zinc-500 px-2 py-0.5 rounded-full border border-white/5">
-              {linkedPeople?.length ?? 0} total
-            </span>
-          </div>
-          {!linkedPeople || linkedPeople.length === 0 ? (
-            <div className="py-4 border border-dashed border-white/5 rounded-xl text-center">
-              <p className="text-sm text-zinc-500 italic">No performers linked to this gallery.</p>
-            </div>
-          ) : (
-            <div className="flex flex-wrap gap-3">
-              {linkedPeople.map((person) => {
-                const photo = parsePhotos(person.photos)[0];
-                return (
-                  <div
-                    key={person.id}
-                    className="group relative flex items-center gap-3 rounded-full bg-white/5 border border-white/5 pr-4 pl-1 py-1 hover:bg-white/10 hover:border-white/20 transition-all duration-300 cursor-pointer"
-                    onClick={() => setModalPersonId(person.id)}
-                  >
-                    <div className="relative h-8 w-8 rounded-full overflow-hidden ring-1 ring-white/10 group-hover:ring-blue-500/50 transition-all">
-                      {photo ? (
-                        <img src={photo} alt={person.name} className="h-full w-full object-cover group-hover:scale-110 transition-transform duration-500" />
-                      ) : (
-                        <div className="h-full w-full bg-zinc-800 flex items-center justify-center text-[10px] text-zinc-500 font-bold uppercase">
-                          {person.name.charAt(0)}
-                        </div>
-                      )}
-                    </div>
-                    <span className="text-sm font-medium text-zinc-300 group-hover:text-white transition-colors">
-                      {person.name}
-                    </span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        unlinkPersonMut.mutate(person.id);
-                      }}
-                      disabled={unlinkPersonMut.isPending}
-                      className="ml-1 p-1 rounded-full text-zinc-500 hover:text-red-400 hover:bg-red-400/10 opacity-0 group-hover:opacity-100 transition-all"
-                      title={`Unlink ${person.name}`}
-                    >
-                      <X size={12} />
-                    </button>
+          <div className="flex flex-col md:flex-row gap-6 md:items-end mb-10">
+            <div className="relative shrink-0">
+              <div className="relative w-36 h-48 md:w-44 md:h-60 rounded-lg overflow-hidden bg-zinc-800 ring-1 ring-white/10 shadow-lg">
+                {coverImageSrc ? (
+                  <img src={coverImageSrc.src} alt={gallery.name} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-zinc-600">
+                    <FileText size={36} />
                   </div>
-                );
-              })}
+                )}
+              </div>
             </div>
-          )}
+
+            <div className="flex-1 min-w-0">
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                {gallery.provider && (
+                  <span className="text-[10px] uppercase tracking-wider font-semibold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded">{gallery.provider}</span>
+                )}
+                {imageList && (
+                  <span className="text-xs text-zinc-400">{imageList.meta.total_items} images</span>
+                )}
+              </div>
+
+              {isEditingTitle ? (
+                <div className="flex items-center gap-2 mb-3 max-w-xl">
+                  <Input value={editedTitle} onChange={(e) => setEditedTitle(e.target.value)} className="text-lg font-bold bg-white/5 border-white/10 h-10" autoFocus onKeyDown={(e) => e.key === 'Enter' && updateTitleMut.mutate(editedTitle)} />
+                  <Button size="sm" onClick={() => updateTitleMut.mutate(editedTitle)} disabled={updateTitleMut.isPending}><Save size={16} /></Button>
+                  <Button size="sm" variant="ghost" onClick={() => setIsEditingTitle(false)}><X size={16} /></Button>
+                </div>
+              ) : (
+                <h1 className="text-2xl md:text-4xl font-bold text-white mb-2 tracking-tight break-words">
+                  {gallery.name || `Gallery #${gallery.id}`}
+                </h1>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                {!isEditingTitle && (
+                  <button onClick={() => { setEditedTitle(gallery.name || ''); setIsEditingTitle(true); }} className="p-1.5 rounded bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-all" title="Edit title">
+                    <Edit2 size={14} />
+                  </button>
+                )}
+                <span className="flex items-center gap-1"><Calendar size={12} /> Added {formatDate(gallery.created_at)}</span>
+                {gallery.release_date && <span className="flex items-center gap-1"><Star size={12} className="text-amber-400" /> Released {gallery.release_date}</span>}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <select value={sortBy} onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-200 focus:outline-none cursor-pointer">
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
+                <option value="largest">Largest</option>
+                <option value="smallest">Smallest</option>
+              </select>
+              <Button variant="ghost" size="sm" onClick={() => setShowTools(!showTools)}>
+                <Settings2 size={14} /> Tools
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteGallery(true)} className="text-zinc-500 hover:text-red-400">
+                <Trash2 size={14} />
+              </Button>
+            </div>
+          </div>
         </div>
 
-      </div>
+        {/* Info Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4">
+            <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Source</h3>
+            {gallery.source_url ? (
+              <a href={gallery.source_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 p-2 rounded-lg bg-zinc-800/50 hover:bg-blue-500/10 hover:border-blue-500/30 border border-zinc-700 transition-all group">
+                <span className="flex-1 text-sm text-blue-400 truncate">{gallery.source_url}</span>
+                <ExternalLink size={12} className="text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+              </a>
+            ) : (
+              <p className="text-sm text-zinc-500 italic">No source URL.</p>
+            )}
+          </div>
 
-      {/* Gallery Management Tools */}
-      <div className="flex items-center justify-end mb-4 px-6">
-        <Button variant="secondary" size="sm" onClick={() => setShowTools((v) => !v)}>
-          <Settings2 size={14} /> {showTools ? 'Hide Tools' : 'Tools'}
-        </Button>
-      </div>
+          <div className="md:col-span-2 rounded-lg border border-zinc-800 bg-zinc-900/30 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Description</h3>
+              {gallery.rating != null && gallery.rating > 0 && (
+                <span className="flex items-center gap-1 text-xs text-amber-400"><Star size={12} className="fill-amber-400" />{gallery.rating.toFixed(1)}</span>
+              )}
+            </div>
+            {gallery.description ? (
+              <p className="text-sm text-zinc-300 leading-relaxed">{gallery.description}</p>
+            ) : (
+              <p className="text-sm text-zinc-500 italic">No description provided.</p>
+            )}
+          </div>
 
-      {showTools && (
-        <div className="mx-6 mb-8 rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 space-y-6">
-          <h3 className="text-lg font-medium text-white flex items-center gap-2 border-b border-zinc-800 pb-4">
-            <Settings2 size={18} className="text-blue-400" />
-            Gallery Management Tools
-          </h3>
+          <div className="md:col-span-3 rounded-lg border border-zinc-800 bg-zinc-900/30 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Linked People</h3>
+              <span className="text-[10px] text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded">{linkedPeople?.length ?? 0}</span>
+            </div>
+            {!linkedPeople || linkedPeople.length === 0 ? (
+              <p className="text-sm text-zinc-500 italic">No performers linked to this gallery.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {linkedPeople.map((person) => {
+                  const photo = parsePhotos(person.photos)[0];
+                  return (
+                    <div key={person.id} className="flex items-center gap-2 rounded-full bg-zinc-800/50 border border-zinc-700 pr-3 pl-1 py-1 hover:bg-zinc-700/50 transition-all cursor-pointer"
+                      onClick={() => setModalPersonId(person.id)}>
+                      <div className="w-7 h-7 rounded-full overflow-hidden bg-zinc-700">
+                        {photo ? <img src={photo} alt={person.name} className="w-full h-full object-cover" />
+                        : <div className="w-full h-full flex items-center justify-center text-[9px] text-zinc-500 font-bold">{person.name.charAt(0)}</div>}
+                      </div>
+                      <span className="text-xs text-zinc-300">{person.name}</span>
+                      <button onClick={(e) => { e.stopPropagation(); unlinkPersonMut.mutate(person.id); }}
+                        className="p-0.5 rounded-full text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all" title="Unlink">
+                        <X size={10} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Search & Missing Galleries */}
-            <div className="md:col-span-2 bg-zinc-950/40 p-4 rounded-lg border border-zinc-800/80 space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
-                  <Search size={14} /> Search & Missing Galleries
-                </h4>
-                <div className="flex items-center gap-2">
-                  {searchResults && searchResults.length > 0 && (
-                    <span className="text-[10px] bg-white/5 text-zinc-500 px-2 py-0.5 rounded-full border border-white/5">
-                      {searchResults.filter(r => !r.id).length} missing / {searchResults.length} total
-                    </span>
-                  )}
+        {/* Tools section */}
+        {showTools && (
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4 mb-6 space-y-4">
+            <h3 className="text-sm font-medium text-zinc-200">Gallery Management Tools</h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Search & Missing */}
+              <div className="md:col-span-2 bg-zinc-900/40 p-3 rounded-lg border border-zinc-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-semibold text-zinc-400">Search & Missing Galleries</h4>
                   <Button size="sm" onClick={() => searchMetaMut.mutate()} disabled={searchMetaMut.isPending}>
                     {searchMetaMut.isPending ? 'Searching...' : 'Search'}
                   </Button>
                 </div>
-              </div>
-              <p className="text-xs text-zinc-500">Search provider for matching galleries based on name and linked people.</p>
-              {searchMetaMut.isPending && (
-                <div className="text-xs text-zinc-400 animate-pulse py-4 text-center">Searching providers...</div>
-              )}
-              {!searchMetaMut.isPending && !searchResults && autoSuggestions.length > 0 && (
-                <div className="space-y-2 pt-2 border-t border-white/5">
-                  <p className="text-[10px] uppercase font-bold text-amber-400">Suggested Scrapes (Found in performer's missing list):</p>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                    {autoSuggestions.map((r, idx) => (
-                      <div key={idx} className="group relative flex flex-col rounded-lg overflow-hidden border border-zinc-800 bg-zinc-900/80 hover:border-zinc-700 transition-all">
-                        <div className="aspect-[2/3] bg-zinc-800 overflow-hidden">
-                          {r.thumbnail ? (
-                            <img src={r.thumbnail} alt={r.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-zinc-600 text-[9px]">No thumb</div>
-                          )}
-                        </div>
-                        <div className="p-1.5 space-y-0.5 flex-1 flex flex-col">
-                          <p className="text-[9px] text-zinc-200 font-medium leading-tight line-clamp-2">{r.title}</p>
-                          <div className="flex items-center gap-1 flex-wrap">
-                            <Badge variant="info" className="text-[7px]">{r.provider}</Badge>
-                            {r.release_date && <span className="text-[7px] text-zinc-500">{r.release_date}</span>}
+                {!searchMetaMut.isPending && !searchResults && autoSuggestions.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-[10px] uppercase font-bold text-amber-400">Suggested scrapes:</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                      {autoSuggestions.map((r, idx) => (
+                        <div key={idx} className="relative flex flex-col rounded-lg overflow-hidden border border-zinc-800 bg-zinc-900/80 hover:border-zinc-700 transition-all group">
+                          <div className="aspect-[2/3] bg-zinc-800 overflow-hidden">
+                            {r.thumbnail ? <img src={r.thumbnail} alt={r.title} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                            : <div className="w-full h-full flex items-center justify-center text-zinc-600 text-[9px]">No thumb</div>}
                           </div>
-                          <div className="mt-auto pt-0.5">
-                            <Badge variant="warning" className="text-[7px]">Suggested</Badge>
+                          <div className="p-1.5 space-y-0.5">
+                            <p className="text-[9px] text-zinc-200 font-medium leading-tight line-clamp-2">{r.title}</p>
+                            <span className="text-[8px] text-zinc-500">{r.provider}</span>
                           </div>
-                        </div>
-                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
-                          <Button size="sm" className="h-6 px-1.5 text-[9px]" disabled={scrapeMetaMut.isPending} onClick={() => scrapeMetaMut.mutate({ provider: r.provider, source_url: r.url })}>
-                            {scrapeMetaMut.isPending ? '...' : 'Scrape'}
-                          </Button>
-                          <a href={`https://www.vipergirls.to/search.php?query="${encodeURIComponent(r.title)}"&titleonly=1&search_in=topics&forumchoice%5B%5D=235&childforums=1`} target="_blank" rel="noopener noreferrer" className="h-6 px-1.5 inline-flex items-center justify-center text-[9px] font-medium rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 border border-blue-500/30 transition-all">
-                            VG
-                          </a>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {!searchMetaMut.isPending && searchResults && searchResults.length === 0 && (
-                <p className="text-xs text-zinc-500 italic py-4 text-center">No matching galleries found.</p>
-              )}
-              {!searchMetaMut.isPending && searchResults && searchResults.length > 0 && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                  {searchResults.map((r, idx) => {
-                    const isLinked = !!r.id;
-                    return (
-                      <div key={idx} className={`group relative flex flex-col rounded-lg overflow-hidden border transition-all ${isLinked ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-zinc-800 bg-zinc-900/80 hover:border-zinc-700'}`}>
-                        <div className="aspect-[2/3] bg-zinc-800 overflow-hidden">
-                          {r.thumbnail ? (
-                            <img src={r.thumbnail} alt={r.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-zinc-600 text-[9px]">No thumb</div>
-                          )}
-                        </div>
-                        <div className="p-1.5 space-y-0.5 flex-1 flex flex-col">
-                          <p className="text-[9px] text-zinc-200 font-medium leading-tight line-clamp-2">{r.title}</p>
-                          <div className="flex items-center gap-1 flex-wrap">
-                            <Badge variant={isLinked ? 'success' : 'info'} className="text-[7px]">{r.provider}</Badge>
-                            {r.release_date && <span className="text-[7px] text-zinc-500">{r.release_date}</span>}
-                          </div>
-                          <div className="mt-auto pt-0.5">
-                            {isLinked ? (
-                              <Badge variant="success" className="text-[7px]">Linked</Badge>
-                            ) : (
-                              <Badge variant="warning" className="text-[7px]">Missing</Badge>
-                            )}
-                          </div>
-                        </div>
-                        {!isLinked && (
                           <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
-                            <Button size="sm" className="h-6 px-1.5 text-[9px]" disabled={scrapeMetaMut.isPending} onClick={() => scrapeMetaMut.mutate({ provider: r.provider, source_url: r.url })}>
+                            <Button size="sm" className="h-6 px-1.5 text-[9px]" disabled={scrapeMetaMut.isPending}
+                              onClick={() => scrapeAndLinkMut.mutate({ provider: r.provider, source_url: r.url, personId: r.personId })}>
                               {scrapeMetaMut.isPending ? '...' : 'Scrape'}
                             </Button>
-                            <a href={`https://www.vipergirls.to/search.php?query="${encodeURIComponent(r.title)}"&titleonly=1&search_in=topics&forumchoice%5B%5D=235&childforums=1`} target="_blank" rel="noopener noreferrer" className="h-6 px-1.5 inline-flex items-center justify-center text-[9px] font-medium rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 border border-blue-500/30 transition-all">
-                              VG
-                            </a>
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Scrape Metadata */}
-            <div className="bg-zinc-950/40 p-4 rounded-lg border border-zinc-800/80 space-y-3">
-              <h4 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
-                <Download size={14} /> Scrape Metadata
-              </h4>
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <Input placeholder="Provider (e.g. MetArt)" value={scrapeProvider} onChange={(e) => setScrapeProvider(e.target.value)} className="h-9 text-xs" />
-                </div>
-                <div className="flex-[2]">
-                  <Input placeholder="Gallery URL" value={scrapeUrl} onChange={(e) => setScrapeUrl(e.target.value)} className="h-9 text-xs" />
-                </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {searchResults && searchResults.length > 0 && (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                    {searchResults.map((r, idx) => {
+                      const isLinked = !!r.id;
+                      return (
+                        <div key={idx} className={`relative flex flex-col rounded-lg overflow-hidden border transition-all ${isLinked ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-zinc-800 bg-zinc-900/80 hover:border-zinc-700'} group`}>
+                          <div className="aspect-[2/3] bg-zinc-800 overflow-hidden">
+                            {r.thumbnail ? <img src={r.thumbnail} alt={r.title} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                            : <div className="w-full h-full flex items-center justify-center text-zinc-600 text-[9px]">No thumb</div>}
+                          </div>
+                          <div className="p-1.5 space-y-0.5">
+                            <p className="text-[9px] text-zinc-200 font-medium leading-tight line-clamp-2">{r.title}</p>
+                            <span className={`text-[8px] ${isLinked ? 'text-emerald-400' : 'text-amber-400'}`}>{isLinked ? 'Linked' : 'Missing'}</span>
+                          </div>
+                          {!isLinked && (
+                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                              <Button size="sm" className="h-6 px-1.5 text-[9px]" disabled={scrapeMetaMut.isPending}
+                                onClick={() => scrapeMetaMut.mutate({ provider: r.provider, source_url: r.url })}>
+                                {scrapeMetaMut.isPending ? '...' : 'Scrape'}
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {searchResults && searchResults.length === 0 && (
+                  <p className="text-xs text-zinc-500 italic">No matching galleries found.</p>
+                )}
               </div>
-              <Button size="sm" onClick={() => scrapeMetaMut.mutate({ provider: scrapeProvider, source_url: scrapeUrl })} disabled={!scrapeProvider || !scrapeUrl || scrapeMetaMut.isPending}>
-                {scrapeMetaMut.isPending ? 'Scraping...' : 'Scrape'}
-              </Button>
-            </div>
 
-            {/* Update Provider */}
-            <div className="bg-zinc-950/40 p-4 rounded-lg border border-zinc-800/80 space-y-3">
-              <h4 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
-                <Upload size={14} /> Update Provider
-              </h4>
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <Input placeholder="Provider name" value={updateProvider} onChange={(e) => setUpdateProvider(e.target.value)} className="h-9 text-xs" />
+              <div className="bg-zinc-900/40 p-3 rounded-lg border border-zinc-800 space-y-2">
+                <h4 className="text-xs font-semibold text-zinc-400">Scrape Metadata</h4>
+                <div className="flex gap-2">
+                  <Input placeholder="Provider" value={scrapeProvider} onChange={(e) => setScrapeProvider(e.target.value)} className="h-8 text-xs" />
+                  <Input placeholder="Gallery URL" value={scrapeUrl} onChange={(e) => setScrapeUrl(e.target.value)} className="h-8 text-xs flex-[2]" />
                 </div>
-                <div className="flex-[2]">
-                  <Input placeholder="Source URL (optional)" value={updateSourceUrl} onChange={(e) => setUpdateSourceUrl(e.target.value)} className="h-9 text-xs" />
-                </div>
+                <Button size="sm" onClick={() => scrapeMetaMut.mutate({ provider: scrapeProvider, source_url: scrapeUrl })} disabled={!scrapeProvider || !scrapeUrl || scrapeMetaMut.isPending}>
+                  {scrapeMetaMut.isPending ? 'Scraping...' : 'Scrape'}
+                </Button>
               </div>
-              <Button size="sm" onClick={() => updateProviderMut.mutate()} disabled={!updateProvider || updateProviderMut.isPending}>
-                {updateProviderMut.isPending ? 'Updating...' : 'Update'}
-              </Button>
-            </div>
 
-            {/* Add Image by URL */}
-            <div className="bg-zinc-950/40 p-4 rounded-lg border border-zinc-800/80 space-y-3">
-              <h4 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
-                <Download size={14} /> Add Image from URL
-              </h4>
-              <Input placeholder="Image URL to download" value={addImageUrl} onChange={(e) => setAddImageUrl(e.target.value)} className="h-9 text-xs" />
-              <Button size="sm" onClick={() => addImageMut.mutate()} disabled={!addImageUrl || addImageMut.isPending}>
-                {addImageMut.isPending ? 'Downloading...' : 'Download & Add'}
-              </Button>
+              <div className="bg-zinc-900/40 p-3 rounded-lg border border-zinc-800 space-y-2">
+                <h4 className="text-xs font-semibold text-zinc-400">Update Provider</h4>
+                <div className="flex gap-2">
+                  <Input placeholder="Provider name" value={updateProvider} onChange={(e) => setUpdateProvider(e.target.value)} className="h-8 text-xs" />
+                  <Input placeholder="Source URL (optional)" value={updateSourceUrl} onChange={(e) => setUpdateSourceUrl(e.target.value)} className="h-8 text-xs flex-[2]" />
+                </div>
+                <Button size="sm" onClick={() => updateProviderMut.mutate()} disabled={!updateProvider || updateProviderMut.isPending}>
+                  {updateProviderMut.isPending ? 'Updating...' : 'Update'}
+                </Button>
+              </div>
+
+              <div className="bg-zinc-900/40 p-3 rounded-lg border border-zinc-800 space-y-2">
+                <h4 className="text-xs font-semibold text-zinc-400">Add Image</h4>
+                <Input placeholder="Image URL to download" value={addImageUrl} onChange={(e) => setAddImageUrl(e.target.value)} className="h-8 text-xs" />
+                <Button size="sm" onClick={() => addImageMut.mutate()} disabled={!addImageUrl || addImageMut.isPending}>
+                  {addImageMut.isPending ? 'Downloading...' : 'Download & Add'}
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-
-      <section className="p-1">
-        {loadingImages ? (
-          <Spinner />
-        ) : !imageList || imageList.data.length === 0 ? (
-          <EmptyState message="No images in this gallery." />
-        ) : (
-          <JustifiedGrid
-            items={gridItems}
-            rowHeight={230}
-            gap={4}
-            onItemClick={(index) => setLightboxIndex(index)}
-          />
         )}
-      </section>
 
-      {/* Lightbox */}
+        {/* Image Grid */}
+        <section>
+          {loadingImages ? (
+            <Spinner />
+          ) : !imageList || imageList.data.length === 0 ? (
+            <EmptyState message="No images in this gallery." />
+          ) : (
+            <JustifiedGrid items={gridItems} rowHeight={230} gap={4} onItemClick={(index) => setLightboxIndex(index)} />
+          )}
+        </section>
+      </div>
+
       {lightboxIndex !== null && (
-        <Lightbox
-          images={lightboxImages}
-          index={lightboxIndex}
-          onClose={() => setLightboxIndex(null)}
-          onIndexChange={setLightboxIndex}
-          imageData={imageList!.data}
-          onToggleFavorite={(id) => favMut.mutate(id)}
-        />
+        <Lightbox images={lightboxImages} index={lightboxIndex} onClose={() => setLightboxIndex(null)}
+          onIndexChange={setLightboxIndex} imageData={imageList!.data} onToggleFavorite={(id) => favMut.mutate(id)} />
       )}
 
-      {/* Confirm dialogs */}
-      <ConfirmDialog
-        open={confirmDeleteGallery}
-        title="Delete Gallery"
+      <ConfirmDialog open={confirmDeleteGallery} title="Delete Gallery"
         message="Delete this gallery and all its images? Files will be removed from disk. This cannot be undone."
-        confirmLabel="Delete Gallery"
-        onConfirm={() => deleteGalleryMut.mutate()}
-        onCancel={() => setConfirmDeleteGallery(false)}
-      />
+        confirmLabel="Delete Gallery" onConfirm={() => deleteGalleryMut.mutate()} onCancel={() => setConfirmDeleteGallery(false)} />
 
-      <ConfirmDialog
-        open={confirmDeleteImageId !== null}
-        title="Delete Image"
+      <ConfirmDialog open={confirmDeleteImageId !== null} title="Delete Image"
         message="Delete this image? The file will be removed from disk. This cannot be undone."
         confirmLabel="Delete Image"
-        onConfirm={() => {
-          if (confirmDeleteImageId !== null) {
-            deleteImageMut.mutate(confirmDeleteImageId);
-          }
-        }}
-        onCancel={() => setConfirmDeleteImageId(null)}
-      />
-      </div>
+        onConfirm={() => { if (confirmDeleteImageId !== null) deleteImageMut.mutate(confirmDeleteImageId); }}
+        onCancel={() => setConfirmDeleteImageId(null)} />
 
       {modalPersonId !== null && (
         <PersonModal personId={modalPersonId} onClose={() => setModalPersonId(null)} />
