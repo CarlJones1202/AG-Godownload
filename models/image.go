@@ -34,4 +34,5 @@ type Image struct {
 	People          []*Person      `json:"people,omitempty" gorm:"many2many:person_images;"`
 	Tags            []*Tag         `json:"tags,omitempty" gorm:"many2many:image_tags;"`
 	VRMode          string         `json:"vr_mode" gorm:"default:'';index"` // "180" or "360" for persistent VR view
+	FileExists      bool           `json:"file_exists" gorm:"default:false;index"`
 }

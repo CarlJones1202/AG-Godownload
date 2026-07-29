@@ -308,6 +308,16 @@ func GetGallery(c *gin.Context) {
 	c.JSON(http.StatusOK, gallery)
 }
 
+func GetGalleryPeople(c *gin.Context) {
+	id := c.Param("id")
+	var gallery models.Gallery
+	if err := database.DB.Preload("People").First(&gallery, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Gallery not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gallery.People)
+}
+
 // DeleteGallery removes a gallery and optionally its images
 func DeleteGallery(c *gin.Context) {
 	idStr := c.Param("id")

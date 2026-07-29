@@ -80,6 +80,11 @@ func main() {
 		} else {
 			logger.Info("Video verification started successfully")
 		}
+
+		logger.Info("Syncing file_exists column...")
+		if err := services.SyncFileExists(); err != nil {
+			logger.Error("File exists sync failed:", err)
+		}
 	}()
 
 	// Start video worker
@@ -121,6 +126,7 @@ func main() {
 	r.POST("/galleries/:id/images", handlers.AddImageToGallery)
 	r.DELETE("/galleries/:id", handlers.DeleteGallery)
 	r.PUT("/galleries/:id", handlers.UpdateGallery)
+	r.GET("/galleries/:id/people", handlers.GetGalleryPeople)
 	r.GET("/galleries/:id/search-metadata", handlers.SearchGalleryMetadata)
 	r.POST("/galleries/:id/scrape-metadata", handlers.ScrapeGalleryMetadata)
 	r.POST("/galleries/:id/update-provider", handlers.UpdateGalleryProvider)
@@ -164,6 +170,7 @@ func main() {
 
 	// Admin: all missing galleries across all people
 	r.GET("/admin/missing-galleries", handlers.GetAllMissingGalleries)
+	r.POST("/admin/recheck-missing-galleries", handlers.RecheckAllPeople)
 
 	// Old StashDB routes (kept for backward compatibility)
 	r.GET("/stashdb/search", handlers.SearchStashDB)

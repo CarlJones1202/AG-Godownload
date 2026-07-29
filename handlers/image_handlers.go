@@ -97,6 +97,7 @@ func AddImageToGallery(c *gin.Context) {
 		DownloadURL:    req.URL,
 		DominantColors: result.DominantColors,
 		Galleries:      []*models.Gallery{&gallery},
+		FileExists:     true,
 	}
 	if err := database.DB.Create(&image).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save image record"})
@@ -175,7 +176,11 @@ func GetImages(c *gin.Context) {
 	if existsFilter == "" {
 		existsFilter = c.Query("on_disk")
 	}
-	applyExistsFilter := existsFilter != ""
+	if existsFilter == "true" {
+		query = query.Where("file_exists = ?", true)
+	} else if existsFilter == "false" {
+		query = query.Where("file_exists = ?", false)
+	}
 
 	// Count total matching images using a separate query chain
 	countQuery := database.DB.Model(&models.Image{})
@@ -198,6 +203,11 @@ func GetImages(c *gin.Context) {
 	}
 	if c.Query("favorites") == "true" || c.Query("is_favorite") == "true" {
 		countQuery = countQuery.Where("is_favorite = ?", true)
+	}
+	if existsFilter == "true" {
+		countQuery = countQuery.Where("file_exists = ?", true)
+	} else if existsFilter == "false" {
+		countQuery = countQuery.Where("file_exists = ?", false)
 	}
 	countQuery.Count(&total)
 
@@ -232,43 +242,14 @@ func GetImages(c *gin.Context) {
 		query = query.Order("created_at DESC, id DESC")
 	}
 
-	// Fetch images with pagination
-	// If exists filter is applied, we'll fetch extra and filter client-side
-	fetchLimit := limit
-	if applyExistsFilter {
-		// Fetch more to account for filtered out images
-		fetchLimit = limit * 3
-	}
-
 	var images []models.Image
 	// Preload Galleries.Source to get source name for images
 	// Preload Source to get source name for videos (direct association)
 	// Preload People for videos (direct association)
 	// Preload Tags for all images
-	if err := query.Preload("Galleries.Source").Preload("Source").Preload("People").Preload("Tags").Limit(fetchLimit).Offset(offset).Find(&images).Error; err != nil {
+	if err := query.Preload("Galleries.Source").Preload("Source").Preload("People").Preload("Tags").Limit(limit).Offset(offset).Find(&images).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch images"})
 		return
-	}
-
-	// Apply exists filter if enabled - check filesystem only for fetched images
-	if applyExistsFilter {
-		filteredImages := make([]models.Image, 0, len(images))
-		for _, img := range images {
-			fullPath := filepath.Join(services.UploadsDir, img.Filename)
-			if _, err := os.Stat(fullPath); err == nil {
-				if existsFilter == "true" {
-					filteredImages = append(filteredImages, img)
-				}
-			} else {
-				if existsFilter == "false" {
-					filteredImages = append(filteredImages, img)
-				}
-			}
-			if len(filteredImages) >= limit {
-				break
-			}
-		}
-		images = filteredImages
 	}
 
 	// Populate virtual paths

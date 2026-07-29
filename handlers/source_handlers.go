@@ -425,6 +425,10 @@ func autoLinkPeopleToGallery(sourceName string, galleryID uint) []uint {
 			// Use GORM's Association to append to existing galleries
 			database.DB.Model(person).Association("Galleries").Append(&gallery)
 			linkedPersonIDs = append(linkedPersonIDs, person.ID)
+			// Auto-resolve missing galleries matching this gallery
+			if err := services.AutoResolveMissingGalleries(person.ID, gallery.ID); err != nil {
+				logger.Warnf("Failed to auto-resolve missing galleries for person %d, gallery %d: %v", person.ID, gallery.ID, err)
+			}
 		}
 	}
 
@@ -481,6 +485,10 @@ func autoLinkGalleryToPeopleByURL(galleryID uint, sourceLocation string) {
 			if strings.Contains(locationLower, term) {
 				database.DB.Model(person).Association("Galleries").Append(&gallery)
 				logger.Infof("Auto-linked gallery %d to person %s via URL match (term: %s)", galleryID, person.Name, term)
+				// Auto-resolve missing galleries matching this gallery
+				if err := services.AutoResolveMissingGalleries(person.ID, gallery.ID); err != nil {
+					logger.Warnf("Failed to auto-resolve missing galleries for person %d, gallery %d: %v", person.ID, gallery.ID, err)
+				}
 				break
 			}
 		}

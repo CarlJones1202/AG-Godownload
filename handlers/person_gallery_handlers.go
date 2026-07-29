@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"gallery_api/database"
+	"gallery_api/logger"
 	"gallery_api/models"
+	"gallery_api/services"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -29,6 +31,11 @@ func LinkGalleryToPerson(c *gin.Context) {
 	if err := database.DB.Model(&person).Association("Galleries").Append(&gallery); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to link gallery"})
 		return
+	}
+
+	// Auto-resolve any missing galleries that match this gallery by name
+	if err := services.AutoResolveMissingGalleries(person.ID, gallery.ID); err != nil {
+		logger.Warnf("Failed to auto-resolve missing galleries for person %d, gallery %d: %v", person.ID, gallery.ID, err)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Gallery linked successfully"})

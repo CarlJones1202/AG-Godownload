@@ -176,6 +176,11 @@ func LinkFoundGallery(c *gin.Context) {
 	// Link gallery to person
 	database.DB.Model(&person).Association("Galleries").Append(&gallery)
 
+	// Auto-resolve any missing galleries that match this gallery by name
+	if err := services.AutoResolveMissingGalleries(person.ID, gallery.ID); err != nil {
+		logger.Warnf("Failed to auto-resolve missing galleries for person %d, gallery %d: %v", person.ID, gallery.ID, err)
+	}
+
 	c.JSON(http.StatusCreated, gallery)
 }
 
@@ -217,6 +222,11 @@ func LinkUnsureGallery(c *gin.Context) {
 
 	// Link gallery to person
 	database.DB.Model(&person).Association("Galleries").Append(&gallery)
+
+	// Auto-resolve any missing galleries that match this gallery by name
+	if err := services.AutoResolveMissingGalleries(person.ID, gallery.ID); err != nil {
+		logger.Warnf("Failed to auto-resolve missing galleries for person %d, gallery %d: %v", person.ID, gallery.ID, err)
+	}
 
 	// Re-scan to update the cached results - this removes the linked gallery from unsure list
 	go func() {
@@ -417,3 +427,17 @@ func GetAllMissingGalleries(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response)
 }
+
+func RecheckAllPeople(c *gin.Context) {
+	queued, err := services.AddAllPeopleToScanQueue()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Recheck triggered for all people across all alias+provider combos",
+		"queued":  queued,
+	})
+}
+

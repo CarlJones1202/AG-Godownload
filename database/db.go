@@ -137,6 +137,16 @@ func addImageIndexes() {
 		return
 	}
 	logger.Info("Added composite index idx_images_deleted_created_id on images(deleted_at, created_at, id)")
+
+	err = DB.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_images_type_file_exists_deleted_created 
+		ON images(type, file_exists, deleted_at, created_at, id)
+	`).Error
+	if err != nil {
+		logger.Warn("Failed to add file_exists index:", err)
+		return
+	}
+	logger.Info("Added composite index idx_images_type_file_exists_deleted_created on images")
 }
 
 // Shutdown performs a final WAL checkpoint and closes the database connection.

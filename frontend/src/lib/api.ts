@@ -236,6 +236,8 @@ export const maintenance = {
 export const admin = {
   missingGalleries: (_params?: PaginationParams & { q?: string; provider?: string; person_id?: number }) =>
     request<{ data: any[]; meta: any }>('/admin/missing-galleries'),
+  recheckAll: () =>
+    request<{ message: string; queued: number }>('/admin/recheck-missing-galleries', { method: 'POST' }),
 };
 
 export const tagsApi = {

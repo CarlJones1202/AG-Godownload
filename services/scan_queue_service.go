@@ -78,10 +78,10 @@ func AddToScanQueue(personID uint, provider string, alias string) error {
 }
 
 // AddAllPeopleToScanQueue adds all people with provider aliases to the scan queue
-func AddAllPeopleToScanQueue() error {
+func AddAllPeopleToScanQueue() (int, error) {
 	var aliases []models.PersonProviderAlias
 	if err := database.DB.Find(&aliases).Error; err != nil {
-		return fmt.Errorf("failed to fetch provider aliases: %w", err)
+		return 0, fmt.Errorf("failed to fetch provider aliases: %w", err)
 	}
 
 	seen := make(map[string]bool) // Track (personID, provider) pairs
@@ -99,7 +99,7 @@ func AddAllPeopleToScanQueue() error {
 	}
 
 	logger.Infof("Added %d people to scan queue", len(seen))
-	return nil
+	return len(seen), nil
 }
 
 // GetScanResults returns the scan results for a person
@@ -226,7 +226,7 @@ func StartDailyScanScheduler() {
 	// Run daily at 3 AM
 	_, err := dailyCron.AddFunc("0 3 * * *", func() {
 		logger.Info("Starting daily scan of all people with provider aliases")
-		if err := AddAllPeopleToScanQueue(); err != nil {
+		if _, err := AddAllPeopleToScanQueue(); err != nil {
 			logger.Errorf("Daily scan failed: %v", err)
 		}
 	})
@@ -528,4 +528,174 @@ func CheckAndLinkMissingGalleriesByName(galleryID uint, galleryName string, link
 
 	linkedPersonIDs = linkedPersonIDs[:linkedCount]
 	return linkedPersonIDs, nil
+}
+
+// AutoResolveMissingGalleries checks if a gallery linked to a person matches any of that
+// person's missing galleries by name. If exactly one missing gallery matches, it auto-resolves
+// the missing gallery: updates the gallery with provider metadata, creates an exclusion,
+// queues the source for crawling, and re-scans the person to refresh cached results.
+func AutoResolveMissingGalleries(personID, galleryID uint) error {
+	var person models.Person
+	if err := database.DB.First(&person, personID).Error; err != nil {
+		return err
+	}
+
+	var gallery models.Gallery
+	if err := database.DB.First(&gallery, galleryID).Error; err != nil {
+		return err
+	}
+
+	normalizedName := normalizeGalleryName(gallery.Name)
+	if normalizedName == "" {
+		return nil
+	}
+
+	var scans []models.PersonScanQueue
+	if err := database.DB.Where("person_id = ? AND status = ?", personID, models.ScanStatusCompleted).
+		Find(&scans).Error; err != nil {
+		return err
+	}
+
+	for _, scan := range scans {
+		if scan.Results == "" {
+			continue
+		}
+
+		var results map[string]interface{}
+		if err := json.Unmarshal([]byte(scan.Results), &results); err != nil {
+			continue
+		}
+
+		missingGalleries, ok := results["missing_galleries"].([]interface{})
+		if !ok || len(missingGalleries) == 0 {
+			continue
+		}
+
+		var matchingIndices []int
+		for i, g := range missingGalleries {
+			gMap, ok := g.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			missingTitle, _ := gMap["title"].(string)
+			if normalizeGalleryName(missingTitle) == normalizedName {
+				matchingIndices = append(matchingIndices, i)
+			}
+		}
+
+		if len(matchingIndices) != 1 {
+			continue
+		}
+
+		matchedGallery := missingGalleries[matchingIndices[0]].(map[string]interface{})
+		missingURL, _ := matchedGallery["url"].(string)
+		missingTitle, _ := matchedGallery["title"].(string)
+		missingThumbnail, _ := matchedGallery["thumbnail"].(string)
+
+		// Check if already excluded for this person+provider+URL combo
+		var existingExclusion models.ScanResultExclusion
+		if missingURL != "" {
+			err := database.DB.Where("person_id = ? AND provider = ? AND source_url = ?",
+				personID, scan.Provider, missingURL).First(&existingExclusion).Error
+			if err == nil {
+				continue
+			}
+		}
+
+		// Update gallery with provider info where missing
+		needsUpdate := false
+		if gallery.Provider == "" && scan.Provider != "" {
+			gallery.Provider = scan.Provider
+			needsUpdate = true
+		}
+		if gallery.SourceURL == "" && missingURL != "" {
+			gallery.SourceURL = missingURL
+			needsUpdate = true
+		}
+		if gallery.ProviderThumbnailURL == "" && missingThumbnail != "" {
+			gallery.ProviderThumbnailURL = missingThumbnail
+			needsUpdate = true
+		}
+		if needsUpdate {
+			database.DB.Save(&gallery)
+		}
+
+		// Download thumbnail if we have a URL and no local thumbnail yet
+		if missingThumbnail != "" && gallery.ProviderThumbnail == "" {
+			localPath, err := DownloadProviderThumbnail(missingThumbnail)
+			if err != nil {
+				logger.Warnf("Failed to download thumbnail for gallery %d: %v", gallery.ID, err)
+			} else {
+				gallery.ProviderThumbnail = localPath
+				database.DB.Save(&gallery)
+			}
+		}
+
+		// Create exclusion to remove from missing list
+		exclusion := models.ScanResultExclusion{
+			PersonID:  personID,
+			Provider:  scan.Provider,
+			SourceURL: missingURL,
+			Title:     missingTitle,
+			Reason:    "auto-assumed",
+		}
+		if err := database.DB.Create(&exclusion).Error; err != nil {
+			logger.Warnf("Failed to create exclusion for person %d, gallery %s: %v", personID, missingURL, err)
+		}
+
+		logger.Infof("Auto-resolved missing gallery %q for person %s (provider: %s)", gallery.Name, person.Name, scan.Provider)
+
+		// Try to create a source and queue crawling if the gallery has no source and we have a URL
+		if gallery.SourceID == nil && missingURL != "" {
+			var existingSource models.Source
+			if err := database.DB.Where("location = ?", missingURL).First(&existingSource).Error; err != nil {
+				source := models.Source{
+					Name:     gallery.Name,
+					Type:     "url",
+					Location: missingURL,
+					Status:   "idle",
+				}
+				if err := database.DB.Create(&source).Error; err != nil {
+					logger.Warnf("Failed to create source for gallery %d: %v", gallery.ID, err)
+				} else {
+					gallery.SourceID = &source.ID
+					database.DB.Save(&gallery)
+					AddToCrawlerQueue(source.ID)
+					logger.Infof("Created source %d for gallery %d and queued for crawling", source.ID, gallery.ID)
+				}
+			} else {
+				gallery.SourceID = &existingSource.ID
+				database.DB.Save(&gallery)
+				logger.Infof("Linked existing source %d to gallery %d", existingSource.ID, gallery.ID)
+			}
+		} else if gallery.SourceID != nil {
+			AddToCrawlerQueue(*gallery.SourceID)
+		}
+
+		// Re-scan the person to update cached results (removing this from missing list)
+		go func(pID uint, prov string) {
+			var providerAlias models.PersonProviderAlias
+			if err := database.DB.Where("person_id = ? AND provider = ?", pID, prov).
+				First(&providerAlias).Error; err == nil {
+				if result, err := ScanSourceForPerson(pID, prov, providerAlias.Alias); err == nil {
+					var latestScan models.PersonScanQueue
+					if err := database.DB.Where("person_id = ? AND provider = ?", pID, prov).
+						Order("created_at DESC").First(&latestScan).Error; err == nil {
+						resultsJSON, _ := json.Marshal(map[string]interface{}{
+							"found_count":       result.FoundCount,
+							"existing_count":    result.ExistingCount,
+							"unsure_count":      result.UnsureCount,
+							"missing_count":     result.MissingCount,
+							"missing_galleries": result.MissingGalleries,
+							"unsure_galleries":  result.UnsureGalleries,
+						})
+						latestScan.Results = string(resultsJSON)
+						database.DB.Save(&latestScan)
+					}
+				}
+			}
+		}(personID, scan.Provider)
+	}
+
+	return nil
 }

@@ -107,6 +107,18 @@ export function DashboardPage() {
     }
   };
 
+  const [recheckStatus, setRecheckStatus] = useState<string | null>(null);
+  const recheckAllMut = useMutation({
+    mutationFn: () => admin.recheckAll(),
+    onSuccess: (data) => {
+      setRecheckStatus(`Recheck queued for ${data.queued} alias+provider combos across all people.`);
+      queryClient.invalidateQueries({ queryKey: ['admin', 'missing-galleries'] });
+    },
+    onError: (err: any) => {
+      setRecheckStatus(`Error: ${err.message || 'Failed to trigger recheck'}`);
+    },
+  });
+
   if (!d) return <Spinner />;
 
   const activeCrawls = d.downloads?.crawler?.active_sources ?? [];
@@ -297,10 +309,35 @@ export function DashboardPage() {
 
           {/* Missing Galleries */}
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/20">
-            <div className="p-4 border-b border-zinc-800">
+            <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
               <h3 className="text-sm font-medium text-zinc-200">Missing Galleries ({missingGalleries.length})</h3>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setRecheckStatus(null);
+                  recheckAllMut.mutate();
+                }}
+                disabled={recheckAllMut.isPending}
+                className="gap-1.5 text-xs"
+              >
+                <RefreshCw size={13} className={cn(recheckAllMut.isPending && 'animate-spin')} />
+                {recheckAllMut.isPending ? 'Rechecking...' : 'Recheck All People'}
+              </Button>
             </div>
             <div className="p-4">
+              {recheckStatus && (
+                <div
+                  className={cn(
+                    'mb-3 p-2.5 rounded text-xs border',
+                    recheckStatus.startsWith('Error')
+                      ? 'bg-red-950/50 text-red-400 border-red-800/80'
+                      : 'bg-blue-950/50 text-blue-300 border-blue-800/80',
+                  )}
+                >
+                  {recheckStatus}
+                </div>
+              )}
               {loadingMissing ? (
                 <Spinner size="sm" />
               ) : missingGalleries.length === 0 ? (

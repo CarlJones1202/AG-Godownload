@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"gallery_api/database"
+	"gallery_api/logger"
 	"gallery_api/models"
 	"gallery_api/services"
 	"net/http"
@@ -515,6 +516,13 @@ func LinkPersonToGalleries(c *gin.Context) {
 	// Link matched galleries to person
 	if len(matchedGalleries) > 0 {
 		database.DB.Model(&person).Association("Galleries").Replace(matchedGalleries)
+
+		// Auto-resolve missing galleries for each linked gallery
+		for _, g := range matchedGalleries {
+			if err := services.AutoResolveMissingGalleries(person.ID, g.ID); err != nil {
+				logger.Warnf("Failed to auto-resolve missing galleries for person %d, gallery %d: %v", person.ID, g.ID, err)
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
