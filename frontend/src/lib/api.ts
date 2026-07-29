@@ -49,6 +49,8 @@ function qs(params: Record<string, unknown>): string {
 }
 
 export const sources = {
+  guessName: (url: string) =>
+    request<{ name: string; location: string }>(`/sources/guess-name${qs({ url })}`),
   list: (params: PaginationParams & { q?: string } = {}) =>
     request<PaginatedResult<Source>>(`/sources${qs(params)}`),
   create: (data: { name: string; location: string; type?: string; priority?: number }) =>

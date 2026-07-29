@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -649,17 +650,47 @@ func ProcessVideoSource(source models.Source) error {
 		logger.Infof("Detected PMVHaven URL, invoking RipPMVHaven...")
 		videoURL, videoTitle, err = RipPMVHaven(source.Location)
 		if err != nil {
-			logger.Warnf("RipPMVHaven failed: %v; trying yt-dlp fallback...", err)
-			// Some PMVHaven pages render the player via JS/Cloudflare; yt-dlp can often extract the
-			// final video by executing site logic. Use RipYouTube (yt-dlp wrapper) as a fallback.
-			localPath, title2, err2 := RipYouTube(source.Location)
-			if err2 != nil {
-				return fmt.Errorf("failed to extract PMVHaven video: %w; yt-dlp fallback also failed: %v", err, err2)
+			// If the extracted URL is an HLS stream, use yt-dlp to download it
+			if strings.HasSuffix(videoURL, ".m3u8") {
+				logger.Infof("Got HLS stream URL from RipPMVHaven, using yt-dlp for download")
+				localPath, title2, err2 := RipYouTube(videoURL)
+				if err2 != nil {
+					return fmt.Errorf("failed to download PMVHaven HLS stream: %w", err2)
+				}
+				videoTitle = title2
+				isLocalFile = true
+				localPath = localPath
+				videoURL = ""
+			} else {
+				logger.Warnf("RipPMVHaven failed: %v; trying yt-dlp fallback...", err)
+				// Check if yt-dlp is available before attempting fallback
+				if _, ytErr := exec.LookPath("yt-dlp"); ytErr != nil {
+					return fmt.Errorf("failed to extract PMVHaven video: %w (yt-dlp not found in PATH, install yt-dlp or provide a pmvhaven_cookies.txt file with valid session cookies)", err)
+				}
+				localPath, title2, err2 := RipYouTube(source.Location)
+				if err2 != nil {
+					return fmt.Errorf("failed to extract PMVHaven video: %w; yt-dlp fallback also failed: %v", err, err2)
+				}
+				videoTitle = title2
+				isLocalFile = true
+				localPath = localPath
+				videoURL = ""
 			}
-			videoTitle = title2
+		} else if strings.HasSuffix(videoURL, ".m3u8") {
+			// Got HLS URL directly, use yt-dlp
+			logger.Infof("RipPMVHaven returned HLS stream URL, using yt-dlp for download")
+			if _, ytErr := exec.LookPath("yt-dlp"); ytErr != nil {
+				return fmt.Errorf("PMVHaven video requires yt-dlp to download HLS stream, but yt-dlp was not found in PATH")
+			}
+			localPath, title2, err2 := RipYouTube(videoURL)
+			if err2 != nil {
+				return fmt.Errorf("failed to download PMVHaven HLS stream: %w", err2)
+			}
+			if title2 != "" {
+				videoTitle = title2
+			}
 			isLocalFile = true
 			localPath = localPath
-			// clear videoURL so later flow uses local import
 			videoURL = ""
 		}
 	} else if strings.Contains(source.Location, "youtube.com") || strings.Contains(source.Location, "youtu.be") {

@@ -423,6 +423,13 @@ export function DashboardPage() {
               <Button size="sm" variant="danger" onClick={handleCleanupDupes} disabled={cleanupMut.isPending}>
                 <Wrench size={14} /> {cleanupMut.isPending ? 'Running...' : 'Clean Up Duplicates'}
               </Button>
+              <a
+                href="/api/export/db"
+                className="inline-flex items-center gap-1.5 rounded-md font-medium transition-colors px-2.5 py-1.5 text-xs bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40 disabled:pointer-events-none"
+                download
+              >
+                <Download size={14} /> Export DB
+              </a>
               {cleanupStatus && (
                 <div className={cn(
                   'p-2.5 rounded text-xs border',

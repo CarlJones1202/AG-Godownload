@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { galleries } from '@/lib/api';
 import {
   PageHeader,
@@ -10,13 +11,15 @@ import {
   Textarea,
   Pagination,
   ConfirmDialog,
+  Select,
 } from '@/components/UI';
 import { CoverGrid } from '@/components/CoverGrid';
-import { Search, Plus } from 'lucide-react';
+import { Search, Plus, Shuffle } from 'lucide-react';
 import { usePagination } from '@/hooks/usePagination';
 
 export function GalleriesPage() {
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState('');
   const { page, limit, prevPage, nextPage, resetPage } = usePagination({ limit: 50 });
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
@@ -28,13 +31,31 @@ export function GalleriesPage() {
     description: '',
   });
 
+  const sortBy = searchParams.get('sort') || 'newest';
+  const randomSeed = Number(searchParams.get('seed')) || 0;
+
+  const updateFilter = useCallback((key: string, value: any) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value === null || value === false || value === '' || (key === 'sort' && value === 'newest') || (key === 'seed' && value === 0)) {
+        next.delete(key);
+      } else {
+        next.set(key, String(value));
+      }
+      next.delete('page');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
   const { data: galleryList, isLoading } = useQuery({
-    queryKey: ['galleries', { search, page, limit }],
+    queryKey: ['galleries', { search, page, limit, sort: sortBy, seed: sortBy === 'shuffle' ? randomSeed : undefined }],
     queryFn: () =>
       galleries.list({
         q: search || undefined,
         limit,
         page,
+        sort: sortBy,
+        seed: sortBy === 'shuffle' ? randomSeed : undefined,
       }),
   });
 
@@ -129,6 +150,31 @@ export function GalleriesPage() {
           }}
           className="pl-9 bg-zinc-900 border-zinc-700"
         />
+      </div>
+
+      <div className="flex flex-wrap items-end gap-4 mb-6">
+        <div className="w-44">
+          <Select
+            label="Sort By"
+            value={sortBy}
+            onChange={(e) => updateFilter('sort', e.target.value)}
+            options={[
+              { value: 'newest', label: 'Newest first' },
+              { value: 'oldest', label: 'Oldest first' },
+              { value: 'shuffle', label: 'Shuffle' },
+            ]}
+          />
+        </div>
+        {sortBy === 'shuffle' && (
+          <>
+            <div className="w-28">
+              <Input label="Seed" type="number" value={randomSeed} onChange={(e) => updateFilter('seed', e.target.value)} />
+            </div>
+            <Button variant="secondary" size="md" className="mb-0.5" onClick={() => updateFilter('seed', Math.floor(Math.random() * 1000000))}>
+              <Shuffle size={14} /> Shuffle
+            </Button>
+          </>
+        )}
       </div>
 
       {isLoading ? (

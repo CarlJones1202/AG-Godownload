@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sources } from '@/lib/api';
-import { formatDateTime } from '@/lib/utils';
+import { formatDateTime, guessTitleFromUrl } from '@/lib/utils';
 import {
   PageHeader,
   Button,
@@ -21,6 +21,44 @@ export function SourcesPage() {
   const [bulkStatus, setBulkStatus] = useState<{ type: 'success' | 'error' | null; message: string }>({ type: null, message: '' });
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [newSource, setNewSource] = useState({ location: '', name: '', priority: 0 });
+  const [nameManuallyEdited, setNameManuallyEdited] = useState(false);
+  const guessTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  // Debounced API call to get the correct guessed name (with model stripping)
+  useEffect(() => {
+    if (guessTimerRef.current) clearTimeout(guessTimerRef.current);
+    if (!newSource.location || nameManuallyEdited) return;
+
+    guessTimerRef.current = setTimeout(async () => {
+      try {
+        const result = await sources.guessName(newSource.location);
+        // Only update if name is still not manually edited and URL hasn't changed
+        setNewSource((prev) => {
+          if (prev.location !== newSource.location) return prev;
+          return { ...prev, name: result.name };
+        });
+      } catch {
+        // API failed — keep the local guess
+      }
+    }, 300);
+
+    return () => { if (guessTimerRef.current) clearTimeout(guessTimerRef.current); };
+  }, [newSource.location, nameManuallyEdited]);
+
+  const handleLocationChange = (value: string) => {
+    setNewSource((prev) => {
+      const updated = { ...prev, location: value };
+      if (!nameManuallyEdited) {
+        updated.name = guessTitleFromUrl(value);
+      }
+      return updated;
+    });
+  };
+
+  const handleNameChange = (value: string) => {
+    setNameManuallyEdited(true);
+    setNewSource((prev) => ({ ...prev, name: value }));
+  };
 
   const { data: sourceData, isLoading } = useQuery({
     queryKey: ['sources'],
@@ -30,7 +68,7 @@ export function SourcesPage() {
 
   const createMut = useMutation({
     mutationFn: () => sources.create({
-      name: newSource.name || newSource.location,
+      name: nameManuallyEdited ? newSource.name : '',
       location: newSource.location,
       priority: newSource.priority,
     }),
@@ -38,6 +76,7 @@ export function SourcesPage() {
       queryClient.invalidateQueries({ queryKey: ['sources'] });
       setShowCreate(false);
       setNewSource({ location: '', name: '', priority: 0 });
+      setNameManuallyEdited(false);
     },
   });
 
@@ -109,8 +148,8 @@ export function SourcesPage() {
       {showCreate && (
         <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 mb-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <Input label="URL" placeholder="https://example.com/thread/123" value={newSource.location} onChange={(e) => setNewSource({ ...newSource, location: e.target.value })} />
-            <Input label="Name" placeholder="Source name (optional)" value={newSource.name} onChange={(e) => setNewSource({ ...newSource, name: e.target.value })} />
+            <Input label="URL" placeholder="https://example.com/thread/123" value={newSource.location} onChange={(e) => handleLocationChange(e.target.value)} />
+            <Input label="Name" placeholder="Auto-detected from URL" value={newSource.name} onChange={(e) => handleNameChange(e.target.value)} />
             <Input label="Priority" type="number" value={newSource.priority} onChange={(e) => setNewSource({ ...newSource, priority: parseInt(e.target.value) || 0 })} />
           </div>
           <div className="flex justify-end gap-2 mt-3">

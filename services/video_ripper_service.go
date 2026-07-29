@@ -620,19 +620,27 @@ func nuxtDataResolveMap(data []interface{}, val interface{}) map[string]interfac
 // findStringInNuxtData walks the Nuxt data array looking for a string value
 // that matches a predicate. This is used to find video URLs buried in the
 // pointer-based structure.
+func isVideoURL(s string) bool {
+	return strings.HasPrefix(s, "http") &&
+		(strings.HasSuffix(s, ".mp4") || strings.HasSuffix(s, ".m3u8")) &&
+		!strings.Contains(s, "/videoPreview/") &&
+		!strings.Contains(s, "/thumbnail/") &&
+		!strings.Contains(s, "/previews/")
+}
+
 func findURLInNuxtData(data []interface{}) string {
-	// Walk all entries looking for URLs ending in .mp4 that look like
-	// actual download URLs (not preview thumbnails).
+	// Walk all entries looking for URLs ending in .mp4 or .m3u8 that look like
+	// actual download/stream URLs (not preview thumbnails).
 	for _, item := range data {
 		switch v := item.(type) {
 		case string:
-			if strings.HasPrefix(v, "http") && strings.HasSuffix(v, ".mp4") && !strings.Contains(v, "/videoPreview/") && !strings.Contains(v, "/thumbnail/") {
+			if isVideoURL(v) {
 				return v
 			}
 		case map[string]interface{}:
 			for _, field := range v {
 				if s, ok := field.(string); ok {
-					if strings.HasPrefix(s, "http") && strings.HasSuffix(s, ".mp4") && !strings.Contains(s, "/videoPreview/") && !strings.Contains(s, "/thumbnail/") {
+					if isVideoURL(s) {
 						return s
 					}
 				}
@@ -693,7 +701,7 @@ func pmvhavenAPIVideoInput(videoID string, client *http.Client) (string, string,
 // click-to-reveal interaction. This function uses multiple strategies:
 //
 //  1. Parse __NUXT_DATA__ from the page to extract video metadata and try to
-//     find any embedded download URL
+//     find any embedded download or HLS stream URL (.mp4 / .m3u8)
 //  2. If a pmvhaven_cookies.txt file exists, use it to authenticate with the
 //     PMVHaven v2 API and retrieve the download URL
 //  3. Fall back to og:video / og:video:url meta tags
@@ -771,11 +779,11 @@ func RipPMVHaven(pageURL string) (string, string, error) {
 		logger.Infof("Parsed __NUXT_DATA__ array with %d elements", len(nuxtData))
 
 		// Try to find any download URLs in the raw text first
-		reURL := regexp.MustCompile(`https?://[^"'\s\\]+\.mp4`)
+		reURL := regexp.MustCompile(`https?://[^"'\s\\]+\.(mp4|m3u8)`)
 		for _, match := range reURL.FindAllString(raw, -1) {
 			if !strings.Contains(match, "/videoPreview/") && !strings.Contains(match, "/thumbnail/") && !strings.Contains(match, "/previews/") {
 				videoURL = match
-				logger.Infof("Found mp4 URL in Nuxt data: %s", videoURL)
+				logger.Infof("Found video URL in Nuxt data: %s", videoURL)
 				return
 			}
 		}
@@ -860,8 +868,8 @@ func RipPMVHaven(pageURL string) (string, string, error) {
 		if videoURL == "" {
 			videoURL, _ = doc.Find("meta[property='og:video:url']").Attr("content")
 		}
-		if videoURL != "" && !strings.HasSuffix(videoURL, ".mp4") {
-			logger.Debugf("Ignoring non-mp4 og:video: %s", videoURL)
+		if videoURL != "" && !strings.HasSuffix(videoURL, ".mp4") && !strings.HasSuffix(videoURL, ".m3u8") {
+			logger.Debugf("Ignoring non-video og:video: %s", videoURL)
 			videoURL = ""
 		}
 		if videoURL != "" {
@@ -872,7 +880,7 @@ func RipPMVHaven(pageURL string) (string, string, error) {
 	// Fallback: check for video source tags
 	if videoURL == "" {
 		doc.Find("video source").Each(func(i int, s *goquery.Selection) {
-			if src, exists := s.Attr("src"); exists && strings.Contains(src, ".mp4") {
+			if src, exists := s.Attr("src"); exists && (strings.Contains(src, ".mp4") || strings.Contains(src, ".m3u8")) {
 				videoURL = src
 				logger.Debugf("Found video source in HTML5 tag: %s", videoURL)
 			}

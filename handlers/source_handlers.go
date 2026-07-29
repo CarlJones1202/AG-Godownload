@@ -7,11 +7,15 @@ import (
 	"gallery_api/models"
 	"gallery_api/services"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 )
@@ -37,7 +41,586 @@ type importError struct {
 	Message string
 }
 
+var reFileExt = regexp.MustCompile(`\.(html?|php|asp|aspx|jsp|shtml|cfm|jpe?g|png|gif|bmp|webp|mp4|avi|mkv)$`)
+
+// knownModelNames is populated lazily from the people table
+var knownModelNames map[string]int
+var knownModelNamesOnce sync.Once
+
+// knownSurnameWords — second words of known 2-word model names (lowercase)
+var knownSurnameWords = map[string]bool{
+	"chey": true, "moss": true, "may": true, "ocean": true,
+	"constance": true, "nekrasova": true, "isizzu": true,
+	"k": true, "nass": true,
+}
+
+func loadKnownModelNames() {
+	knownModelNames = make(map[string]int)
+	var people []models.Person
+	if err := database.DB.Find(&people).Error; err != nil {
+		return
+	}
+	for _, p := range people {
+		words := strings.Fields(strings.ToLower(strings.TrimSpace(p.Name)))
+		if len(words) >= 1 && len(words) <= 2 {
+			knownModelNames[strings.Join(words, " ")] = len(words)
+		}
+	}
+}
+
+func guessNameFromURL(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	path := strings.TrimSuffix(parsed.Path, "/")
+	segments := strings.Split(strings.Trim(path, "/"), "/")
+	if len(segments) == 0 {
+		return ""
+	}
+
+	raw := segments[len(segments)-1]
+	raw, _ = url.QueryUnescape(raw)
+	raw = reFileExt.ReplaceAllString(raw, "")
+	raw = strings.SplitN(raw, "?", 2)[0]
+	raw = strings.SplitN(raw, "#", 2)[0]
+
+	title := strings.TrimSpace(regexp.MustCompile(`[-_+]+`).ReplaceAllString(raw, " "))
+	if len(title) < 2 {
+		return ""
+	}
+
+	words := strings.Fields(title)
+
+	// Strip trailing .digits from any word before metadata stripping
+	for i, w := range words {
+		if dotIdx := strings.LastIndex(w, "."); dotIdx > 0 {
+			suffix := w[dotIdx+1:]
+			if isAllDigits(suffix) {
+				words[i] = w[:dotIdx]
+			}
+		}
+	}
+
+	// 1. Strip leading numeric (thread ID)
+	for len(words) > 0 && isAllDigits(words[0]) {
+		words = words[1:]
+	}
+	if len(words) == 0 {
+		return ""
+	}
+
+	// 2. Strip leading dates
+	words = stripLeadingDates(words)
+	if len(words) == 0 {
+		return ""
+	}
+
+	// 3. Strip trailing metadata aggressively
+	words = stripTrailingMeta(words)
+	if len(words) == 0 {
+		return ""
+	}
+
+	// Strip "highlight" and following words
+	for i, w := range words {
+		if strings.EqualFold(w, "highlight") {
+			words = words[:i]
+			break
+		}
+	}
+	if len(words) == 0 {
+		return ""
+	}
+
+	// 4. Strip leading site prefixes
+	words = stripSitePrefix(words)
+	if len(words) == 0 {
+		return ""
+	}
+
+	// 5. Strip model name + optional connector, leaving the title
+	words = stripModelAndConnector(words)
+	if len(words) == 0 {
+		return ""
+	}
+
+	// 5b. Strip trailing metadata again (some was hidden behind model words)
+	words = stripTrailingMeta(words)
+	if len(words) == 0 {
+		return ""
+	}
+
+	// 6. Handle apostrophes
+	for i, w := range words {
+		if strings.Contains(w, "'") {
+			parts := strings.SplitN(w, "'", 2)
+			if len(parts[1]) == 1 || len(parts[1]) == 2 {
+				words[i] = parts[0] + "'" + parts[1]
+			}
+		}
+	}
+
+	// 7. Strip trailing non-alphanumeric characters from each word (punctuation)
+	for i, w := range words {
+		words[i] = strings.TrimRight(w, "!?,;.:-")
+	}
+
+	// 8. Remove any words that are purely non-alphanumeric (like en dash)
+	cleaned := make([]string, 0, len(words))
+	for _, w := range words {
+		hasLetterOrDigit := false
+		for _, r := range w {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) {
+				hasLetterOrDigit = true
+				break
+			}
+		}
+		if hasLetterOrDigit {
+			cleaned = append(cleaned, w)
+		}
+	}
+	words = cleaned
+	if len(words) == 0 {
+		return ""
+	}
+
+	// 9. Title case
+	return formatTitle(words)
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func isMonth(s string) bool {
+	lower := strings.ToLower(s)
+	months := []string{"january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december",
+		"jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"}
+	for _, m := range months {
+		if lower == m {
+			return true
+		}
+	}
+	return false
+}
+
+func isConnectorWord(s string) bool {
+	lower := strings.ToLower(s)
+	connectors := []string{"in", "a", "an", "the"}
+	for _, c := range connectors {
+		if lower == c {
+			return true
+		}
+	}
+	return false
+}
+
+func isImageDesc(s string) bool {
+	lower := strings.ToLower(s)
+	desc := []string{"pictures", "pictures,", "photos", "photos,", "pix", "pics", "images", "files", "jpg", "jpeg", "set", "picture", "photo"}
+	for _, d := range desc {
+		if lower == d {
+			return true
+		}
+	}
+	return false
+}
+
+func sitePrefixes() [][]string {
+	return [][]string{
+		{"playboyplus", "com"},
+		{"playboy", "com"},
+		{"metartx", "com"},
+		{"metart", "com"},
+		{"sexart", "com"},
+		{"vivthomas", "com"},
+		{"wowgirls", "com"},
+		{"rylskyart", "com"},
+		{"eternaldesire", "com"},
+		{"mplstudios", "com"},
+		{"lifeerotic", "com"},
+	}
+}
+
+func isMetaWord(s string) bool {
+	lower := strings.ToLower(s)
+	if strings.HasPrefix(lower, "x") && isAllDigits(s[1:]) {
+		return true
+	}
+	if matched, _ := regexp.MatchString(`^\d+px$`, lower); matched {
+		return true
+	}
+	if matched, _ := regexp.MatchString(`^\d+[x×]\d+$`, lower); matched {
+		return true
+	}
+	if matched, _ := regexp.MatchString(`^\d+[x×]\d+px$`, lower); matched {
+		return true
+	}
+	if matched, _ := regexp.MatchString(`^\d+x$`, lower); matched {
+		return true
+	}
+	if matched, _ := regexp.MatchString(`^x\d+px?$`, lower); matched {
+		return true
+	}
+	if isMonth(s) {
+		return true
+	}
+	return false
+}
+
+func isTrailingCount(s string) bool {
+	if isAllDigits(s) {
+		if n, err := strconv.Atoi(s); err == nil && n >= 100 {
+			return true
+		}
+	}
+	return false
+}
+
+func isExtraTag(s string) bool {
+	lower := strings.ToLower(s)
+	tags := []string{"pre-release", "prerelease", "pre", "hi-res", "hires", "hi", "res", "highlight", "release"}
+	for _, t := range tags {
+		if lower == t {
+			return true
+		}
+	}
+	return false
+}
+
+func stripLeadingDates(words []string) []string {
+	// YYYY MM DD
+	for len(words) >= 3 && isAllDigits(words[0]) && isAllDigits(words[1]) && isAllDigits(words[2]) {
+		words = words[3:]
+	}
+	// YYYY Mon DD
+	for len(words) >= 3 && isAllDigits(words[0]) && isMonth(words[1]) && isAllDigits(words[2]) {
+		words = words[3:]
+	}
+	// YYYY Mon
+	for len(words) >= 2 && isAllDigits(words[0]) && isMonth(words[1]) {
+		words = words[2:]
+	}
+	// DD Mon YYYY
+	for len(words) >= 3 && isAllDigits(words[0]) && isMonth(words[1]) && isAllDigits(words[2]) {
+		words = words[3:]
+	}
+	// Mon DD, YYYY
+	if len(words) >= 3 && isMonth(words[0]) && isAllDigits(words[1]) {
+		words = words[3:]
+	}
+	// Single year token left over
+	for len(words) > 0 && len(words[0]) == 4 && isAllDigits(words[0]) {
+		words = words[1:]
+	}
+	// DD-MM-YY or similar numeric at start
+	for len(words) >= 3 && isAllDigits(words[0]) && isAllDigits(words[1]) && isAllDigits(words[2]) {
+		words = words[3:]
+	}
+	return words
+}
+
+func stripTrailingMeta(words []string) []string {
+	for {
+		n := len(words)
+		if n == 0 {
+			break
+		}
+		changed := false
+
+		// Remove trailing single metadata token
+		if isMetaWord(words[n-1]) {
+			words = words[:n-1]
+			changed = true
+			continue
+		}
+
+		// Parenthesized single token at end
+		last := words[n-1]
+		if strings.HasPrefix(last, "(") && strings.HasSuffix(last, ")") {
+			words = words[:n-1]
+			changed = true
+			continue
+		}
+
+		// Parenthesized 3-word group at end: ( word word word )
+		if n >= 3 && strings.HasPrefix(words[n-3], "(") && strings.HasSuffix(words[n-1], ")") {
+			words = words[:n-3]
+			changed = true
+			continue
+		}
+
+		// Parenthesized 2-word group at end: ( word word )
+		if n >= 2 && strings.HasPrefix(words[n-2], "(") && strings.HasSuffix(words[n-1], ")") {
+			words = words[:n-2]
+			changed = true
+			continue
+		}
+
+		// "number pictures/photos/pix" pair
+		if n >= 2 && isAllDigits(words[n-2]) && isImageDesc(words[n-1]) {
+			words = words[:n-2]
+			changed = true
+			continue
+		}
+
+		// "x 120"
+		if n >= 2 && strings.EqualFold(words[n-2], "x") && isAllDigits(words[n-1]) {
+			words = words[:n-2]
+			changed = true
+			continue
+		}
+
+		// Date at end: Mon DD YYYY or DD Mon YYYY
+		if n >= 3 && isMonth(words[n-3]) && isAllDigits(words[n-2]) && isAllDigits(words[n-1]) {
+			words = words[:n-3]
+			changed = true
+			continue
+		}
+		if n >= 3 && isAllDigits(words[n-3]) && isMonth(words[n-2]) && isAllDigits(words[n-1]) {
+			words = words[:n-3]
+			changed = true
+			continue
+		}
+
+		// "Mon DD" or "DD Mon" at end
+		if n >= 2 && isMonth(words[n-2]) && isAllDigits(words[n-1]) {
+			words = words[:n-2]
+			changed = true
+			continue
+		}
+		if n >= 2 && isAllDigits(words[n-2]) && isMonth(words[n-1]) {
+			words = words[:n-2]
+			changed = true
+			continue
+		}
+
+		// 2-digit year date at end: MM DD YY (first word must be 1-12)
+		if n >= 3 && isAllDigits(words[n-3]) && isAllDigits(words[n-2]) && isAllDigits(words[n-1]) && len(words[n-1]) <= 2 {
+			if first, err := strconv.Atoi(words[n-3]); err == nil && first >= 1 && first <= 12 {
+				words = words[:n-3]
+				changed = true
+				continue
+			}
+		}
+
+		// Trailing DD MM or MM DD pair (both plausibly 1-31, last ≤ 2 digits)
+		if n >= 2 && isAllDigits(words[n-2]) && isAllDigits(words[n-1]) && len(words[n-1]) <= 2 {
+			a, _ := strconv.Atoi(words[n-2])
+			b, _ := strconv.Atoi(words[n-1])
+			if (a >= 1 && a <= 31 && b >= 1 && b <= 31) && (a <= 12 || b <= 12) {
+				words = words[:n-2]
+				changed = true
+				continue
+			}
+		}
+
+		// YYYY MM (4-digit year + 1-2 digit month)
+		if n >= 2 && len(words[n-2]) == 4 && isAllDigits(words[n-2]) && isAllDigits(words[n-1]) && len(words[n-1]) <= 2 {
+			if yr, err := strconv.Atoi(words[n-2]); err == nil && yr >= 1900 && yr <= 2099 {
+				words = words[:n-2]
+				changed = true
+				continue
+			}
+		}
+
+		// All numeric date suffix: YYYY MM DD (plausible year first) or DD MM YYYY (plausible year last)
+		if n >= 3 && isAllDigits(words[n-3]) && isAllDigits(words[n-2]) && isAllDigits(words[n-1]) {
+			if yr, err := strconv.Atoi(words[n-3]); err == nil && yr >= 1900 && yr <= 2099 {
+				words = words[:n-3]
+				changed = true
+				continue
+			}
+			if yr, err := strconv.Atoi(words[n-1]); err == nil && yr >= 1900 && yr <= 2099 {
+				words = words[:n-3]
+				changed = true
+				continue
+			}
+		}
+
+		// Single 4-digit year (plausible range)
+		if n >= 1 && len(words[n-1]) == 4 && isAllDigits(words[n-1]) {
+			if yr, err := strconv.Atoi(words[n-1]); err == nil && yr >= 1900 && yr <= 2099 {
+				words = words[:n-1]
+				changed = true
+				continue
+			}
+		}
+
+		// trailing count (all-digits >= 100) — only if it's not the last meaningful word
+		if n >= 1 && isTrailingCount(words[n-1]) {
+			if n-1 >= 2 {
+				words = words[:n-1]
+				changed = true
+				continue
+			}
+		}
+
+		// extra tags
+		if n >= 1 && isExtraTag(words[n-1]) {
+			words = words[:n-1]
+			changed = true
+			continue
+		}
+
+		// resolution at end: 3840x5760px or 3840x5760
+		if n >= 1 {
+			if matched, _ := regexp.MatchString(`^\d+[x×]\d+px?$`, words[n-1]); matched {
+				words = words[:n-1]
+				changed = true
+				continue
+			}
+		}
+
+		if !changed {
+			break
+		}
+	}
+	return words
+}
+
+func stripSitePrefix(words []string) []string {
+	for _, prefix := range sitePrefixes() {
+		if len(words) >= len(prefix) {
+			match := true
+			for i, p := range prefix {
+				if !strings.EqualFold(words[i], p) {
+					match = false
+					break
+				}
+			}
+			if match {
+				words = words[len(prefix):]
+				break
+			}
+		}
+	}
+	return words
+}
+
+func detectModelWords(words []string) int {
+	// Try known model names first (case-insensitive)
+	knownModelNamesOnce.Do(loadKnownModelNames)
+
+	if len(words) >= 2 {
+		two := strings.ToLower(words[0] + " " + words[1])
+		if n, ok := knownModelNames[two]; ok {
+			return n
+		}
+	}
+	if len(words) >= 1 {
+		one := strings.ToLower(words[0])
+		if n, ok := knownModelNames[one]; ok {
+			return n
+		}
+	}
+
+	// No known model: surname heuristic
+	if len(words) >= 2 && knownSurnameWords[strings.ToLower(words[1])] {
+		return 2
+	}
+
+	// If the first word repeats later → model is 1 word
+	for i := 1; i < len(words); i++ {
+		if strings.EqualFold(words[i], words[0]) {
+			return 1
+		}
+	}
+	// If first 2 words repeat together later → model is 2 words
+	if len(words) >= 4 {
+		for i := 2; i < len(words)-1; i++ {
+			if strings.EqualFold(words[i]+" "+words[i+1], words[0]+" "+words[1]) {
+				return 2
+			}
+		}
+	}
+
+	// Default: check if stripping 2 gives a reasonable title
+	if len(words) == 2 {
+		return 1
+	}
+	if len(words) <= 2 {
+		return len(words)
+	}
+
+	// Pick the stripping that gives at least 2 words, preferring 2-word model
+	if len(words[1:]) >= 2 && len(words[2:]) >= 2 {
+		return 2
+	}
+	if len(words[2:]) < 2 && len(words[1:]) >= 2 {
+		return 1
+	}
+	return 2
+}
+
+func stripModelAndConnector(words []string) []string {
+	if len(words) == 0 {
+		return words
+	}
+
+	n := detectModelWords(words)
+	if n >= len(words) {
+		return nil
+	}
+
+	if n < len(words) && isConnectorWord(words[n]) && words[n] == strings.ToLower(words[n]) {
+		n++
+	}
+
+	if n >= len(words) {
+		return nil
+	}
+	return words[n:]
+}
+
+func formatTitle(words []string) string {
+	lowerExceptions := map[string]bool{
+		"a": true, "an": true, "the": true,
+		"in": true, "of": true, "for": true, "and": true, "or": true,
+		"to": true, "on": true, "at": true, "by": true, "with": true,
+		"from": true, "into": true, "onto": true, "upon": true,
+	}
+
+	result := ""
+	for i, w := range words {
+		if i > 0 {
+			result += " "
+		}
+		lower := strings.ToLower(w)
+		if i > 0 && lowerExceptions[lower] {
+			result += lower
+		} else if len(w) > 0 {
+			runes := []rune(w)
+			runes[0] = unicode.ToUpper(runes[0])
+			result += string(runes)
+		}
+	}
+	return result
+}
+
+func GuessName(c *gin.Context) {
+	location := c.Query("url")
+	if location == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url query parameter is required"})
+		return
+	}
+	name := guessNameFromURL(location)
+	c.JSON(http.StatusOK, gin.H{"name": name, "location": location})
+}
+
 func createSingleSource(name, location, sourceType string, priority int) (*models.Source, *importError) {
+	if name == "" {
+		name = guessNameFromURL(location)
+	}
 	source := models.Source{
 		Name:     name,
 		Type:     sourceType,

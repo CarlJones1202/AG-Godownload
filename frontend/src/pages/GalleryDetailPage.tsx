@@ -15,7 +15,7 @@ import { JustifiedGrid } from '@/components/JustifiedGrid';
 import type { GallerySearchResult } from '@/types';
 import type { JustifiedItem } from '@/components/JustifiedGrid';
 import { Lightbox } from '@/components/Lightbox';
-import { PersonModal } from '@/components/PersonModal';
+
 import {
   Heart,
   ArrowLeft,
@@ -50,7 +50,7 @@ export function GalleryDetailPage() {
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'largest' | 'smallest'>('newest');
   const [showTools, setShowTools] = useState(false);
   const [searchResults, setSearchResults] = useState<GallerySearchResult[] | null>(null);
-  const [modalPersonId, setModalPersonId] = useState<number | null>(null);
+
   const [scrapeProvider, setScrapeProvider] = useState('');
   const [scrapeUrl, setScrapeUrl] = useState('');
   const [updateProvider, setUpdateProvider] = useState('');
@@ -382,7 +382,7 @@ export function GalleryDetailPage() {
                   const photo = parsePhotos(person.photos)[0];
                   return (
                     <div key={person.id} className="flex items-center gap-2 rounded-full bg-zinc-800/50 border border-zinc-700 pr-3 pl-1 py-1 hover:bg-zinc-700/50 transition-all cursor-pointer"
-                      onClick={() => setModalPersonId(person.id)}>
+                      onClick={() => navigate(`/people/${person.id}`)}>
                       <div className="w-7 h-7 rounded-full overflow-hidden bg-zinc-700">
                         {photo ? <img src={photo} alt={person.name} className="w-full h-full object-cover" />
                         : <div className="w-full h-full flex items-center justify-center text-[9px] text-zinc-500 font-bold">{person.name.charAt(0)}</div>}
@@ -531,9 +531,7 @@ export function GalleryDetailPage() {
         onConfirm={() => { if (confirmDeleteImageId !== null) deleteImageMut.mutate(confirmDeleteImageId); }}
         onCancel={() => setConfirmDeleteImageId(null)} />
 
-      {modalPersonId !== null && (
-        <PersonModal personId={modalPersonId} onClose={() => setModalPersonId(null)} />
-      )}
+
     </>
   );
 }

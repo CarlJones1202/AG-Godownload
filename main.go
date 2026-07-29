@@ -102,6 +102,7 @@ func main() {
 	// Routes
 	r.POST("/sources", handlers.CreateSource)
 	r.GET("/sources", handlers.GetSources)
+	r.GET("/sources/guess-name", handlers.GuessName)
 	// Retry endpoints
 	r.GET("/admin/failed-images", handlers.GetFailedImages)
 	r.POST("/admin/failed-images/:id/retry", handlers.RetryImage)
@@ -178,6 +179,9 @@ func main() {
 
 	// Stats routes
 	r.GET("/api/stats", handlers.GetDashboardStats)
+
+	// Database export (Vite proxy strips /api, so match without it)
+	r.GET("/export/db", handlers.ExportDB)
 	r.GET("/people/:id/stats", handlers.GetPersonStats)
 
 	// Source scan routes
