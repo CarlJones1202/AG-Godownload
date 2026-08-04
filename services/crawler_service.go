@@ -555,6 +555,11 @@ func CrawlSource(sourceID uint) error {
 
 			logger.Infof("Successfully inserted %d images", len(insertedIDs))
 
+			// Enqueue embedding + derived tag work for any newly added images.
+			if n := EnqueueMissingEmbeddings(); n > 0 {
+				logger.Debugf("Enqueued embs for %d new images after crawl", n)
+			}
+
 			// Now update the M2M associations using raw SQL for performance
 			if len(insertedIDs) > 0 {
 				var valueStrings []string

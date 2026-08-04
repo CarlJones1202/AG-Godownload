@@ -116,6 +116,8 @@ func VerifyDownloadedImages() error {
 					} else {
 						atomic.AddInt32(&recoveredCount, 1)
 						IncVerificationRecovered()
+						// Re-downloaded file now on disk — (re)build its embedding.
+						EnqueueEmbed(res.ID)
 					}
 				}
 				tx.Commit()

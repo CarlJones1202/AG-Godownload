@@ -95,6 +95,15 @@ func main() {
 	services.StartWebSocketHub()
 	services.StartScanWorker()
 	services.StartDailyScanScheduler()
+
+	// Content similarity: build vector index, load taste profile, start embedder
+	if err := services.InitEmbedding(); err != nil {
+		logger.Error("Embedding initialization failed:", err)
+	}
+	if err := services.DefaultProfile.Rebuild(); err != nil {
+		logger.Error("Taste profile rebuild failed:", err)
+	}
+	services.StartEmbeddingWorker()
 	logger.Info("Background workers started")
 
 	r := gin.Default()
@@ -201,6 +210,16 @@ func main() {
 	r.PATCH("/images/:imageId/vr-mode", handlers.UpdateImageVrMode)
 	r.GET("/images", handlers.GetImages)
 	r.GET("/search/color", handlers.SearchByColor)
+
+	// Content similarity + ratings
+	r.GET("/similar/:id", handlers.GetSimilarImages)
+	r.GET("/similar", handlers.GetSimilarImages) // ?ids=<base64 JSON array>
+	r.PUT("/ratings/:imageId", handlers.SetImageRating)
+	r.GET("/ratings/:imageId", handlers.GetImageRating)
+	r.DELETE("/ratings/:imageId", handlers.ClearImageRating)
+	r.POST("/profile/reset", handlers.ResetProfile)
+	r.POST("/admin/embed/backfill", handlers.BackfillEmbeddings)
+	r.GET("/admin/embed/status", handlers.GetEmbedStatus)
 
 	// Static file serving
 	r.GET("/thumbnails/*filepath", handlers.ServeThumbnail)

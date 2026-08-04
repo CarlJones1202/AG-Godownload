@@ -104,6 +104,9 @@ func AddImageToGallery(c *gin.Context) {
 		return
 	}
 
+	// Schedule embedding + derived tag extraction (idempotent).
+	services.EnqueueEmbed(image.ID)
+
 	c.JSON(http.StatusCreated, image)
 }
 
@@ -569,6 +572,12 @@ func DeleteImage(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete image"})
 		return
 	}
+
+	// Drop embedding state so it never surfaces in recommendations again.
+	services.VectorIndex.Remove(image.ID)
+	database.DB.Where("image_id = ?", image.ID).Delete(&models.ImageEmbedding{})
+	database.DB.Where("image_id = ?", image.ID).Delete(&models.EmbedQueue{})
+	database.DB.Where("image_id = ?", image.ID).Delete(&models.ImageRating{})
 
 	c.JSON(http.StatusOK, gin.H{"message": "Image deleted successfully"})
 }

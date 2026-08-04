@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -39,6 +40,18 @@ type Config struct {
 	HTTPMaxRetries     int
 	// Maintenance token for privileged API endpoints
 	MaintenanceToken string
+
+	// Embedding / content similarity
+	Embedding struct {
+		ModelPath    string // ONNX model path; empty = built-in low-level provider
+		ModelName    string // embedder version tag stored in image_embeddings
+		Dim          int    // expected vector dimension
+		TagThreshold float64
+		Concurrency  int
+		// Recommendation blending weights: embed,tags,color,pref (must sum to 1)
+		RecWeights        [4]float64
+		RecDiversityLambda float64
+	}
 }
 
 var Global Config
@@ -67,6 +80,47 @@ func Load() {
 	Global.GalleryDL.TimeoutSec = getEnvAsInt("GALLERYDL_TIMEOUT_SEC", 30)
 	// Providers default - only imx
 	Global.GalleryDL.Providers = []string{"imx"}
+
+	// Embedding defaults — feature is always on via the built-in low-level
+	// provider; setting EMBED_MODEL_PATH opts into a semantic embedder later.
+	Global.Embedding.ModelPath = getEnv("EMBED_MODEL_PATH", "")
+	Global.Embedding.ModelName = getEnv("EMBED_MODEL_NAME", "lowlevel-v1")
+	Global.Embedding.Dim = getEnvAsInt("EMBED_DIM", 51)
+	Global.Embedding.TagThreshold = 0.3
+	if v, err := strconv.ParseFloat(getEnv("EMBED_TAG_THRESHOLD", "0.3"), 64); err == nil {
+		Global.Embedding.TagThreshold = v
+	}
+	Global.Embedding.Concurrency = getEnvAsInt("EMBED_CONCURRENCY", 2)
+	if Global.Embedding.Concurrency < 1 {
+		Global.Embedding.Concurrency = 1
+	}
+
+	// Recommendation weights: embed, tags, color, pref
+	Global.Embedding.RecWeights = [4]float64{0.5, 0.25, 0.15, 0.10}
+	if w := getEnv("REC_WEIGHTS", ""); w != "" {
+		if parts := strings.Split(w, ","); len(parts) == 4 {
+			parsed := [4]float64{}
+			ok := true
+			for i, p := range parts {
+				v, err := strconv.ParseFloat(strings.TrimSpace(p), 64)
+				if err != nil {
+					ok = false
+					break
+				}
+				parsed[i] = v
+			}
+			if ok {
+				sum := parsed[0] + parsed[1] + parsed[2] + parsed[3]
+				if sum > 0 {
+					for i := range parsed {
+						parsed[i] /= sum
+					}
+					Global.Embedding.RecWeights = parsed
+				}
+			}
+		}
+	}
+	Global.Embedding.RecDiversityLambda = getEnvAsFloat("REC_DIVERSITY_LAMBDA", 0.6)
 }
 
 func getEnv(key, fallback string) string {
@@ -82,6 +136,17 @@ func getEnvAsInt(key string, fallback int) int {
 		return fallback
 	}
 	if value, err := strconv.Atoi(strValue); err == nil {
+		return value
+	}
+	return fallback
+}
+
+func getEnvAsFloat(key string, fallback float64) float64 {
+	strValue := getEnv(key, "")
+	if strValue == "" {
+		return fallback
+	}
+	if value, err := strconv.ParseFloat(strValue, 64); err == nil {
 		return value
 	}
 	return fallback

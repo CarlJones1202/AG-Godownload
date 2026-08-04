@@ -69,6 +69,9 @@ func Migrate() {
 		&models.PersonScanQueue{},
 		&models.ScanResultExclusion{},
 		&models.Tag{},
+		&models.ImageEmbedding{},
+		&models.ImageRating{},
+		&models.EmbedQueue{},
 	)
 	if err != nil {
 		logger.Fatal("Failed to migrate database:", err)

@@ -29,6 +29,7 @@ type Image struct {
 	TrickplayVTT    string         `gorm:"-" json:"trickplay_vtt,omitempty"`       // VTT file path for video scrubbing
 	TrickplaySprite string         `gorm:"-" json:"trickplay_sprite,omitempty"`    // Sprite sheet path for video scrubbing
 	DominantColors  string         `json:"dominant_colors"`                        // JSON array of hex color strings
+	ContentFeatures string         `gorm:"column:image_content_features" json:"image_content_features"` // JSON low-level features (vibrancy, grid, etc.)
 	IsFavorite      bool           `json:"is_favorite" gorm:"default:false;index"` // Favorite status
 	Type            string         `json:"type" gorm:"default:'image';index"`      // "image" or "video"
 	People          []*Person      `json:"people,omitempty" gorm:"many2many:person_images;"`
