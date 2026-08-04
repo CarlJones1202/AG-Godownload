@@ -6,7 +6,6 @@ import (
 	"gallery_api/database"
 	"gallery_api/logger"
 	"gallery_api/models"
-	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -44,9 +43,20 @@ func StartEmbeddingWorker() {
 		go func(workerID int) {
 			logger.Debugf("Embedding worker %d started", workerID)
 			for imageID := range EmbedWorkQueue {
-				if err := ProcessEmbed(imageID); err != nil {
-					logger.Warnf("Embedding worker %d failed image %d: %v", workerID, imageID, err)
-				}
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							logger.Errorf("Embedding worker %d recovered from panic on image %d: %v", workerID, imageID, r)
+							// Mark permanently-failed so it isn't auto-retried every sweep.
+							database.DB.Model(&models.EmbedQueue{}).
+								Where("image_id = ?", imageID).
+								Updates(map[string]interface{}{"status": "failed", "attempts": maxEmbedRetries + 1})
+						}
+					}()
+					if err := ProcessEmbed(imageID); err != nil {
+						logger.Warnf("Embedding worker %d failed image %d: %v", workerID, imageID, err)
+					}
+				}()
 			}
 		}(i)
 	}
@@ -60,12 +70,14 @@ func StartEmbeddingWorker() {
 		}
 	}()
 
-	// Periodic sweep covers images added while running / failed retries.
+	// Periodic sweep re-feeds pending work, retries bounded failures, and picks
+	// up images added while running.
 	go func() {
-		ticker := time.NewTicker(12 * time.Hour)
+		ticker := time.NewTicker(15 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
 			FeedPendingEmbedQueue()
+			FeedRetryableFailed()
 			if n := EnqueueMissingEmbeddings(); n > 0 {
 				logger.Infof("Embedding sweep enqueued %d new images", n)
 			}
@@ -82,6 +94,26 @@ func FeedPendingEmbedQueue() {
 		Order("id ASC").Limit(4000).
 		Pluck("image_id", &ids).Error; err != nil {
 		logger.Warnf("FeedPendingEmbedQueue error: %v", err)
+		return
+	}
+	for _, id := range ids {
+		select {
+		case EmbedWorkQueue <- id:
+		case <-time.After(100 * time.Millisecond):
+			return
+		}
+	}
+}
+
+// FeedRetryableFailed re-pushes bounded failures (attempts < maxEmbedRetries)
+// so transient errors get another chance between sweeps.
+func FeedRetryableFailed() {
+	var ids []uint
+	if err := database.DB.Table("embed_queues").
+		Where("status = ? AND attempts < ?", "failed", maxEmbedRetries).
+		Order("id ASC").Limit(4000).
+		Pluck("image_id", &ids).Error; err != nil {
+		logger.Warnf("FeedRetryableFailed error: %v", err)
 		return
 	}
 	for _, id := range ids {
@@ -179,10 +211,18 @@ func handleEmbedFailure(imageID uint, attempts int, err error) error {
 		Where("image_id = ?", imageID).
 		Updates(map[string]interface{}{"status": "failed", "attempts": attempts})
 	if attempts < maxEmbedRetries {
-		select {
-		case EmbedWorkQueue <- imageID:
-		default:
+		// Back off before retrying (attempt^2 * 10s, capped at 10m) so a
+		// persistently failing image can't spin a worker and starve the queue.
+		delay := time.Duration(attempts*attempts*10) * time.Second
+		if delay > 10*time.Minute {
+			delay = 10 * time.Minute
 		}
+		time.AfterFunc(delay, func() {
+			select {
+			case EmbedWorkQueue <- imageID:
+			default:
+			}
+		})
 	}
 	return err
 }
@@ -192,8 +232,9 @@ func markEmbedDone(imageID uint) error {
 }
 
 // ResolveImageFilePath finds the on-disk path for an image, following the same
-// gallery/source layout rules as the rest of the codebase, with a recursive
-// walk fallback for legacy flat layouts.
+// gallery/source layout rules as the rest of the codebase, with a flat-layout
+// fallback. No tree walks: a missing file is just a fast, cheap failure (a
+// recursive scan on every retry could stall a worker for minutes).
 func ResolveImageFilePath(imageID uint) (string, error) {
 	var image models.Image
 	if err := database.DB.Select("id, filename, source_id").First(&image, imageID).Error; err != nil {
@@ -217,33 +258,15 @@ func ResolveImageFilePath(imageID uint) (string, error) {
 		}
 	}
 
-	baseName := filepath.Base(image.Filename)
-	fullPath := filepath.Join(UploadsDir, SanitizeDirectoryName(sourceName), baseName)
-	if _, err := os.Stat(fullPath); err == nil {
-		return fullPath, nil
+	candidates := []string{
+		filepath.Join(UploadsDir, SanitizeDirectoryName(sourceName), filepath.Base(image.Filename)),
+		filepath.Join(UploadsDir, image.Filename), // legacy flat layout
+		image.Filename,                            // absolute/relative path stored directly
 	}
-	for _, candidate := range []string{filepath.Join(UploadsDir, image.Filename), image.Filename} {
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
 		}
-	}
-
-	found := ""
-	walkErr := filepath.Walk(UploadsDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if !info.IsDir() && (info.Name() == baseName || info.Name() == image.Filename) {
-			found = path
-			return io.EOF
-		}
-		return nil
-	})
-	if walkErr != nil && walkErr != io.EOF {
-		return "", fmt.Errorf("recursive search failed: %w", walkErr)
-	}
-	if found != "" {
-		return found, nil
 	}
 	return "", fmt.Errorf("image file not found on disk (image %d)", imageID)
 }
