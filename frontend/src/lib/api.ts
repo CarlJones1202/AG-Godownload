@@ -2,6 +2,7 @@ import type {
   AutoTagResult,
   DashboardStats,
   DownloadStatus,
+  EmbedStatus,
   Gallery,
   GallerySearchResult,
   IdentifierResult,
@@ -14,6 +15,8 @@ import type {
   PersonScanResponse,
   PersonScanResult,
   ProviderAlias,
+  RatingResponse,
+  SimilarImagesResponse,
   Source,
   Tag,
 } from '@/types';
@@ -81,6 +84,8 @@ export const adminApi = {
   getFailedSources: () => request<{ data: import('@/types').Source[] }>('/admin/failed-sources'),
   retrySource: (id: number) => request<{ message: string }>(`/admin/failed-sources/${id}/retry`, { method: 'POST' }),
   retryAllSources: () => request<{ message: string; count: number }>(`/admin/failed-sources/retry-all`, { method: 'POST' }),
+  getEmbedStatus: () => request<EmbedStatus>('/admin/embed/status'),
+  backfillEmbeddings: () => request<{ enqueued: number }>('/admin/embed/backfill', { method: 'POST' }),
 };
 
 export interface GalleryListParams extends PaginationParams {
@@ -139,6 +144,23 @@ export const images = {
     request<{ id: number; vr_mode: string }>(`/images/${id}/vr-mode`, { method: 'PATCH', body: JSON.stringify({ vr_mode }) }),
   searchByColor: (color: string, limit?: number, threshold?: number) =>
     request<PaginatedResult<Image>>(`/search/color${qs({ color, limit, threshold })}`),
+};
+
+export const ratings = {
+  get: (imageId: number) => request<RatingResponse>(`/ratings/${imageId}`),
+  set: (imageId: number, rating: number) =>
+    request<RatingResponse>(`/ratings/${imageId}`, { method: 'PUT', body: JSON.stringify({ rating }) }),
+  clear: (imageId: number) =>
+    request<RatingResponse>(`/ratings/${imageId}`, { method: 'DELETE' }),
+};
+
+export const similar = {
+  byImage: (imageId: number, limit?: number) =>
+    request<SimilarImagesResponse>(`/similar/${imageId}${qs({ limit })}`),
+};
+
+export const profile = {
+  reset: () => request<{ message: string }>('/profile/reset', { method: 'POST' }),
 };
 
 export const videos = {

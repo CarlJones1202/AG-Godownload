@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, X, Info, Heart, Link as LinkIcon, Play, Pause, Maximize, Minimize, Timer, UserPlus, Tag, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Info, Heart, Link as LinkIcon, Play, Pause, Maximize, Minimize, Timer, UserPlus, Tag, Plus, Star, Sparkles } from 'lucide-react';
 import type { Image, Person } from '@/types';
 import { formatDate, parseColors, cn } from '@/lib/utils';
-import { Link } from 'react-router-dom';
-import { tagsApi, people } from '@/lib/api';
+import { Link, useNavigate } from 'react-router-dom';
+import { tagsApi, people, ratings as ratingsApi, similar as similarApi } from '@/lib/api';
 import { Input } from '@/components/UI';
 
 interface LightboxProps {
@@ -26,6 +26,8 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
   const [tagSearch, setTagSearch] = useState('');
   const [linkPersonOpen, setLinkPersonOpen] = useState(false);
   const [personSearch, setPersonSearch] = useState('');
+  const [similarOpen, setSimilarOpen] = useState(false);
+  const navigate = useNavigate();
 
   const { data: tagResults } = useQuery({
     queryKey: ['tags', 'search', tagSearch],
@@ -93,6 +95,51 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
       onToggleFavorite(currentImage.id);
     }
   }, [currentImage, onToggleFavorite]);
+
+  const isCurrentImage = currentImage?.type === 'image';
+
+  const { data: ratingData } = useQuery({
+    queryKey: ['ratings', currentImage?.id],
+    queryFn: () => ratingsApi.get(currentImage!.id),
+    enabled: !!currentImage,
+  });
+
+  const setRatingMut = useMutation({
+    mutationFn: (r: number) => ratingsApi.set(currentImage!.id, r),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ratings', currentImage?.id] });
+    },
+  });
+
+  const clearRatingMut = useMutation({
+    mutationFn: () => ratingsApi.clear(currentImage!.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ratings', currentImage?.id] });
+    },
+  });
+
+  const handleRate = useCallback((n: number) => {
+    if (!currentImage || setRatingMut.isPending) return;
+    if (n === (ratingData?.rating ?? 0)) {
+      clearRatingMut.mutate();
+    } else {
+      setRatingMut.mutate(n);
+    }
+  }, [currentImage, setRatingMut, clearRatingMut, ratingData]);
+
+  const { data: similarData, isFetching: similarLoading } = useQuery({
+    queryKey: ['similar', currentImage?.id],
+    queryFn: () => similarApi.byImage(currentImage!.id, 24),
+    enabled: similarOpen && isCurrentImage,
+  });
+
+  const openSimilarImage = useCallback((sim: { gallery_id?: number; web_path?: string }) => {
+    if (sim.gallery_id) {
+      navigate(`/galleries/${sim.gallery_id}`);
+    } else if (sim.web_path) {
+      window.open(sim.web_path, '_blank');
+    }
+  }, [navigate]);
 
   useEffect(() => {
     let timer: number | undefined;
@@ -209,6 +256,23 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
             >
               <Maximize size={20} />
             </button>
+
+            {isCurrentImage && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSimilarOpen(!similarOpen);
+                }}
+                className={`p-2 rounded-lg transition-all ${
+                  similarOpen 
+                    ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/20' 
+                    : 'text-white/60 hover:text-white hover:bg-white/10'
+                }`}
+                title="Similar images"
+              >
+                <Sparkles size={20} />
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-4">
@@ -321,6 +385,33 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
                     {currentImage.is_favorite ? 'Favorited' : 'Favorite'}
                   </span>
                 </button>
+                <div className="h-8 w-px bg-white/10" />
+                <div className="flex flex-col items-center gap-1 group">
+                  <div className="flex items-center gap-0.5">
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <button
+                        key={n}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRate(n);
+                        }}
+                        disabled={setRatingMut.isPending || clearRatingMut.isPending}
+                        className="p-0.5 transition-transform hover:scale-110 disabled:opacity-50"
+                        title={n <= (ratingData?.rating ?? 0) ? 'Click to clear rating' : `Rate ${n} ${n === 1 ? 'star' : 'stars'}`}
+                      >
+                        <Star
+                          size={16}
+                          className={n <= (ratingData?.rating ?? 0)
+                            ? 'fill-amber-400 text-amber-400'
+                            : 'text-white/25 group-hover:text-white/60'}
+                        />
+                      </button>
+                    ))}
+                  </div>
+                  <span className="text-[10px] uppercase tracking-widest text-white/30 group-hover:text-white/60">
+                    {ratingData?.rating ? `${ratingData.rating}/5` : 'Rate'}
+                  </span>
+                </div>
                 {currentImage.tags && currentImage.tags.length > 0 && (
                   <div className="flex flex-col gap-1.5">
                     <span className="text-white/30 text-[10px] uppercase tracking-widest">Tags</span>
@@ -452,6 +543,55 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
           ) : (
             <div className="text-white/40 text-sm flex items-center justify-center font-mono">
               {index + 1} / {images.length}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Similar images panel */}
+      {!isFullScreen && similarOpen && (
+        <div className="px-8 pb-6">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-white/40 text-[10px] uppercase tracking-widest">You might like</div>
+            <div className="text-white/25 text-[10px]">
+              {similarData?.profile.ready
+                ? `mixed with your taste (${similarData.profile.n_likes} liked)`
+                : 'based on visual similarity'}
+            </div>
+          </div>
+          {similarLoading ? (
+            <div className="text-white/20 text-[10px] py-4">Loading similar images…</div>
+          ) : similarData && similarData.data.length > 0 ? (
+            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none">
+              {similarData.data.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => openSimilarImage(s)}
+                  className="shrink-0 group text-left"
+                  title={s.reasons.length > 0 ? s.reasons.join(' · ') : `${Math.round(s.similarity * 100)}% similar`}
+                >
+                  <div className="relative">
+                    <img
+                      src={s.web_path}
+                      alt={s.filename}
+                      loading="lazy"
+                      className="h-24 w-20 object-cover rounded-md border border-zinc-800 opacity-80 group-hover:opacity-100 group-hover:border-zinc-500 transition-all"
+                    />
+                    <div className="absolute bottom-1 right-1 text-[9px] font-mono px-1 py-0.5 rounded bg-black/75 text-white/80">
+                      {Math.round(s.similarity * 100)}%
+                    </div>
+                    {s.favorite && (
+                      <div className="absolute top-1 left-1">
+                        <Heart size={10} className="fill-red-500 text-red-500" />
+                      </div>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="text-white/20 text-[10px] py-4">
+              No similar finds yet — embeddings are still being built in the background.
             </div>
           )}
         </div>

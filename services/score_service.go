@@ -15,9 +15,10 @@ var ErrSeedNotEmbedded = errors.New("image is not embedded yet")
 
 // Recommendation is one ranked result with human-readable reasons.
 type Recommendation struct {
-	Image   models.Image `json:"image"`
-	Score   float64      `json:"similarity"`
-	Reasons []string     `json:"reasons"`
+	Image     models.Image `json:"image"`
+	Score     float64      `json:"similarity"`
+	Reasons   []string     `json:"reasons"`
+	GalleryID uint         `json:"gallery_id,omitempty"`
 }
 
 type candidate struct {
@@ -125,12 +126,20 @@ func RecommendSimilar(seedID uint, limit int) ([]Recommendation, error) {
 			continue
 		}
 		recs = append(recs, Recommendation{
-			Image:   img,
-			Score:   c.score,
-			Reasons: buildReasons(&c, seedTagNames),
+			Image:     img,
+			Score:     c.score,
+			Reasons:   buildReasons(&c, seedTagNames),
+			GalleryID: firstGalleryID(c.galleries),
 		})
 	}
 	return recs, nil
+}
+
+func firstGalleryID(ids []uint) uint {
+	if len(ids) == 0 {
+		return 0
+	}
+	return ids[0]
 }
 
 // selectMMR greedily picks the most relevant candidates while penalizing

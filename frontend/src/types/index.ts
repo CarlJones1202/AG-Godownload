@@ -64,6 +64,50 @@ export interface Image {
   thumbnail_path?: string;
 }
 
+export interface RatingProfile {
+  n_likes: number;
+  n_dislikes: number;
+  ready: boolean;
+}
+
+export interface RatingResponse {
+  rating: number;
+  profile?: RatingProfile;
+}
+
+export interface SimilarImage {
+  id: number;
+  filename: string;
+  similarity: number;
+  reasons: string[];
+  web_path: string;
+  thumbnail_path: string;
+  favorite: boolean;
+}
+
+export interface SimilarImagesResponse {
+  seed: {
+    id: number;
+    filename: string;
+    tags: string[];
+    web_path: string;
+    thumbnail_path: string;
+    embedded: boolean;
+  };
+  profile: RatingProfile;
+  data: SimilarImage[];
+}
+
+export interface EmbedStatus {
+  total_images: number;
+  embedded: number;
+  pending: number;
+  failed: number;
+  index_size: number;
+  embedder: string;
+  dimension: number;
+}
+
 export interface Person {
   id: number;
   created_at: string;

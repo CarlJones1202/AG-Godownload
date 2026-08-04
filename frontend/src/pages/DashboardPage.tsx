@@ -63,6 +63,18 @@ export function DashboardPage() {
     enabled: showAdmin,
   });
 
+  const { data: embedStatus } = useQuery({
+    queryKey: ['admin', 'embed-status'],
+    queryFn: () => adminApi.getEmbedStatus(),
+    enabled: showAdmin,
+    refetchInterval: 5000,
+  });
+
+  const backfillMut = useMutation({
+    mutationFn: () => adminApi.backfillEmbeddings(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'embed-status'] }),
+  });
+
   const retryImageMut = useMutation({
     mutationFn: (id: number) => adminApi.retryImage(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'failed-images'] }),
@@ -410,6 +422,69 @@ export function DashboardPage() {
                   )}
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Embedding Status */}
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/20">
+            <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+              <h3 className="text-sm font-medium text-zinc-200">Embedding Status</h3>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => backfillMut.mutate()}
+                disabled={backfillMut.isPending}
+                className="gap-1.5 text-xs"
+              >
+                <RefreshCw size={13} className={cn(backfillMut.isPending && 'animate-spin')} />
+                {backfillMut.isPending ? 'Backfilling...' : 'Backfill Missing'}
+              </Button>
+            </div>
+            <div className="p-4 space-y-3">
+              {!embedStatus ? (
+                <Spinner size="sm" />
+              ) : (
+                <>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-zinc-400">Embedder</span>
+                    <span className="font-mono text-zinc-300">
+                      {embedStatus.embedder} (dim {embedStatus.dimension})
+                    </span>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between text-xs mb-1.5">
+                      <span className="text-zinc-400">Indexed</span>
+                      <span className="font-mono text-zinc-300">
+                        {embedStatus.embedded} / {embedStatus.total_images}
+                      </span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-blue-500 transition-all"
+                        style={{
+                          width: `${embedStatus.total_images ? Math.min(100, (embedStatus.embedded / embedStatus.total_images) * 100) : 0}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="rounded border border-zinc-800 bg-zinc-900/40 p-2 text-center">
+                      <div className="text-sm font-mono text-zinc-200">{embedStatus.index_size}</div>
+                      <div className="text-[10px] uppercase tracking-wider text-zinc-500">Index Size</div>
+                    </div>
+                    <div className="rounded border border-zinc-800 bg-zinc-900/40 p-2 text-center">
+                      <div className="text-sm font-mono text-amber-400">{embedStatus.pending}</div>
+                      <div className="text-[10px] uppercase tracking-wider text-zinc-500">Pending</div>
+                    </div>
+                    <div className="rounded border border-zinc-800 bg-zinc-900/40 p-2 text-center">
+                      <div className={cn('text-sm font-mono', embedStatus.failed > 0 ? 'text-red-400' : 'text-zinc-200')}>
+                        {embedStatus.failed}
+                      </div>
+                      <div className="text-[10px] uppercase tracking-wider text-zinc-500">Failed</div>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 

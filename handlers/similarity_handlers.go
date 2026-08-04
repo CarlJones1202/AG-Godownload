@@ -75,6 +75,7 @@ func GetSimilarImages(c *gin.Context) {
 			"web_path":       im.WebPath,
 			"thumbnail_path": im.ThumbnailPath,
 			"favorite":       im.IsFavorite,
+			"gallery_id":     r.GalleryID,
 		})
 	}
 
