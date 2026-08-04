@@ -33,6 +33,7 @@ import {
   Trash2,
   Check,
   ExternalLink,
+  Camera,
 } from 'lucide-react';
 import { CoverGrid } from '@/components/CoverGrid';
 
@@ -87,6 +88,7 @@ export function PersonDetailPage() {
   const [aliasName, setAliasName] = useState('');
   const [stashDbOpen, setStashDbOpen] = useState(false);
   const [stashDbSearchQuery, setStashDbSearchQuery] = useState('');
+  const [profilePickerOpen, setProfilePickerOpen] = useState(false);
 
   const { data: person, isLoading: loadingPerson } = useQuery({
     queryKey: ['person', personId],
@@ -197,13 +199,37 @@ export function PersonDetailPage() {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['person', personId] }); setStashDbOpen(false); },
   });
 
+  const { data: personImages, isLoading: loadingPersonImages } = useQuery({
+    queryKey: ['person-images', personId],
+    queryFn: () => people.profileImages(personId),
+    enabled: profilePickerOpen,
+  });
+
+  const setProfileImageMut = useMutation({
+    mutationFn: (imageId: number) => people.setProfileImage(personId, imageId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['person', personId] });
+      queryClient.invalidateQueries({ queryKey: ['people'] });
+      setProfilePickerOpen(false);
+    },
+  });
+
+  const clearProfileImageMut = useMutation({
+    mutationFn: () => people.clearProfileImage(personId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['person', personId] });
+      queryClient.invalidateQueries({ queryKey: ['people'] });
+    },
+  });
+
   const startEditing = () => { if (!person) return; setEditForm({ name: person.name }); setEditing(true); };
 
   if (loadingPerson) return <Spinner />;
   if (!person) return <EmptyState message="Profile not found" />;
 
   const photos = parsePhotos(person.photos);
-  const coverPhoto = photos[photoIndex] ?? photos[0];
+  const hasCustomProfile = !!person.profile_image_path;
+  const coverPhoto = person.profile_image_path ?? (photos[photoIndex] ?? photos[0]);
   const galleryList = person.galleries ?? [];
   const linkedSourceUrls = new Set(galleryList.map((g: any) => g.source_url).filter(Boolean));
   const statChips = [
@@ -229,8 +255,17 @@ export function PersonDetailPage() {
               ) : (
                 <div className="h-full w-full flex items-center justify-center"><User size={36} className="text-zinc-600" /></div>
               )}
+              {hasCustomProfile && (
+                <div className="absolute top-1.5 left-1.5 text-[9px] font-medium text-amber-300 bg-black/60 backdrop-blur-sm px-1.5 py-0.5 rounded">
+                  Custom
+                </div>
+              )}
+              <button onClick={() => setProfilePickerOpen(true)} title="Set profile picture from a gallery image"
+                className="absolute bottom-1.5 right-1.5 inline-flex h-7 w-7 items-center justify-center rounded bg-black/60 hover:bg-blue-500/80 text-zinc-200 hover:text-white transition-colors">
+                <Camera size={14} />
+              </button>
             </div>
-            {photos.length > 1 && (
+            {!hasCustomProfile && photos.length > 1 && (
               <div className="mt-2 flex items-center justify-between">
                 <button onClick={() => setPhotoIndex((i) => (i - 1 + photos.length) % photos.length)}
                   className="inline-flex h-6 w-6 items-center justify-center rounded border border-zinc-700 text-zinc-300 hover:text-white">
@@ -649,6 +684,61 @@ export function PersonDetailPage() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Profile Picture Picker Modal */}
+      {profilePickerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-3xl max-h-[85vh] flex flex-col rounded-lg border border-zinc-800 bg-zinc-950 shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+              <div>
+                <h2 className="text-base font-semibold text-white">Choose Profile Picture</h2>
+                <p className="text-xs text-zinc-400 mt-0.5">Pick a gallery image of {person.name} as their profile picture</p>
+              </div>
+              <button onClick={() => setProfilePickerOpen(false)} className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded transition-colors">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              {loadingPersonImages ? (
+                <div className="py-12 flex flex-col items-center gap-3"><Spinner /><p className="text-xs text-zinc-500 animate-pulse">Loading images...</p></div>
+              ) : !personImages || personImages.data.length === 0 ? (
+                <p className="text-xs text-zinc-500 text-center py-12">No images linked to this person's galleries yet.</p>
+              ) : (
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                  {personImages.data.map((img) => {
+                    const isCurrent = img.id === person.profile_image_id;
+                    const src = img.thumbnail_path && img.thumbnail_path.startsWith('/') ? img.thumbnail_path : undefined;
+                    return (
+                      <button key={img.id} disabled={setProfileImageMut.isPending}
+                        onClick={() => setProfileImageMut.mutate(img.id)}
+                        className={`relative aspect-[3/4] rounded-lg overflow-hidden border-2 transition-all bg-zinc-800 group ${
+                          isCurrent ? 'border-amber-400' : 'border-transparent hover:border-zinc-600'
+                        }`} title={img.filename}>
+                        {src
+                          ? <img src={src} alt={img.filename} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                          : <div className="w-full h-full flex items-center justify-center text-zinc-600 text-[9px]">{img.filename}</div>}
+                        <div className={`absolute inset-0 flex items-center justify-center text-[10px] font-medium transition-all ${
+                          isCurrent ? 'bg-amber-500/20 text-amber-200' : 'bg-black/40 text-white opacity-0 group-hover:opacity-100'
+                        }`}>
+                          {isCurrent ? <><Check size={14} /> Current</> : 'Use as picture'}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-between px-6 py-4 border-t border-zinc-800 bg-zinc-900/30">
+              {person.profile_image_id ? (
+                <Button variant="secondary" size="sm" disabled={clearProfileImageMut.isPending} onClick={() => clearProfileImageMut.mutate()}>
+                  Remove Profile Picture
+                </Button>
+              ) : <span />}
+              <Button size="sm" onClick={() => setProfilePickerOpen(false)}>Done</Button>
+            </div>
           </div>
         </div>
       )}

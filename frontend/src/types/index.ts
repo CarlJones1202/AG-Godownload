@@ -48,6 +48,8 @@ export interface Image {
   created_at: string;
   updated_at: string;
   filename: string;
+  title?: string;
+  title_customized?: boolean;
   original_url?: string;
   gallery_id?: number;
   type: string;
@@ -125,6 +127,8 @@ export interface Person {
   piercings?: string;
   biography?: string;
   photos?: string;
+  profile_image_id?: number | null;
+  profile_image_path?: string;
   birth_date?: string;
   gallery_count?: number;
   galleries?: Gallery[];

@@ -7,6 +7,7 @@ import (
 	"gallery_api/models"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // IsLocalPath checks if the string looks like a file path
@@ -33,12 +34,17 @@ func ProcessLocalSource(source models.Source) error {
 		}
 
 		// For videos, create image record without gallery but with direct source reference
+		// Prefer the source's title (user-provided) and fall back to the calculated one
+		imageTitle := result.Title
+		if strings.TrimSpace(source.Name) != "" {
+			imageTitle = source.Name
+		}
 		image := models.Image{
 			SourceID:       &source.ID,
 			Filename:       filepath.Base(result.Path),
 			OriginalURL:    fmt.Sprintf("file://%s", path),
 			DownloadURL:    fmt.Sprintf("file://%s", result.Path),
-			Title:          result.Title,
+			Title:          imageTitle,
 			Duration:       result.Duration,
 			Width:          result.Width,
 			Height:         result.Height,

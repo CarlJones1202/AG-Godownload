@@ -13,7 +13,7 @@ import {
   ConfirmDialog,
 } from '@/components/UI';
 import { VideoPlayer } from '@/components/VideoPlayer';
-import { Heart, Play, Trash2, UserPlus, X } from 'lucide-react';
+import { Heart, Play, Trash2, UserPlus, X, Pencil } from 'lucide-react';
 import { usePagination } from '@/hooks/usePagination';
 import type { Image, Person } from '@/types';
 
@@ -24,6 +24,8 @@ export function VideosPage() {
   const [activeVideo, setActiveVideo] = useState<Image | null>(null);
   const [linkPersonImageId, setLinkPersonImageId] = useState<number | null>(null);
   const [personSearch, setPersonSearch] = useState('');
+  const [renameId, setRenameId] = useState<number | null>(null);
+  const [renameTitle, setRenameTitle] = useState('');
 
   const { data: videoList, isLoading } = useQuery({
     queryKey: ['videos', { offset, limit }],
@@ -49,6 +51,14 @@ export function VideosPage() {
     mutationFn: ({ id, mode }: { id: number; mode: string }) => imagesApi.updateVrMode(id, mode),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['videos'] });
+    },
+  });
+
+  const renameMut = useMutation({
+    mutationFn: ({ id, title }: { id: number; title: string }) => imagesApi.updateTitle(id, title),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['videos'] });
+      setRenameId(null);
     },
   });
 
@@ -106,7 +116,7 @@ export function VideosPage() {
                   )}
                 </div>
                 <div className="p-2">
-                  <p className="text-xs text-white truncate">{vid.filename}</p>
+                  <p className="text-xs text-white truncate" title={vid.title || vid.filename}>{vid.title || vid.filename}</p>
                   <div className="flex items-center gap-2 mt-1">
                     {vid.width != null && vid.height != null && (
                       <Badge variant="info">{vid.width}x{vid.height}</Badge>
@@ -123,6 +133,9 @@ export function VideosPage() {
                       </Button>
                       <Button variant="ghost" size="sm" title="Link to person" onClick={() => { setLinkPersonImageId(vid.id); setPersonSearch(''); }}>
                         <UserPlus size={14} className="text-zinc-500 hover:text-blue-400" />
+                      </Button>
+                      <Button variant="ghost" size="sm" title="Rename video" onClick={() => { setRenameId(vid.id); setRenameTitle(vid.title || vid.filename); }}>
+                        <Pencil size={14} className="text-zinc-500 hover:text-yellow-400" />
                       </Button>
                       <Button variant="ghost" size="sm" title="Delete video" onClick={() => setConfirmDeleteId(vid.id)}>
                         <Trash2 size={14} className="text-zinc-500 hover:text-red-400" />
@@ -185,6 +198,42 @@ export function VideosPage() {
             {personSearch.length > 1 && personResults && personResults.data.length === 0 && (
               <p className="text-xs text-zinc-500 text-center py-2">No people found matching "{personSearch}"</p>
             )}
+          </div>
+        </div>
+      )}
+
+      {renameId !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setRenameId(null)}>
+          <div className="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-lg p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-white">Rename Video</h3>
+              <button onClick={() => setRenameId(null)} className="text-zinc-500 hover:text-white transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <Input
+              value={renameTitle}
+              onChange={(e) => setRenameTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && renameTitle.trim()) {
+                  renameMut.mutate({ id: renameId, title: renameTitle.trim() });
+                }
+                if (e.key === 'Escape') setRenameId(null);
+              }}
+              autoFocus
+              className="mb-3"
+              placeholder="Video title"
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setRenameId(null)}>Cancel</Button>
+              <Button
+                size="sm"
+                onClick={() => renameTitle.trim() && renameMut.mutate({ id: renameId, title: renameTitle.trim() })}
+                disabled={renameMut.isPending || !renameTitle.trim()}
+              >
+                Save
+              </Button>
+            </div>
           </div>
         </div>
       )}

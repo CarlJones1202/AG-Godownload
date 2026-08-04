@@ -731,3 +731,47 @@ func UpdateImageVrMode(c *gin.Context) {
 		"vr_mode": image.VRMode,
 	})
 }
+
+// UpdateImageTitle updates the display title for a video/image and marks it as
+// user-customized so the retroactive title sync leaves it alone.
+func UpdateImageTitle(c *gin.Context) {
+	idStr := c.Param("imageId")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid image ID"})
+		return
+	}
+
+	var req struct {
+		Title string `json:"title"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var image models.Image
+	if err := database.DB.First(&image, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Image not found"})
+		return
+	}
+
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Title cannot be empty"})
+		return
+	}
+
+	image.Title = title
+	image.TitleCustomized = true
+	if err := database.DB.Save(&image).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update title"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":          "Title updated",
+		"title":            image.Title,
+		"title_customized": true,
+	})
+}

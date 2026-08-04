@@ -423,3 +423,50 @@ func ValidateProviderThumbnails() (int, int, error) {
 	logger.Infof("Provider thumbnail validation complete: %d valid, %d fixed/updated", valid, fixed)
 	return valid, fixed, nil
 }
+
+// SyncVideoTitlesToSourceNames retroactively updates video image titles to match
+// their source's name when the source has a non-empty name. Video titles should
+// prefer the user-provided source title and only fall back to the calculated
+// title when the source has none. Videos whose source name is blank (or already
+// match the source name) are left untouched.
+func SyncVideoTitlesToSourceNames() (int, error) {
+	logger.Info("Starting retroactive video title sync to source names...")
+
+	var videos []struct {
+		ID         uint
+		Title      string
+		SourceID   *uint
+		SourceName string
+	}
+	err := database.DB.Table("images").
+		Select("images.id, images.title, images.source_id, sources.name AS source_name").
+		Joins("LEFT JOIN sources ON sources.id = images.source_id AND sources.deleted_at IS NULL").
+		Where("images.type = ? AND images.deleted_at IS NULL AND images.title_customized = ?", "video", false).
+		Find(&videos).Error
+	if err != nil {
+		return 0, fmt.Errorf("failed to load videos: %w", err)
+	}
+
+	updated := 0
+	for _, v := range videos {
+		if v.SourceID == nil {
+			continue
+		}
+		sourceName := strings.TrimSpace(v.SourceName)
+		if sourceName == "" {
+			continue
+		}
+		if strings.TrimSpace(v.Title) == sourceName {
+			continue
+		}
+		if err := database.DB.Model(&models.Image{}).Where("id = ?", v.ID).Update("title", sourceName).Error; err != nil {
+			logger.Warnf("Failed to update title for video %d: %v", v.ID, err)
+			continue
+		}
+		logger.Infof("Video %d title updated: %q -> %q", v.ID, v.Title, sourceName)
+		updated++
+	}
+
+	logger.Infof("Retroactive video title sync complete: %d videos updated", updated)
+	return updated, nil
+}

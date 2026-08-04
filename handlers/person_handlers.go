@@ -138,9 +138,34 @@ func GetPeople(c *gin.Context) {
 	// Batch 3: Thumbnails with fallback
 	thumbnailMap := make(map[uint]string, len(people))
 
+	// Stage 0: User-chosen gallery profile pictures (highest priority)
+	profileImageIDs := make([]uint, 0, len(people))
+	profilePersonOf := make(map[uint]uint, len(people))
+	for i := range people {
+		if people[i].ProfileImageID != nil {
+			profileImageIDs = append(profileImageIDs, *people[i].ProfileImageID)
+			profilePersonOf[*people[i].ProfileImageID] = people[i].ID
+		}
+	}
+	if len(profileImageIDs) > 0 {
+		var profileImages []models.Image
+		database.DB.
+			Where("id IN ?", profileImageIDs).
+			Find(&profileImages)
+		populateImagePaths(profileImages)
+		for i := range profileImages {
+			if pid, ok := profilePersonOf[profileImages[i].ID]; ok {
+				thumbnailMap[pid] = profileImages[i].ThumbnailPath
+			}
+		}
+	}
+
 	// Stage 1: Parse Photos arrays (in-memory)
 	noPhotoIDs := make([]uint, 0, len(people))
 	for i := range people {
+		if _, set := thumbnailMap[people[i].ID]; set {
+			continue
+		}
 		if people[i].Photos != "" {
 			var photos []string
 			if err := json.Unmarshal([]byte(people[i].Photos), &photos); err == nil && len(photos) > 0 {
@@ -320,9 +345,12 @@ func GetPerson(c *gin.Context) {
 		}
 	}
 
-	// Get fallback thumbnail if no photos
+	// Get fallback thumbnail: user-chosen gallery profile picture wins,
+	// then photos, then first tagged image, then first gallery image.
+	profileImagePath := personProfileThumbnailPath(&person)
 	var thumbnailPath string
-	if person.Photos != "" {
+	thumbnailPath = profileImagePath
+	if thumbnailPath == "" && person.Photos != "" {
 		var photos []string
 		if err := json.Unmarshal([]byte(person.Photos), &photos); err == nil && len(photos) > 0 {
 			thumbnailPath = photos[0]
@@ -363,29 +391,31 @@ func GetPerson(c *gin.Context) {
 
 	// Return person with enhanced galleries
 	c.JSON(http.StatusOK, gin.H{
-		"id":             person.ID,
-		"created_at":     person.CreatedAt,
-		"updated_at":     person.UpdatedAt,
-		"name":           person.Name,
-		"aliases":        person.Aliases,
-		"stash_id":       person.StashID,
-		"birthdate":      person.Birthdate,
-		"country":        person.Country,
-		"ethnicity":      person.Ethnicity,
-		"eye_color":      person.EyeColor,
-		"hair_color":     person.HairColor,
-		"height":         person.Height,
-		"measurements":   person.Measurements,
-		"fake_tits":      person.FakeTits,
-		"career_length":  person.CareerLength,
-		"tattoos":        person.Tattoos,
-		"piercings":      person.Piercings,
-		"bio":            person.Bio,
-		"twitter":        person.Twitter,
-		"instagram":      person.Instagram,
-		"photos":         person.Photos,
-		"thumbnail_path": thumbnailPath,
-		"galleries":      galleryResponses,
+		"id":                 person.ID,
+		"created_at":         person.CreatedAt,
+		"updated_at":         person.UpdatedAt,
+		"name":               person.Name,
+		"aliases":            person.Aliases,
+		"stash_id":           person.StashID,
+		"birthdate":          person.Birthdate,
+		"country":            person.Country,
+		"ethnicity":          person.Ethnicity,
+		"eye_color":          person.EyeColor,
+		"hair_color":         person.HairColor,
+		"height":             person.Height,
+		"measurements":       person.Measurements,
+		"fake_tits":          person.FakeTits,
+		"career_length":      person.CareerLength,
+		"tattoos":            person.Tattoos,
+		"piercings":          person.Piercings,
+		"bio":                person.Bio,
+		"twitter":            person.Twitter,
+		"instagram":          person.Instagram,
+		"photos":             person.Photos,
+		"profile_image_id":   person.ProfileImageID,
+		"profile_image_path": profileImagePath,
+		"thumbnail_path":     thumbnailPath,
+		"galleries":          galleryResponses,
 	})
 }
 

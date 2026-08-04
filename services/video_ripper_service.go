@@ -576,8 +576,15 @@ func buildVideoResult(destPath string, title string) (*DownloadImageResult, erro
 
 // extractVideoIDFromPMVHavenURL extracts the 24-character hex video ID from a PMVHaven URL.
 // URL format: https://pmvhaven.com/video/Slug_Name_66195f01d0f2168854325fd0
+// URLs from search results commonly carry query strings (e.g. ?from=search&q=...), so
+// the query string is stripped before matching.
 func extractVideoIDFromPMVHavenURL(pageURL string) (string, error) {
-	re := regexp.MustCompile(`_([a-f0-9]{24})$`)
+	if u, err := url.Parse(pageURL); err == nil {
+		u.RawQuery = ""
+		u.Fragment = ""
+		pageURL = u.String()
+	}
+	re := regexp.MustCompile(`_([a-f0-9]{24})/?$`)
 	matches := re.FindStringSubmatch(pageURL)
 	if len(matches) < 2 {
 		return "", fmt.Errorf("could not extract video ID from URL: %s", pageURL)
@@ -694,17 +701,69 @@ func pmvhavenAPIVideoInput(videoID string, client *http.Client) (string, string,
 	return result.Video.URL, result.Video.Title, nil
 }
 
+// pmvhavenWatchPageVideo calls the PMVHaven watch-page API to get video details
+// including the direct video URL. This is the same endpoint the site's own
+// Nuxt client uses, and it returns public video URLs without authentication.
+func pmvhavenWatchPageVideo(videoID string, client *http.Client) (string, string, error) {
+	apiURL := fmt.Sprintf("https://pmvhaven.com/api/videos/%s/watch-page", videoID)
+
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("creating API request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Referer", "https://pmvhaven.com/")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		return "", "", fmt.Errorf("Video not found")
+	}
+	if resp.StatusCode != 200 {
+		return "", "", fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Video struct {
+				Title                string `json:"title"`
+				URL                  string `json:"videoUrl"`
+				HLSMasterPlaylistURL string `json:"hlsMasterPlaylistUrl"`
+				HLSEnabled           bool   `json:"hlsEnabled"`
+			} `json:"video"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", "", fmt.Errorf("decoding API response: %w", err)
+	}
+
+	if !result.Success || result.Data.Video.URL == "" {
+		return "", "", fmt.Errorf("API response missing video URL")
+	}
+
+	return result.Data.Video.URL, result.Data.Video.Title, nil
+}
+
 // RipPMVHaven extracts the video URL from a PMVHaven page.
 //
 // PMVHaven was rebuilt as a Nuxt.js SPA (Nov 2025). Video download URLs are no
 // longer embedded in the HTML — they require an authenticated API call or a
 // click-to-reveal interaction. This function uses multiple strategies:
 //
-//  1. Parse __NUXT_DATA__ from the page to extract video metadata and try to
+//  1. Query the PMVHaven watch-page API (/api/videos/{id}/watch-page). This is
+//     the endpoint the site's own client uses and it returns the direct video
+//     URL and title for public videos without any authentication.
+//  2. Parse __NUXT_DATA__ from the page to extract video metadata and try to
 //     find any embedded download or HLS stream URL (.mp4 / .m3u8)
-//  2. If a pmvhaven_cookies.txt file exists, use it to authenticate with the
+//  3. If a pmvhaven_cookies.txt file exists, use it to authenticate with the
 //     PMVHaven v2 API and retrieve the download URL
-//  3. Fall back to og:video / og:video:url meta tags
+//  4. Fall back to og:video / og:video:url meta tags
 func RipPMVHaven(pageURL string) (string, string, error) {
 	logger.Infof("Starting RipPMVHaven for %s", pageURL)
 
@@ -716,6 +775,20 @@ func RipPMVHaven(pageURL string) (string, string, error) {
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 	}
+
+	// Strategy 1: watch-page API (no auth required for public videos)
+	if videoID != "" {
+		apiURL, apiTitle, apiErr := pmvhavenWatchPageVideo(videoID, client)
+		if apiErr == nil {
+			logger.Infof("Successfully retrieved video URL from watch-page API")
+			return apiURL, apiTitle, nil
+		}
+		logger.Warnf("watch-page API call failed: %v", apiErr)
+		if strings.Contains(apiErr.Error(), "Video not found") {
+			return "", "", fmt.Errorf("PMVHaven video %s does not appear to exist anymore (it may have been removed): %v", videoID, apiErr)
+		}
+	}
+
 	req, err := http.NewRequest("GET", pageURL, nil)
 	if err != nil {
 		return "", "", fmt.Errorf("creating request: %w", err)
@@ -743,9 +816,14 @@ func RipPMVHaven(pageURL string) (string, string, error) {
 		return "", "", fmt.Errorf("parsing HTML: %w", err)
 	}
 
-	// Extract title from <h1>
-	title := strings.TrimSpace(doc.Find("h1").First().Text())
+	// Extract title from <title> tag (h1 on the SPA shell stays "Dashboard")
+	title := strings.TrimSpace(doc.Find("title").First().Text())
+	title = strings.TrimPrefix(title, "Loading...")
 	title = strings.TrimSuffix(title, " - PMVHaven")
+	if title == "" {
+		title, _ = doc.Find("meta[property='og:title']").Attr("content")
+		title = strings.TrimSuffix(strings.TrimSpace(title), " - PMVHaven")
+	}
 	if title == "" {
 		title = "Unknown Video"
 	}
@@ -888,7 +966,7 @@ func RipPMVHaven(pageURL string) (string, string, error) {
 	}
 
 	if videoURL == "" {
-		return "", "", fmt.Errorf("could not find video URL on %s — PMVHaven now requires authentication; create a pmvhaven_cookies.txt file with your session cookies", pageURL)
+		return "", "", fmt.Errorf("could not find video URL on %s — PMVHaven may have removed the video or changed their layout", pageURL)
 	}
 
 	return videoURL, title, nil

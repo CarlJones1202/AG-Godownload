@@ -85,6 +85,13 @@ func main() {
 		if err := services.SyncFileExists(); err != nil {
 			logger.Error("File exists sync failed:", err)
 		}
+
+		logger.Info("Syncing retroactive video titles to source names...")
+		if updated, err := services.SyncVideoTitlesToSourceNames(); err != nil {
+			logger.Error("Video title sync failed:", err)
+		} else {
+			logger.Infof("Video title sync complete, %d videos updated", updated)
+		}
 	}()
 
 	// Start video worker
@@ -151,6 +158,9 @@ func main() {
 	r.DELETE("/people/:id/galleries/:galleryId", handlers.UnlinkGalleryFromPerson)
 	r.POST("/people/:id/images/:imageId", handlers.LinkImageToPerson)
 	r.DELETE("/people/:id/images/:imageId", handlers.UnlinkImageFromPerson)
+	r.GET("/people/:id/images", handlers.GetPersonImages)
+	r.POST("/people/:id/profile-image", handlers.SetPersonProfileImage)
+	r.DELETE("/people/:id/profile-image", handlers.ClearPersonProfileImage)
 
 	// New identifier system routes
 	r.GET("/identifiers/sources", handlers.ListIdentifierSources)
@@ -208,6 +218,7 @@ func main() {
 	r.DELETE("/images/:imageId", handlers.DeleteImage)
 	r.POST("/images/:imageId/favorite", handlers.ToggleFavorite)
 	r.PATCH("/images/:imageId/vr-mode", handlers.UpdateImageVrMode)
+	r.PATCH("/images/:imageId/title", handlers.UpdateImageTitle)
 	r.GET("/images", handlers.GetImages)
 	r.GET("/search/color", handlers.SearchByColor)
 

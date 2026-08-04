@@ -756,12 +756,17 @@ func ProcessVideoSource(source models.Source) error {
 	}
 
 	// Create image record with Type="video" (no gallery association)
+	// Prefer the source's title (user-provided) and fall back to the calculated one
+	imageTitle := result.Title
+	if strings.TrimSpace(source.Name) != "" {
+		imageTitle = source.Name
+	}
 	image := models.Image{
 		SourceID:       &source.ID,
 		Filename:       relPath,
 		OriginalURL:    source.Location,
 		DownloadURL:    videoURL,
-		Title:          result.Title,
+		Title:          imageTitle,
 		Duration:       result.Duration,
 		Width:          result.Width,
 		Height:         result.Height,

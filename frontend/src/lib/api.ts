@@ -142,6 +142,10 @@ export const images = {
     request<{ id: number; is_favorite: boolean }>(`/images/${id}/favorite`, { method: 'POST' }),
   updateVrMode: (id: number, vr_mode: string) =>
     request<{ id: number; vr_mode: string }>(`/images/${id}/vr-mode`, { method: 'PATCH', body: JSON.stringify({ vr_mode }) }),
+  updateTitle: (id: number, title: string) =>
+    request<{ message: string; title: string; title_customized: boolean }>(`/images/${id}/title`, {
+      method: 'PATCH', body: JSON.stringify({ title }),
+    }),
   searchByColor: (color: string, limit?: number, threshold?: number) =>
     request<PaginatedResult<Image>>(`/search/color${qs({ color, limit, threshold })}`),
 };
@@ -232,6 +236,14 @@ export const people = {
     request<{ message: string }>(`/people/${personId}/images/${imageId}`, { method: 'POST' }),
   unlinkImage: (personId: number, imageId: number) =>
     request<void>(`/people/${personId}/images/${imageId}`, { method: 'DELETE' }),
+  profileImages: (personId: number) =>
+    request<{ data: Image[] }>(`/people/${personId}/images`),
+  setProfileImage: (personId: number, imageId: number) =>
+    request<{ message: string; person: Person }>(`/people/${personId}/profile-image`, {
+      method: 'POST', body: JSON.stringify({ image_id: imageId }),
+    }),
+  clearProfileImage: (personId: number) =>
+    request<{ message: string; person: Person }>(`/people/${personId}/profile-image`, { method: 'DELETE' }),
   autoLinkGalleries: (personId: number) =>
     request<{ message: string; galleries_linked: number }>(`/people/${personId}/link-galleries`, { method: 'POST' }),
   searchStashDB: (name: string) =>

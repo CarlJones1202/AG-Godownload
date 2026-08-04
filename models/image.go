@@ -18,6 +18,7 @@ type Image struct {
 	Source          *Source        `json:"source,omitempty" gorm:"foreignKey:SourceID"`
 	Filename        string         `gorm:"index" json:"filename"`
 	Title           string         `gorm:"index" json:"title"`        // Video title or display name
+	TitleCustomized bool           `json:"title_customized" gorm:"default:false"` // true once the user renames a video in the UI
 	Duration        float64        `json:"duration"`                  // Runtime in seconds
 	Width           int            `json:"width"`                     // Video width in pixels
 	Height          int            `json:"height"`                    // Video height in pixels

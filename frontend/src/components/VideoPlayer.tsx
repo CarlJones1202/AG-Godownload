@@ -203,7 +203,7 @@ export function VideoPlayer({ video, onClose }: VideoPlayerProps) {
         <div className="bg-gradient-to-b from-black/80 to-transparent px-5 pt-4 pb-10">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3 min-w-0 mr-4">
-              <span className="text-sm text-white/90 font-medium truncate">{video.filename}</span>
+              <span className="text-sm text-white/90 font-medium truncate">{video.title || video.filename}</span>
               {video.width && video.height && (
                 <span className="text-xs text-white/50 shrink-0">{video.width}x{video.height}</span>
               )}
