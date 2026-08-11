@@ -5,64 +5,42 @@ import (
 	"gallery_api/models"
 	"time"
 
-	"github.com/glebarez/sqlite"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
-// lastCheckpointTime tracks the last time we performed a WAL TRUNCATE checkpoint
-var lastCheckpointTime time.Time
-
 var DB *gorm.DB
 
-func Connect(dbPath string) {
+// Connect opens a GORM connection to PostgreSQL using a lib/pq-style DSN.
+func Connect(dsn string) {
 	var err error
-	// Use glebarez/sqlite for pure Go implementation
-	// Enable WAL mode for better concurrency and set busy timeout
-	// synchronous=NORMAL is safe with WAL (writes are still atomic) and much faster
-	// cache_size=-20000 allocates 20MB page cache (default is 2MB)
-	// journal_size_limit=4194304 caps WAL file at 4MB to prevent read slowdown
-	//
-	// _txlock=immediate makes every transaction BEGIN IMMEDIATE (take the write
-	// lock up front). With the default deferred BEGIN, a transaction that reads
-	// then writes fails instantly with SQLITE_BUSY ("database is locked") whenever
-	// any other connection committed in between — busy_timeout does NOT help that
-	// case. IMMEDIATE turns that race into a normal busy-wait handled by
-	// busy_timeout, so concurrent writers serialize instead of erroring.
-	DB, err = gorm.Open(sqlite.Open(dbPath+"?_pragma=journal_mode(WAL)"+
-		"&_pragma=busy_timeout(5000)"+
-		"&_pragma=synchronous(NORMAL)"+
-		"&_pragma=cache_size(-20000)"+
-		"&_pragma=journal_size_limit(4194304)"+
-		"&_pragma=temp_store(MEMORY)"+
-		"&_txlock=immediate",
-	), &gorm.Config{})
+	// Foreign keys are not emitted: the legacy sqlite database never enforced
+	// them and rows use sentinel ids (e.g. gallery_id = 0 for "no gallery").
+	// Enabling FK constraints would reject both those rows and new inserts.
+	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+	})
 	if err != nil {
 		logger.Fatal("Failed to connect to database:", err)
 	}
 
-	// Configure connection pool.
-	// SQLite WAL mode supports concurrent reads + one writer.
-	// Using 3 connections allows readers to proceed while a writer is active,
-	// preventing API requests from queueing behind slow flushes.
+	// Configure the connection pool. PostgreSQL handles concurrency natively,
+	// so we can be more generous than SQLite's single-writer limit.
 	sqlDB, err := DB.DB()
 	if err != nil {
 		logger.Fatal("Failed to get underlying sql.DB:", err)
 	}
-	sqlDB.SetMaxOpenConns(3)
-	sqlDB.SetMaxIdleConns(1)
-	sqlDB.SetConnMaxLifetime(5 * time.Minute)
+	sqlDB.SetMaxOpenConns(25)
+	sqlDB.SetMaxIdleConns(5)
+	sqlDB.SetConnMaxLifetime(30 * time.Minute)
 
 	logger.Info("Database connected successfully")
 }
 
-// Checkpoint runs a PASSIVE WAL checkpoint to keep the WAL file manageable.
-// This is non-blocking and fast. The built-in wal_autocheckpoint (triggered
-// every ~1000 pages / ~4 MB) handles TRUNCATE automatically, so we don't
-// force one here and risk blocking concurrent writers on other connections.
+// Checkpoint is retained for callers that previously forced an SQLite WAL
+// checkpoint. PostgreSQL commits are durable at COMMIT time, so this is a no-op.
 func Checkpoint() {
-	if err := DB.Exec("PRAGMA wal_checkpoint(PASSIVE)").Error; err != nil {
-		logger.Warnf("WAL passive checkpoint failed: %v", err)
-	}
+	// no-op
 }
 
 func Migrate() {
@@ -160,29 +138,17 @@ func addImageIndexes() {
 	logger.Info("Added composite index idx_images_type_file_exists_deleted_created on images")
 }
 
-// Shutdown performs a final WAL checkpoint and closes the database connection.
-// This should be called during graceful shutdown to prevent corruption from
-// interrupted writes. The TRUNCATE checkpoint moves all WAL data back into the
-// main database file, which is the safest state for a cold start after shutdown.
+// Shutdown closes the database connection. PostgreSQL persists each committed
+// transaction to disk, so no explicit checkpoint is required on shutdown.
 func Shutdown() {
 	if DB == nil {
 		return
 	}
-	logger.Info("Database shutdown: running final WAL checkpoint...")
+	logger.Info("Database shutdown: closing connection pool...")
 	sqlDB, err := DB.DB()
 	if err != nil {
 		logger.Errorf("Failed to get underlying sql.DB for shutdown: %v", err)
 		return
-	}
-
-	// TRUNCATE waits for readers to finish, then moves WAL into main DB file.
-	// This is slower than PASSIVE but ensures zero WAL residue on next start.
-	if err := DB.Exec("PRAGMA wal_checkpoint(TRUNCATE)").Error; err != nil {
-		logger.Warnf("WAL truncate checkpoint failed: %v", err)
-		// Fallback: PASSIVE checkpoint is non-blocking and still flushes data
-		if err2 := DB.Exec("PRAGMA wal_checkpoint(PASSIVE)").Error; err2 != nil {
-			logger.Warnf("WAL passive checkpoint also failed: %v", err2)
-		}
 	}
 
 	if err := sqlDB.Close(); err != nil {

@@ -242,7 +242,7 @@ func ApplyAutoTagSuggestions(c *gin.Context) {
 			}
 
 			// Add tag
-			database.DB.Exec("INSERT OR IGNORE INTO person_galleries (person_id, gallery_id) VALUES (?, ?)", pid, sugg.ID)
+			database.DB.Exec("INSERT INTO person_galleries (person_id, gallery_id) VALUES (?, ?) ON CONFLICT DO NOTHING", pid, sugg.ID)
 			galleriesTagged++
 		} else if sugg.Type == "video" {
 			// Check not excluded
@@ -255,7 +255,7 @@ func ApplyAutoTagSuggestions(c *gin.Context) {
 			}
 
 			// Add tag
-			database.DB.Exec("INSERT OR IGNORE INTO person_images (person_id, image_id) VALUES (?, ?)", pid, sugg.ID)
+			database.DB.Exec("INSERT INTO person_images (person_id, image_id) VALUES (?, ?) ON CONFLICT DO NOTHING", pid, sugg.ID)
 			videosTagged++
 		}
 	}

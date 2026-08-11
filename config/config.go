@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -17,6 +18,14 @@ type Config struct {
 	// Database
 	DatabasePath string
 	LogLevel     string
+
+	// Database (PostgreSQL)
+	DBHost     string
+	DBPort     string
+	DBUser     string
+	DBPassword string
+	DBName     string
+	PGBinDir   string // directory containing pg_dump / pg_ctl etc. (set by init.ps1)
 
 	// Workers
 	CrawlerWorkers int
@@ -63,6 +72,12 @@ func Load() {
 		env:            getEnv("ENV", "development"),
 		DatabasePath:   getEnv("DATABASE_PATH", "gallery.db"),
 		LogLevel:       getEnv("LOG_LEVEL", "INFO"),
+		DBHost:         getEnv("PGHOST", "127.0.0.1"),
+		DBPort:         getEnv("PGPORT", "5432"),
+		DBUser:         getEnv("PGUSER", "postgres"),
+		DBPassword:     getEnv("PGPASSWORD", "postgres"),
+		DBName:         getEnv("PGDATABASE", "gallery"),
+		PGBinDir:       getEnv("PGBIN", ""),
 		CrawlerWorkers: getEnvAsInt("CRAWLER_WORKERS", 5),
 		// Default to 0 to disable AI tagging unless explicitly enabled
 		AITagWorkers:           getEnvAsInt("AITAG_WORKERS", 0),
@@ -154,4 +169,15 @@ func getEnvAsFloat(key string, fallback float64) float64 {
 
 func IsDev() bool {
 	return Global.env == "development"
+}
+
+// DatabaseDSN returns a PostgreSQL connection string. When DATABASE_URL is set
+// it is used verbatim (also honored by the sqlite->pg importer and pg_dump);
+// otherwise the discrete PG* options are composed into a DSN.
+func (c *Config) DatabaseDSN() string {
+	if d := getEnv("DATABASE_URL", ""); d != "" {
+		return d
+	}
+	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		c.DBHost, c.DBPort, c.DBUser, c.DBPassword, c.DBName)
 }

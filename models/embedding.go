@@ -14,7 +14,7 @@ type ImageEmbedding struct {
 	ImageID   uint      `gorm:"uniqueIndex;index" json:"image_id"`
 	Embedder  string    `gorm:"index" json:"embedder"`
 	Dimension int       `json:"dimension"`
-	Vector    []byte    `json:"-" gorm:"type:BLOB"` // raw float32 little-endian bytes
+	Vector    []byte    `json:"-"` // raw float32 little-endian bytes (BYTEA / BLOB)
 	CreatedAt time.Time `json:"created_at"`
 }
 

@@ -24,7 +24,7 @@ func main() {
 	logger.SetLevelFromString(config.Global.LogLevel)
 
 	// Initialize Database
-	database.Connect(config.Global.DatabasePath)
+	database.Connect(config.Global.DatabaseDSN())
 	database.Migrate()
 	database.MigrateData()
 

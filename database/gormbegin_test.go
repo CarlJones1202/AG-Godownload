@@ -20,6 +20,9 @@ import (
 //   - immediate: B's Begin BLOCKS until A releases the write lock -> the race
 //     between read and write is structurally eliminated.
 func TestGormBeginMode(t *testing.T) {
+	if os.Getenv("TEST_SQLITE_PROBES") != "1" {
+		t.Skip("sqlite-specific probe; set TEST_SQLITE_PROBES=1 to run")
+	}
 	for _, mode := range []string{"deferred", "immediate"} {
 		file := "gormbegin_" + mode + ".db"
 		os.Remove(file)

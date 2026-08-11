@@ -32,7 +32,7 @@ var EmbedWorkQueue = make(chan uint, 1024)
 // already scheduled or in flight is left alone. Idempotent.
 func EnqueueEmbed(imageID uint) {
 	if err := database.DB.Exec(
-		"INSERT OR IGNORE INTO embed_queues (image_id, status, attempts) VALUES (?, 'pending', 0)",
+		"INSERT INTO embed_queues (image_id, status, attempts) VALUES (?, 'pending', 0) ON CONFLICT DO NOTHING",
 		imageID).Error; err != nil {
 		logger.Warnf("Failed to enqueue embed for image %d: %v", imageID, err)
 		return

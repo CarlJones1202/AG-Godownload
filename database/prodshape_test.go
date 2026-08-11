@@ -19,6 +19,9 @@ import (
 // with small writers. Measures commit latency; any commit > busy_timeout is a
 // production BUSY error.
 func TestProdShape(t *testing.T) {
+	if os.Getenv("TEST_SQLITE_PROBES") != "1" {
+		t.Skip("sqlite-specific probe; set TEST_SQLITE_PROBES=1 to run")
+	}
 	type run struct {
 		name       string
 		extraPrag  string

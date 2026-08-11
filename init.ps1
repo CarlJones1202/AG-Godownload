@@ -135,6 +135,195 @@ if (Get-Command "node" -ErrorAction SilentlyContinue) {
     Write-Warning-Host "Node.js was installed but 'node' command is not in the current session path."
 }
 
+# 7. PostgreSQL
+Write-Step "Setting up PostgreSQL (portable, local)..."
+
+# --- PostgreSQL configuration variables ---
+$pgPassword = if ($env:PG_PASSWORD) { $env:PG_PASSWORD } else { "postgres" }
+$pgPort = if ($env:PG_PORT) { $env:PG_PORT.Trim() } else { "5432" }
+$pgData = Join-Path $PWD "bin\pgdata"
+$pgBinDir = Join-Path $PWD "bin\pgsql\bin"
+$pgInitdb = Join-Path $pgBinDir "initdb.exe"
+$pgCtl = Join-Path $pgBinDir "pg_ctl.exe"
+$pgPsql = Join-Path $pgBinDir "psql.exe"
+$pgIsReady = Join-Path $pgBinDir "pg_isready.exe"
+
+# Ensure the bin directory exists
+if (-not (Test-Path (Join-Path $PWD "bin"))) {
+    New-Item -ItemType Directory -Path (Join-Path $PWD "bin") -Force | Out-Null
+    Write-Success "Created 'bin' directory."
+}
+
+# --- VC++ runtime (required by PostgreSQL 17 MSVC binaries) ---
+Write-Host "Checking for Microsoft Visual C++ Redistributable runtime..."
+$system32 = Join-Path $env:WINDIR "System32"
+$vcDllsMissing = -not (Test-Path (Join-Path $system32 "vcruntime140.dll")) -or
+                 -not (Test-Path (Join-Path $system32 "vcruntime140_1.dll")) -or
+                 -not (Test-Path (Join-Path $system32 "msvcp140.dll"))
+if ($vcDllsMissing) {
+    Write-Host "Installing Microsoft Visual C++ Redistributable (x64) via winget..."
+    winget install --id Microsoft.VCRedist.2015+.x64 --silent --accept-package-agreements --accept-source-agreements
+    Write-Host "winget finished (exit code $LASTEXITCODE)."
+    if (-not (Test-Path (Join-Path $system32 "vcruntime140_1.dll"))) {
+        Write-Warning-Host "VC++ runtime may still be missing; PostgreSQL may fail to start (STATUS_DLL_NOT_FOUND)."
+    } else {
+        Write-Success "VC++ runtime is ready."
+    }
+} else {
+    Write-Success "VC++ runtime already present."
+}
+
+# --- Download and extract portable PostgreSQL binaries ---
+if (-not (Test-Path $pgInitdb)) {
+    Write-Host "Downloading PostgreSQL 17.4 portable binaries..."
+    $pgZipUrl = "https://get.enterprisedb.com/postgresql/postgresql-17.4-1-windows-x64-binaries.zip"
+    $pgZip = Join-Path $env:TEMP "postgresql-17.4-1-windows-x64-binaries.zip"
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri $pgZipUrl -OutFile $pgZip
+    } catch {
+        Write-Warning-Host "Failed to download PostgreSQL binaries: $_"
+    }
+    if (Test-Path $pgZip) {
+        Write-Host "Extracting PostgreSQL binaries into bin\pgsql..."
+        try {
+            Expand-Archive -Path $pgZip -DestinationPath (Join-Path $PWD "bin") -Force
+            Remove-Item -Path $pgZip -Force
+        } catch {
+            Write-Warning-Host "Failed to extract PostgreSQL binaries: $_"
+        }
+    }
+} else {
+    Write-Success "PostgreSQL binaries already present ($pgBinDir)."
+}
+
+if (-not (Test-Path $pgInitdb)) {
+    Write-Warning-Host "PostgreSQL binaries are unavailable; skipping PostgreSQL setup."
+} else {
+
+    # --- Initialize the data directory ---
+    if (-not (Test-Path (Join-Path $pgData "PG_VERSION"))) {
+        Write-Host "Initializing PostgreSQL data directory at $pgData ..."
+        if (-not (Test-Path $pgData)) {
+            New-Item -ItemType Directory -Path $pgData -Force | Out-Null
+        }
+        $pwFile = New-TemporaryFile
+        try {
+            Set-Content -Path $pwFile.FullName -Value $pgPassword -NoNewline -Encoding Ascii
+            & $pgInitdb -D $pgData -U postgres -A scram-sha-256 --pwfile=$($pwFile.FullName) -E UTF8 --no-locale
+            if (Test-Path (Join-Path $pgData "PG_VERSION")) {
+                Write-Success "PostgreSQL data directory initialized."
+            } else {
+                Write-Warning-Host "initdb did not complete successfully (exit code $LASTEXITCODE)."
+            }
+        } catch {
+            Write-Warning-Host "initdb failed: $_"
+        } finally {
+            if (Test-Path $pwFile.FullName) { Remove-Item -Path $pwFile.FullName -Force }
+        }
+    } else {
+        Write-Success "PostgreSQL data directory already initialized."
+    }
+
+    # --- Ensure server config listens on localhost with the chosen port ---
+    $pgConf = Join-Path $pgData "postgresql.conf"
+    if (Test-Path $pgConf) {
+        if (-not (Select-String -Path $pgConf -Pattern '^\s*port\s*=' -Quiet)) {
+            Add-Content -Path $pgConf -Value "port = $pgPort"
+        }
+        if (-not (Select-String -Path $pgConf -Pattern '^\s*listen_addresses\s*=' -Quiet)) {
+            Add-Content -Path $pgConf -Value "listen_addresses = '127.0.0.1'"
+        }
+    }
+
+    # --- Start the server if not already running ---
+    & $pgIsReady -h 127.0.0.1 -p $pgPort | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "PostgreSQL is already accepting connections on port $pgPort."
+    } else {
+        Write-Host "Starting PostgreSQL via pg_ctl..."
+        $pgLog = Join-Path $PWD "bin\pg.log"
+        & $pgCtl -D $pgData -l $pgLog start
+        $ready = $false
+        for ($i = 0; $i -lt 30; $i++) {
+            & $pgIsReady -h 127.0.0.1 -p $pgPort | Out-Null
+            if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+            Start-Sleep -Seconds 1
+        }
+        if ($ready) {
+            Write-Success "PostgreSQL started and accepting connections on port $pgPort."
+        } else {
+            Write-Warning-Host "PostgreSQL did not become ready within 30 seconds. Check $pgLog"
+        }
+    }
+
+    # --- Create the gallery database if missing ---
+    $hadPgPasswordEnv = Test-Path Env:\PGPASSWORD
+    $savedPgPasswordEnv = $env:PGPASSWORD
+    $env:PGPASSWORD = $pgPassword
+    try {
+        $existingDb = & $pgPsql -h 127.0.0.1 -p $pgPort -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname='gallery'"
+        if ($LASTEXITCODE -eq 0 -and $existingDb -and $existingDb.Trim() -eq "1") {
+            Write-Success "Database 'gallery' already exists."
+        } else {
+            Write-Host "Creating 'gallery' database..."
+            & $pgPsql -h 127.0.0.1 -p $pgPort -U postgres -c "CREATE DATABASE gallery"
+            if ($LASTEXITCODE -eq 0) {
+                Write-Success "Database 'gallery' created."
+            } else {
+                Write-Warning-Host "Failed to create 'gallery' database."
+            }
+        }
+    } finally {
+        if ($hadPgPasswordEnv) { $env:PGPASSWORD = $savedPgPasswordEnv }
+        else { Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue }
+    }
+
+    # --- Upsert PostgreSQL settings into .env without clobbering existing keys ---
+    function Update-EnvFile {
+        param(
+            [string]$EnvPath,
+            [hashtable]$Values
+        )
+        $lines = @()
+        if (Test-Path $EnvPath) {
+            $lines = Get-Content -Path $EnvPath
+        }
+        foreach ($key in $Values.Keys) {
+            $pattern = "^" + [regex]::Escape($key) + "="
+            $matched = $false
+            $updated = @()
+            foreach ($line in $lines) {
+                if ($line -match $pattern) {
+                    $updated += "$key=$($Values[$key])"
+                    $matched = $true
+                } else {
+                    $updated += $line
+                }
+            }
+            if (-not $matched) {
+                $updated += "$key=$($Values[$key])"
+            }
+            $lines = $updated
+        }
+        Set-Content -Path $EnvPath -Value $lines -Encoding Ascii
+    }
+
+    $databaseUrl = "postgres://postgres:$pgPassword@127.0.0.1:$pgPort/gallery?sslmode=disable"
+    $envFile = Join-Path $PWD ".env"
+    Update-EnvFile -EnvPath $envFile -Values @{
+        "DATABASE_URL" = $databaseUrl
+        "PGHOST"       = "127.0.0.1"
+        "PGPORT"       = $pgPort
+        "PGUSER"       = "postgres"
+        "PGPASSWORD"   = $pgPassword
+        "PGDATABASE"   = "gallery"
+        "PGBIN"        = $pgBinDir
+    }
+    Write-Success "Updated $envFile with PostgreSQL connection settings."
+
+    Write-Success "PostgreSQL setup complete: binaries in $pgBinDir, data in $pgData, database 'gallery' on port $pgPort."
+}
+
 # 6. Initialize Backend
 Write-Step "Initializing backend (Go)..."
 go mod download

@@ -15,6 +15,9 @@ import (
 // a READ transaction into a write-lock-holding transaction that blocks writers.
 // readerStyle: "gorm" = via database/sql Begin(), "raw" = pinned conn plain BEGIN.
 func TestReaderLockMode(t *testing.T) {
+	if os.Getenv("TEST_SQLITE_PROBES") != "1" {
+		t.Skip("sqlite-specific probe; set TEST_SQLITE_PROBES=1 to run")
+	}
 	for _, rs := range []string{"gorm-begin", "raw-begin"} {
 		file := "readerlock_" + rs + ".db"
 		os.Remove(file)

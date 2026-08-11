@@ -2,6 +2,7 @@ package database
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +18,9 @@ import (
 //   - read-then-write transactions (embed worker markEmbedProcessing)
 //   - single-statement writes (EnqueueEmbed, tag links)
 func TestHighContention(t *testing.T) {
+	if os.Getenv("TEST_SQLITE_PROBES") != "1" {
+		t.Skip("sqlite-specific probe; set TEST_SQLITE_PROBES=1 to run")
+	}
 	dsn := "lock_probe_contend.db" +
 		"?_pragma=journal_mode(WAL)" +
 		"&_pragma=busy_timeout(5000)" +

@@ -15,6 +15,9 @@ import (
 // SQLITE_BUSY when another connection commits in between (busy_timeout does
 // not apply to the shared->reserved upgrade). Returns per-mode result.
 func TestDeferredUpgradeRace(t *testing.T) {
+	if os.Getenv("TEST_SQLITE_PROBES") != "1" {
+		t.Skip("sqlite-specific probe; set TEST_SQLITE_PROBES=1 to run")
+	}
 	for _, mode := range []string{"deferred", "immediate"} {
 		file := "upgrade_" + mode + ".db"
 		os.Remove(file)

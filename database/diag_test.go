@@ -26,6 +26,9 @@ func qRow(t *testing.T, conn *sql.Conn, q string) string {
 // 1) is the database ACTUALLY in WAL mode? 2) do DSN pragmas apply?
 // 3) does a long-lived reader block a single writer commit?
 func TestFastDiagnostic(t *testing.T) {
+	if os.Getenv("TEST_SQLITE_PROBES") != "1" {
+		t.Skip("sqlite-specific probe; set TEST_SQLITE_PROBES=1 to run")
+	}
 	file := "diag.db"
 	os.Remove(file)
 	os.Remove(file + "-wal")

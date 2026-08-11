@@ -1,6 +1,7 @@
 package database
 
 import (
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +15,9 @@ import (
 // conn B tries to BEGIN IMMEDIATE. If busy_timeout works, B blocks ~2s and
 // succeeds. If the busy handler is broken, B fails instantly with SQLITE_BUSY.
 func TestBusyTimeoutWorks(t *testing.T) {
+	if os.Getenv("TEST_SQLITE_PROBES") != "1" {
+		t.Skip("sqlite-specific probe; set TEST_SQLITE_PROBES=1 to run")
+	}
 	dsn := "lock_probe_busy.db" +
 		"?_pragma=journal_mode(WAL)" +
 		"&_pragma=busy_timeout(5000)" +
