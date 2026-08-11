@@ -199,8 +199,9 @@ func main() {
 	// Stats routes
 	r.GET("/api/stats", handlers.GetDashboardStats)
 
-	// Database export (Vite proxy strips /api, so match without it)
+	// Database export/restore (Vite proxy strips /api, so match without it)
 	r.GET("/export/db", handlers.ExportDB)
+	r.POST("/import/db", handlers.ImportDB)
 	r.GET("/people/:id/stats", handlers.GetPersonStats)
 
 	// Source scan routes

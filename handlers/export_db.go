@@ -17,20 +17,7 @@ import (
 // pg_dump. The dump command is located under config.Global.PGBinDir (set by
 // init.ps1) or on PATH.
 func ExportDB(c *gin.Context) {
-	pgDump := ""
-	if config.Global.PGBinDir != "" {
-		candidate := filepath.Join(config.Global.PGBinDir, "pg_dump")
-		if _, err := os.Stat(candidate); err == nil {
-			pgDump = candidate
-		} else if _, err := os.Stat(candidate + ".exe"); err == nil {
-			pgDump = candidate + ".exe"
-		}
-	}
-	if pgDump == "" {
-		if p, err := exec.LookPath("pg_dump"); err == nil {
-			pgDump = p
-		}
-	}
+	pgDump := findPgBin("pg_dump")
 	if pgDump == "" {
 		logger.Warn("Export: pg_dump not found (set PGBIN in .env)")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "pg_dump not found; set PGBIN in .env"})
@@ -75,4 +62,23 @@ func ExportDB(c *gin.Context) {
 
 	c.Header("Content-Disposition", "attachment; filename=\""+filename+"\"")
 	c.File(tmpPath)
+}
+
+// findPgBin locates a PostgreSQL utility (pg_dump, psql, ...) under
+// config.Global.PGBinDir or on PATH. Returns "" when not found.
+func findPgBin(name string) string {
+	if config.Global.PGBinDir != "" {
+		for _, candidate := range []string{
+			filepath.Join(config.Global.PGBinDir, name),
+			filepath.Join(config.Global.PGBinDir, name+".exe"),
+		} {
+			if fi, err := os.Stat(candidate); err == nil && !fi.IsDir() {
+				return candidate
+			}
+		}
+	}
+	if p, err := exec.LookPath(name); err == nil {
+		return p
+	}
+	return ""
 }
