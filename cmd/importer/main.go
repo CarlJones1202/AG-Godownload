@@ -16,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"gallery_api/config"
+	"gallery_api/database"
 	"gallery_api/logger"
 	"gallery_api/models"
 	"log/slog"
@@ -61,6 +62,7 @@ func main() {
 	// exactly as they existed before.
 	dst, err := gorm.Open(postgres.Open(*dsn), &gorm.Config{
 		DisableForeignKeyConstraintWhenMigrating: true,
+		Logger: database.NewLogger(),
 	})
 	if err != nil {
 		logger.Fatal("failed to open postgres database:", err)

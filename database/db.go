@@ -5,11 +5,36 @@ import (
 	"gallery_api/models"
 	"time"
 
+	gormlogger "gorm.io/gorm/logger"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
 var DB *gorm.DB
+
+// gormLogWriter forwards GORM's logged messages into the app logger. Only
+// errors are surfaced (GORM is opened at Warn level with a 1h slow threshold),
+// so slow-SQL warnings and per-query SQL lines don't flood the log.
+type gormLogWriter struct{}
+
+func (gormLogWriter) Printf(format string, v ...interface{}) {
+	logger.Errorf("[gorm] "+format, v...)
+}
+
+// NewLogger returns a GORM logger that routes into the app logger and disables
+// the default slow-SQL warnings, which flood sub-second queries on this
+// machine. Real errors are still surfaced.
+func NewLogger() gormlogger.Interface {
+	return gormlogger.New(
+		gormLogWriter{},
+		gormlogger.Config{
+			SlowThreshold:              time.Hour,
+			LogLevel:                   gormlogger.Warn,
+			IgnoreRecordNotFoundError: true,
+			ParameterizedQueries:       true,
+		},
+	)
+}
 
 // Connect opens a GORM connection to PostgreSQL using a lib/pq-style DSN.
 func Connect(dsn string) {
@@ -19,6 +44,7 @@ func Connect(dsn string) {
 	// Enabling FK constraints would reject both those rows and new inserts.
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
 		DisableForeignKeyConstraintWhenMigrating: true,
+		Logger: NewLogger(),
 	})
 	if err != nil {
 		logger.Fatal("Failed to connect to database:", err)
