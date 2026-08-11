@@ -34,7 +34,7 @@ type ImageRating struct {
 type EmbedQueue struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	ImageID   uint      `gorm:"uniqueIndex" json:"image_id"`
-	Status    string    `gorm:"index;default:'pending'" json:"status"` // pending | processing | done | failed
+	Status    string    `gorm:"index;default:'pending'" json:"status"` // pending | processing | failed | deferred
 	Attempts  int       `json:"attempts"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

@@ -102,8 +102,25 @@ func GetSimilarImages(c *gin.Context) {
 			"n_dislikes": nDislikes,
 			"ready":      services.DefaultProfile.Ready(),
 		},
-		"data": items,
+		// Base64-encoded JSON array of the recommended ids so the result set
+		// can be shared / deep-linked via GET /similar?ids=<this value>.
+		"ids_b64": encodeSeedIDs(recs),
+		"data":    items,
 	})
+}
+
+// encodeSeedIDs returns base64(json([...image ids])) for the recommendations,
+// in ranked order, so the set can be passed straight back to /similar?ids=.
+func encodeSeedIDs(recs []services.Recommendation) string {
+	ids := make([]int, 0, len(recs))
+	for _, r := range recs {
+		ids = append(ids, int(r.Image.ID))
+	}
+	b, err := json.Marshal(ids)
+	if err != nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(b)
 }
 
 // SetImageRating stores a 1-5 star rating for an image and updates the taste profile.
@@ -181,18 +198,20 @@ func ResetProfile(c *gin.Context) {
 
 // GetEmbedStatus reports embedding pipeline progress.
 func GetEmbedStatus(c *gin.Context) {
-	var total, embedded, pending, failed int64
+	var total, embedded, pending, failed, deferred int64
 	database.DB.Model(&models.Image{}).
 		Where("type = ? AND file_exists = ? AND deleted_at IS NULL", "image", true).Count(&total)
 	database.DB.Model(&models.ImageEmbedding{}).Count(&embedded)
 	database.DB.Model(&models.EmbedQueue{}).Where("status = ?", "pending").Count(&pending)
 	database.DB.Model(&models.EmbedQueue{}).Where("status = ?", "failed").Count(&failed)
+	database.DB.Model(&models.EmbedQueue{}).Where("status = ?", "deferred").Count(&deferred)
 	embedder := services.CurrentEmbedder()
 	c.JSON(http.StatusOK, gin.H{
 		"total_images": total,
 		"embedded":     embedded,
 		"pending":      pending,
 		"failed":       failed,
+		"deferred":     deferred,
 		"index_size":   services.VectorIndex.Len(),
 		"embedder":     embedder.Name(),
 		"dimension":    embedder.Dim(),

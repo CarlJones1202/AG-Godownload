@@ -55,7 +55,7 @@ export function GalleriesPage() {
         limit,
         page,
         sort: sortBy,
-        seed: sortBy === 'shuffle' ? randomSeed : undefined,
+        seed: sortBy === 'shuffle' ? String(randomSeed) : undefined,
       }),
   });
 

@@ -85,6 +85,7 @@ export interface SimilarImage {
   web_path: string;
   thumbnail_path: string;
   favorite: boolean;
+  gallery_id?: number;
 }
 
 export interface SimilarImagesResponse {
@@ -97,6 +98,7 @@ export interface SimilarImagesResponse {
     embedded: boolean;
   };
   profile: RatingProfile;
+  ids_b64?: string;
   data: SimilarImage[];
 }
 
@@ -105,6 +107,7 @@ export interface EmbedStatus {
   embedded: number;
   pending: number;
   failed: number;
+  deferred?: number;
   index_size: number;
   embedder: string;
   dimension: number;

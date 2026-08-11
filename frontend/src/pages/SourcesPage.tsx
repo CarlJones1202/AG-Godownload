@@ -22,7 +22,7 @@ export function SourcesPage() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [newSource, setNewSource] = useState({ location: '', name: '', priority: 0 });
   const [nameManuallyEdited, setNameManuallyEdited] = useState(false);
-  const guessTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const guessTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // Debounced API call to get the correct guessed name (with model stripping)
   useEffect(() => {

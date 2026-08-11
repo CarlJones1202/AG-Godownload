@@ -467,7 +467,7 @@ export function DashboardPage() {
                       />
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-4 gap-2">
                     <div className="rounded border border-zinc-800 bg-zinc-900/40 p-2 text-center">
                       <div className="text-sm font-mono text-zinc-200">{embedStatus.index_size}</div>
                       <div className="text-[10px] uppercase tracking-wider text-zinc-500">Index Size</div>
@@ -481,6 +481,12 @@ export function DashboardPage() {
                         {embedStatus.failed}
                       </div>
                       <div className="text-[10px] uppercase tracking-wider text-zinc-500">Failed</div>
+                    </div>
+                    <div className="rounded border border-zinc-800 bg-zinc-900/40 p-2 text-center" title="Waiting for their file to be re-downloaded">
+                      <div className={cn('text-sm font-mono', (embedStatus.deferred ?? 0) > 0 ? 'text-sky-400' : 'text-zinc-200')}>
+                        {embedStatus.deferred ?? 0}
+                      </div>
+                      <div className="text-[10px] uppercase tracking-wider text-zinc-500">Deferred</div>
                     </div>
                   </div>
                 </>

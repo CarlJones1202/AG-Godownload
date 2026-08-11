@@ -161,7 +161,15 @@ export const ratings = {
 export const similar = {
   byImage: (imageId: number, limit?: number) =>
     request<SimilarImagesResponse>(`/similar/${imageId}${qs({ limit })}`),
+  byIds: (ids: number[]) =>
+    request<SimilarImagesResponse>(`/similar${qs({ ids: encodeIds(ids) })}`),
 };
+
+// encodeIds base64-encodes a JSON array of image ids for the deep-linkable
+// /similar?ids=<b64> form.
+export function encodeIds(ids: number[]): string {
+  return btoa(JSON.stringify(ids));
+}
 
 export const profile = {
   reset: () => request<{ message: string }>('/profile/reset', { method: 'POST' }),

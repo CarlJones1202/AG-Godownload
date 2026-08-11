@@ -552,12 +552,26 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
       {!isFullScreen && similarOpen && (
         <div className="px-8 pb-6">
           <div className="flex items-center justify-between mb-3">
-            <div className="text-white/40 text-[10px] uppercase tracking-widest">You might like</div>
-            <div className="text-white/25 text-[10px]">
-              {similarData?.profile.ready
-                ? `mixed with your taste (${similarData.profile.n_likes} liked)`
-                : 'based on visual similarity'}
+            <div className="flex items-center gap-3">
+              <div className="text-white/40 text-[10px] uppercase tracking-widest">You might like</div>
+              <div className="text-white/25 text-[10px]">
+                {similarData?.profile.ready
+                  ? `mixed with your taste (${similarData.profile.n_likes} liked)`
+                  : 'based on visual similarity'}
+              </div>
             </div>
+            {similarData?.ids_b64 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate(`/similar?ids=${similarData.ids_b64}`);
+                }}
+                className="flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
+                title="Open the full set on the Similar page"
+              >
+                <Sparkles size={11} /> Open all
+              </button>
+            )}
           </div>
           {similarLoading ? (
             <div className="text-white/20 text-[10px] py-4">Loading similar images…</div>

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"fmt"
 	"gallery_api/config"
 	"gallery_api/database"
@@ -15,17 +16,32 @@ import (
 
 const maxEmbedRetries = 4
 
+// ErrImageFileMissing reports that an image's file is not on disk yet. It is a
+// transient condition (fresh restart before re-download), not a permanent
+// failure, so the worker parks the row as "deferred" instead of burning retries.
+var ErrImageFileMissing = errors.New("image file not found on disk")
+
 // EmbedWorkQueue feeds embedding workers. The embed_queues table is the source
 // of truth for pending work across restarts; dropped channel sends are picked
 // up again by the startup and periodic sweeps.
 var EmbedWorkQueue = make(chan uint, 1024)
 
-// EnqueueEmbed schedules an image for embedding + tagging. Idempotent.
+// EnqueueEmbed schedules an image for embedding + tagging. It doubles as the
+// "this file is available now" signal: terminal (failed) and deferred rows are
+// reset to pending so a re-downloaded image gets embedded, while work that is
+// already scheduled or in flight is left alone. Idempotent.
 func EnqueueEmbed(imageID uint) {
 	if err := database.DB.Exec(
 		"INSERT OR IGNORE INTO embed_queues (image_id, status, attempts) VALUES (?, 'pending', 0)",
 		imageID).Error; err != nil {
 		logger.Warnf("Failed to enqueue embed for image %d: %v", imageID, err)
+		return
+	}
+	if err := database.DB.Exec(
+		"UPDATE embed_queues SET status = 'pending', attempts = 0 "+
+			"WHERE image_id = ? AND status NOT IN ('pending', 'processing')",
+		imageID).Error; err != nil {
+		logger.Warnf("Failed to reset embed queue row for image %d: %v", imageID, err)
 		return
 	}
 	select {
@@ -61,23 +77,27 @@ func StartEmbeddingWorker() {
 		}(i)
 	}
 
-	// Startup: drain the persisted queue, then backfill anything unindexed.
+	// Startup: drain the persisted queue, revive anything deferred whose file
+	// is now on disk, then backfill anything never scheduled.
 	go func() {
 		FeedPendingEmbedQueue()
+		FeedDeferredEmbedQueue()
 		n := EnqueueMissingEmbeddings()
 		if n > 0 {
 			logger.Infof("Embedding backfill enqueued %d images", n)
 		}
 	}()
 
-	// Periodic sweep re-feeds pending work, retries bounded failures, and picks
-	// up images added while running.
+	// Periodic sweep re-feeds pending work, retries bounded failures, revives
+	// deferred rows whose file has appeared, and picks up images added while
+	// running.
 	go func() {
 		ticker := time.NewTicker(15 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
 			FeedPendingEmbedQueue()
 			FeedRetryableFailed()
+			FeedDeferredEmbedQueue()
 			if n := EnqueueMissingEmbeddings(); n > 0 {
 				logger.Infof("Embedding sweep enqueued %d new images", n)
 			}
@@ -125,6 +145,36 @@ func FeedRetryableFailed() {
 	}
 }
 
+// FeedDeferredEmbedQueue revives deferred rows (images whose file was missing
+// at embed time) once their file is back on disk, so a fresh-restart queue gets
+// picked up as soon as images are re-downloaded. Deferred rows whose image
+// record has been deleted are dropped.
+func FeedDeferredEmbedQueue() {
+	var ids []uint
+	if err := database.DB.Table("embed_queues").
+		Where("status = ?", "deferred").
+		Pluck("image_id", &ids).Error; err != nil {
+		logger.Warnf("FeedDeferredEmbedQueue error: %v", err)
+		return
+	}
+	for _, id := range ids {
+		if _, err := ResolveImageFilePath(id); err != nil {
+			if !errors.Is(err, ErrImageFileMissing) {
+				// Image row no longer exists — drop the orphaned queue row.
+				database.DB.Where("image_id = ?", id).Delete(&models.EmbedQueue{})
+			}
+			continue
+		}
+		database.DB.Model(&models.EmbedQueue{}).
+			Where("image_id = ? AND status = ?", id, "deferred").
+			Updates(map[string]interface{}{"status": "pending", "attempts": 0})
+		select {
+		case EmbedWorkQueue <- id:
+		default:
+		}
+	}
+}
+
 // EnqueueMissingEmbeddings queues every eligible image that has no embedding.
 func EnqueueMissingEmbeddings() int {
 	count := 0
@@ -135,6 +185,7 @@ func EnqueueMissingEmbeddings() int {
 		err := database.DB.Select("id").
 			Where("type = ? AND file_exists = ? AND deleted_at IS NULL AND id > ?", "image", true, lastID).
 			Where("NOT EXISTS (SELECT 1 FROM image_embeddings WHERE image_embeddings.image_id = images.id)").
+			Where("NOT EXISTS (SELECT 1 FROM embed_queues WHERE embed_queues.image_id = images.id)").
 			Order("id ASC").Limit(chunkSize).
 			Find(&images).Error
 		if err != nil {
@@ -160,6 +211,12 @@ func ProcessEmbed(imageID uint) error {
 
 	path, err := ResolveImageFilePath(imageID)
 	if err != nil {
+		// File not on disk yet (fresh restart / awaiting re-download): park the
+		// row as deferred instead of burning a retry. It is revived by
+		// FeedDeferredEmbedQueue / EnqueueEmbed once the file reappears.
+		if errors.Is(err, ErrImageFileMissing) {
+			return deferEmbed(imageID)
+		}
 		return handleEmbedFailure(imageID, attempts, err)
 	}
 
@@ -204,6 +261,18 @@ func markEmbedProcessing(imageID uint) int {
 		attempts = 1
 	}
 	return attempts
+}
+
+// deferEmbed parks an image whose file is not on disk yet (e.g. a fresh
+// restart before images have been re-downloaded). It is not counted as a
+// failure and gets no retry backoff; FeedDeferredEmbedQueue / EnqueueEmbed
+// revive it once the file reappears.
+func deferEmbed(imageID uint) error {
+	database.DB.Model(&models.EmbedQueue{}).
+		Where("image_id = ?", imageID).
+		Updates(map[string]interface{}{"status": "deferred", "attempts": 0})
+	logger.Debugf("Embed deferred for image %d: file not on disk yet", imageID)
+	return nil
 }
 
 func handleEmbedFailure(imageID uint, attempts int, err error) error {
@@ -268,5 +337,5 @@ func ResolveImageFilePath(imageID uint) (string, error) {
 			return path, nil
 		}
 	}
-	return "", fmt.Errorf("image file not found on disk (image %d)", imageID)
+	return "", fmt.Errorf("%w (image %d)", ErrImageFileMissing, imageID)
 }

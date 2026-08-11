@@ -249,7 +249,7 @@ export function GalleryDetailPage() {
         return { type: 'image' as const, src: thumb };
       }
     }
-    if (imageList?.data?.length > 0) {
+    if (imageList?.data && imageList.data.length > 0) {
       const img = imageList.data[0];
       const thumb = img.thumbnail_path?.startsWith('/') ? img.thumbnail_path : thumbnailUrl(img.filename);
       return { type: 'image' as const, src: thumb };

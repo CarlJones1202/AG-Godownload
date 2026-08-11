@@ -21,12 +21,20 @@ func Connect(dbPath string) {
 	// synchronous=NORMAL is safe with WAL (writes are still atomic) and much faster
 	// cache_size=-20000 allocates 20MB page cache (default is 2MB)
 	// journal_size_limit=4194304 caps WAL file at 4MB to prevent read slowdown
+	//
+	// _txlock=immediate makes every transaction BEGIN IMMEDIATE (take the write
+	// lock up front). With the default deferred BEGIN, a transaction that reads
+	// then writes fails instantly with SQLITE_BUSY ("database is locked") whenever
+	// any other connection committed in between — busy_timeout does NOT help that
+	// case. IMMEDIATE turns that race into a normal busy-wait handled by
+	// busy_timeout, so concurrent writers serialize instead of erroring.
 	DB, err = gorm.Open(sqlite.Open(dbPath+"?_pragma=journal_mode(WAL)"+
 		"&_pragma=busy_timeout(5000)"+
 		"&_pragma=synchronous(NORMAL)"+
 		"&_pragma=cache_size(-20000)"+
 		"&_pragma=journal_size_limit(4194304)"+
-		"&_pragma=temp_store(MEMORY)",
+		"&_pragma=temp_store(MEMORY)"+
+		"&_txlock=immediate",
 	), &gorm.Config{})
 	if err != nil {
 		logger.Fatal("Failed to connect to database:", err)
