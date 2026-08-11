@@ -80,7 +80,7 @@ func GetSimilarImages(c *gin.Context) {
 	}
 
 	var seedImage models.Image
-	if err := database.DB.Select("id, filename, favorite").First(&seedImage, seed).Error; err != nil {
+	if err := database.DB.Select("id, filename, is_favorite").First(&seedImage, seed).Error; err != nil {
 		seedImage = models.Image{ID: seed}
 	}
 	_, seedErr := services.LoadVector(seed)
