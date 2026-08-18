@@ -10,6 +10,7 @@ import {
   Film,
   Users,
   Download,
+  Upload,
   RefreshCw,
   Play,
   Loader2,
@@ -120,6 +121,39 @@ export function DashboardPage() {
   };
 
   const [recheckStatus, setRecheckStatus] = useState<string | null>(null);
+  const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!confirm(`Are you sure you want to restore "${file.name}"?\nThis will overwrite the current database!`)) {
+      e.target.value = '';
+      return;
+    }
+    setImporting(true);
+    setImportStatus(null);
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch('/api/import/db', {
+        method: 'POST',
+        body: formData,
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || json.detail || 'Restore failed');
+      }
+      setImportStatus(`Success: ${json.message || 'Database restored'} (${json.file}, ${(json.bytes / 1024 / 1024).toFixed(2)} MB)`);
+      queryClient.invalidateQueries();
+    } catch (err: any) {
+      setImportStatus(`Error: ${err.message || 'Import failed'}`);
+    } finally {
+      setImporting(false);
+      e.target.value = '';
+    }
+  };
+
   const recheckAllMut = useMutation({
     mutationFn: () => admin.recheckAll(),
     onSuccess: (data) => {
@@ -500,17 +534,32 @@ export function DashboardPage() {
               <h3 className="text-sm font-medium text-zinc-200">Maintenance</h3>
             </div>
             <div className="p-4 space-y-3">
-              <p className="text-xs text-zinc-500">Remove duplicate images. Requires maintenance token.</p>
-              <Button size="sm" variant="danger" onClick={handleCleanupDupes} disabled={cleanupMut.isPending}>
-                <Wrench size={14} /> {cleanupMut.isPending ? 'Running...' : 'Clean Up Duplicates'}
-              </Button>
-              <a
-                href="/api/export/db"
-                className="inline-flex items-center gap-1.5 rounded-md font-medium transition-colors px-2.5 py-1.5 text-xs bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40 disabled:pointer-events-none"
-                download
-              >
-                <Download size={14} /> Export DB
-              </a>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="danger" onClick={handleCleanupDupes} disabled={cleanupMut.isPending}>
+                  <Wrench size={14} /> {cleanupMut.isPending ? 'Running...' : 'Clean Up Duplicates'}
+                </Button>
+                <a
+                  href="/api/export/db"
+                  className="inline-flex items-center gap-1.5 rounded-md font-medium transition-colors px-2.5 py-1.5 text-xs bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40 disabled:pointer-events-none"
+                  download
+                >
+                  <Download size={14} /> Export DB
+                </a>
+                <label className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md font-medium transition-colors px-2.5 py-1.5 text-xs bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer select-none",
+                  importing && "opacity-50 pointer-events-none"
+                )}>
+                  {importing ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                  {importing ? 'Importing DB...' : 'Import DB'}
+                  <input
+                    type="file"
+                    accept=".sql"
+                    className="hidden"
+                    onChange={handleImportFile}
+                    disabled={importing}
+                  />
+                </label>
+              </div>
               {cleanupStatus && (
                 <div className={cn(
                   'p-2.5 rounded text-xs border',
@@ -519,6 +568,16 @@ export function DashboardPage() {
                     : 'bg-emerald-950/50 text-emerald-400 border-emerald-800/80',
                 )}>
                   {cleanupStatus}
+                </div>
+              )}
+              {importStatus && (
+                <div className={cn(
+                  'p-2.5 rounded text-xs border',
+                  importStatus.startsWith('Error')
+                    ? 'bg-red-950/50 text-red-400 border-red-800/80'
+                    : 'bg-emerald-950/50 text-emerald-400 border-emerald-800/80',
+                )}>
+                  {importStatus}
                 </div>
               )}
             </div>

@@ -58,6 +58,14 @@ func ImportDB(c *gin.Context) {
 	}
 
 	start := time.Now()
+
+	// Reset public schema first so dumps without --clean restore into a fresh schema
+	resetCmd := exec.Command(psql, "-d", config.Global.DatabaseDSN(), "-c", "DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO postgres; GRANT ALL ON SCHEMA public TO public;")
+	resetCmd.Env = append(os.Environ(), "PGPASSWORD="+config.Global.DBPassword)
+	if resetOut, err := resetCmd.CombinedOutput(); err != nil {
+		logger.Warnf("Import: schema reset warning: %v (%s)", err, string(resetOut))
+	}
+
 	cmd := exec.Command(psql, "-d", config.Global.DatabaseDSN(), "-v", "ON_ERROR_STOP=1", "-f", tmpPath)
 	cmd.Env = append(os.Environ(), "PGPASSWORD="+config.Global.DBPassword)
 	out := &strings.Builder{}
