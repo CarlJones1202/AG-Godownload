@@ -283,4 +283,6 @@ export interface ActiveSource {
   download_progress: number;
   downloaded_items: number;
   total_items: number;
+  is_favorite?: boolean;
+  type?: string;
 }

@@ -7,11 +7,34 @@ import (
 	"gallery_api/models"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+// VideoRecoveryTask represents a missing video task to be recovered
+type VideoRecoveryTask struct {
+	ID            uint
+	CurrentDBPath string
+	DownloadURL   string
+	OriginalURL   string
+	SourceName    string
+	Title         string
+	SizeMB        float64
+}
+
+// SortVideoRecoveryTasks sorts tasks by SizeMB ascending (smallest first).
+// If sizes are equal or unknown, it falls back to ID ascending.
+func SortVideoRecoveryTasks(tasks []VideoRecoveryTask) {
+	sort.Slice(tasks, func(i, j int) bool {
+		if tasks[i].SizeMB != tasks[j].SizeMB {
+			return tasks[i].SizeMB < tasks[j].SizeMB
+		}
+		return tasks[i].ID < tasks[j].ID
+	})
+}
 
 // VerifyDownloadedVideos checks all videos in the database and re-downloads any missing files
 func VerifyDownloadedVideos() error {
@@ -31,17 +54,7 @@ func VerifyDownloadedVideos() error {
 		var recoveredCount int32
 		var skippedCount int32
 
-		type recoveryTask struct {
-			ID            uint
-			CurrentDBPath string
-			DownloadURL   string
-			OriginalURL   string
-			SourceName    string
-			Title         string
-		}
-
-		var tasks []recoveryTask
-		var mu sync.Mutex
+		var tasks []VideoRecoveryTask
 
 		type videoUpdateResult struct {
 			ID       uint
@@ -116,10 +129,11 @@ func VerifyDownloadedVideos() error {
 				DownloadURL string
 				OriginalURL string
 				Title       string
+				SizeMB      float64
 			}
 
 			q := database.DB.Model(&models.Image{}).
-				Select("id, filename, download_url, original_url, title").
+				Select("id, filename, download_url, original_url, title, size_mb").
 				Where("type = ? AND id > ?", "video", lastID).
 				Order("id ASC").
 				Limit(chunkSize)
@@ -186,16 +200,15 @@ func VerifyDownloadedVideos() error {
 						}
 					}
 
-					mu.Lock()
-					tasks = append(tasks, recoveryTask{
+					tasks = append(tasks, VideoRecoveryTask{
 						ID:            v.ID,
 						CurrentDBPath: v.Filename,
 						DownloadURL:   v.DownloadURL,
 						OriginalURL:   v.OriginalURL,
 						SourceName:    sourceName,
 						Title:         v.Title,
+						SizeMB:        v.SizeMB,
 					})
-					mu.Unlock()
 				}
 			}
 
@@ -203,88 +216,102 @@ func VerifyDownloadedVideos() error {
 			lastID = videos[len(videos)-1].ID
 		}
 
-		// Phase 2: concurrent recovery
+		// Phase 2: prioritize (smallest first) and concurrent recovery
 		if len(tasks) > 0 {
-			fmt.Printf("Recovering %d missing videos (max 10 concurrent)...\n", len(tasks))
+			SortVideoRecoveryTasks(tasks)
+			logger.Infof("Prioritized %d missing videos by file size (smallest first)", len(tasks))
+
+			fmt.Printf("Recovering %d missing videos (smallest first, max 10 concurrent)...\n", len(tasks))
 			const maxConcurrent = 10
-			sem := make(chan struct{}, maxConcurrent)
-			var wg sync.WaitGroup
+			numWorkers := maxConcurrent
+			if len(tasks) < numWorkers {
+				numWorkers = len(tasks)
+			}
 
+			taskChan := make(chan VideoRecoveryTask, len(tasks))
 			for _, t := range tasks {
+				taskChan <- t
+			}
+			close(taskChan)
+
+			var wg sync.WaitGroup
+			for w := 0; w < numWorkers; w++ {
 				wg.Add(1)
-				go func(task recoveryTask) {
+				go func() {
 					defer wg.Done()
-					UpdateVideoActiveCount(1)
-					AddActiveVideoDownload(task.ID, task.Title, task.DownloadURL, task.SourceName)
-					sem <- struct{}{}
-					defer func() {
-						<-sem
-						UpdateVideoActiveCount(-1)
-						RemoveActiveVideoDownload(task.ID)
-					}()
+					for task := range taskChan {
+						func(t VideoRecoveryTask) {
+							UpdateVideoActiveCount(1)
+							AddActiveVideoDownload(t.ID, t.Title, t.DownloadURL, t.SourceName)
+							defer func() {
+								UpdateVideoActiveCount(-1)
+								RemoveActiveVideoDownload(t.ID)
+							}()
 
-					start := time.Now()
-					pageURL := task.OriginalURL
-					if pageURL == "" {
-						pageURL = task.DownloadURL
-					}
-
-					result, err := DownloadVideo(task.DownloadURL, task.SourceName, pageURL, task.Title)
-					if err != nil {
-						// try to refresh URLs for some providers
-						refreshed := false
-						if task.OriginalURL != "" {
-							var newVideoURL, newTitle string
-							var ripErr error
-							if strings.Contains(task.OriginalURL, "tnaflix.com") {
-								newVideoURL, newTitle, ripErr = RipTnaFlix(task.OriginalURL)
-							} else if strings.Contains(task.OriginalURL, "pornhub.com") {
-								newVideoURL, newTitle, ripErr = RipPornhub(task.OriginalURL)
+							start := time.Now()
+							pageURL := t.OriginalURL
+							if pageURL == "" {
+								pageURL = t.DownloadURL
 							}
-							if ripErr == nil && newVideoURL != "" {
-								database.DB.Model(&models.Image{ID: task.ID}).Update("download_url", newVideoURL)
-								result, err = DownloadVideo(newVideoURL, task.SourceName, pageURL, newTitle)
-								if err == nil {
-									refreshed = true
+
+							result, err := DownloadVideo(t.DownloadURL, t.SourceName, pageURL, t.Title)
+							if err != nil {
+								// try to refresh URLs for some providers
+								refreshed := false
+								if t.OriginalURL != "" {
+									var newVideoURL, newTitle string
+									var ripErr error
+									if strings.Contains(t.OriginalURL, "tnaflix.com") {
+										newVideoURL, newTitle, ripErr = RipTnaFlix(t.OriginalURL)
+									} else if strings.Contains(t.OriginalURL, "pornhub.com") {
+										newVideoURL, newTitle, ripErr = RipPornhub(t.OriginalURL)
+									}
+									if ripErr == nil && newVideoURL != "" {
+										database.DB.Model(&models.Image{ID: t.ID}).Update("download_url", newVideoURL)
+										result, err = DownloadVideo(newVideoURL, t.SourceName, pageURL, newTitle)
+										if err == nil {
+											refreshed = true
+										}
+									}
+								}
+								if !refreshed {
+									logger.Warnf("[Video ID %d] [Source: %s] Re-download failed: %v", t.ID, t.SourceName, err)
+									atomic.AddInt32(&skippedCount, 1)
+									return
 								}
 							}
-						}
-						if !refreshed {
-							logger.Warnf("[Video ID %d] [Source: %s] Re-download failed: %v", task.ID, task.SourceName, err)
-							atomic.AddInt32(&skippedCount, 1)
-							return
-						}
-					}
 
-					relPath, err := filepath.Rel(UploadsDir, result.Path)
-					if err != nil {
-						logger.Warnf("[Video ID %d] [Source: %s] Failed to get relative path: %v", task.ID, task.SourceName, err)
-						relPath = filepath.Join(task.SourceName, filepath.Base(result.Path))
-					}
+							relPath, err := filepath.Rel(UploadsDir, result.Path)
+							if err != nil {
+								logger.Warnf("[Video ID %d] [Source: %s] Failed to get relative path: %v", t.ID, t.SourceName, err)
+								relPath = filepath.Join(t.SourceName, filepath.Base(result.Path))
+							}
 
-					// send to batch writer
-					resultChan <- videoUpdateResult{
-						ID:       task.ID,
-						RelPath:  relPath,
-						Duration: result.Duration,
-						Width:    result.Width,
-						Height:   result.Height,
-						SizeMB:   result.SizeMB,
-					}
+							// send to batch writer
+							resultChan <- videoUpdateResult{
+								ID:       t.ID,
+								RelPath:  relPath,
+								Duration: result.Duration,
+								Width:    result.Width,
+								Height:   result.Height,
+								SizeMB:   result.SizeMB,
+							}
 
-					// extra processing
-					if _, err := GenerateVideoThumbnail(result.Path); err != nil {
-						logger.Warnf("[Video ID %d] Thumbnail generation failed: %v", task.ID, err)
-					}
-					if err := GenerateTrickplayData(result.Path); err != nil {
-						logger.Warnf("[Video ID %d] Trickplay generation failed: %v", task.ID, err)
-					}
+							// extra processing
+							if _, err := GenerateVideoThumbnail(result.Path); err != nil {
+								logger.Warnf("[Video ID %d] Thumbnail generation failed: %v", t.ID, err)
+							}
+							if err := GenerateTrickplayData(result.Path); err != nil {
+								logger.Warnf("[Video ID %d] Trickplay generation failed: %v", t.ID, err)
+							}
 
-					dur := time.Since(start)
-					if dur > 10*time.Second {
-						time.Sleep(2 * time.Second)
+							dur := time.Since(start)
+							if dur > 10*time.Second {
+								time.Sleep(2 * time.Second)
+							}
+						}(task)
 					}
-				}(t)
+				}()
 			}
 
 			wg.Wait()

@@ -48,7 +48,7 @@ func RecoverImage(imageID uint) error {
 	provider := extractImageProvider(img.DownloadURL)
 
 	// Track active download for UI
-	AddActiveVerificationDownload(img.ID, filepath.Base(img.Filename), img.DownloadURL, sourceName)
+	AddActiveVerificationDownload(img.ID, filepath.Base(img.Filename), img.DownloadURL, sourceName, img.IsFavorite)
 	// Ensure we remove active after work
 	defer RemoveActiveVerificationDownload(img.ID)
 

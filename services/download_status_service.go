@@ -20,6 +20,8 @@ type ActiveSourceInfo struct {
 	DownloadProgress int    `json:"download_progress"`
 	DownloadedItems  int    `json:"downloaded_items"`
 	TotalItems       int    `json:"total_items"`
+	IsFavorite       bool   `json:"is_favorite,omitempty"`
+	Type             string `json:"type,omitempty"`
 }
 
 type DownloadStatus struct {
@@ -133,13 +135,37 @@ func UpdateProviderStatus(provider string, active int, max int) {
 	TriggerBroadcast()
 }
 
-func AddActiveVerificationDownload(id uint, name string, location string, sourceName string) {
+func IncProviderActive(provider string, maxAllowed int) {
+	statusMutex.Lock()
+	ps := GlobalStatus.Verification.ProviderStatus[provider]
+	ps.Active++
+	ps.MaxAllowed = maxAllowed
+	GlobalStatus.Verification.ProviderStatus[provider] = ps
+	statusMutex.Unlock()
+	TriggerBroadcast()
+}
+
+func DecProviderActive(provider string, maxAllowed int) {
+	statusMutex.Lock()
+	ps := GlobalStatus.Verification.ProviderStatus[provider]
+	if ps.Active > 0 {
+		ps.Active--
+	}
+	ps.MaxAllowed = maxAllowed
+	GlobalStatus.Verification.ProviderStatus[provider] = ps
+	statusMutex.Unlock()
+	TriggerBroadcast()
+}
+
+func AddActiveVerificationDownload(id uint, name string, location string, sourceName string, isFavorite bool) {
 	statusMutex.Lock()
 	GlobalStatus.Verification.ActiveDownloads = append(GlobalStatus.Verification.ActiveDownloads, ActiveSourceInfo{
 		ID:         id,
 		Name:       name,
 		Location:   location,
 		SourceName: sourceName,
+		IsFavorite: isFavorite,
+		Type:       "image",
 	})
 	statusMutex.Unlock()
 	TriggerBroadcast()

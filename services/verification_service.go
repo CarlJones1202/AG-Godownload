@@ -57,6 +57,96 @@ func extractImageProvider(url string) string {
 
 // VerifyDownloadedImages checks all images in the database and re-downloads any missing files
 // VerifyDownloadedImages checks all images and re-downloads + fixes DB if needed
+// ImageRecoveryTask represents a missing image task to be recovered
+type ImageRecoveryTask struct {
+	ID            uint
+	CurrentDBPath string
+	DownloadURL   string
+	SourceName    string
+	IsFavorite    bool
+	CreatedAt     time.Time
+	GalleryIDs    []uint
+}
+
+// PrioritizeImageRecoveryTasks orders missing images according to the required priority:
+// 1. Tier 1: Favorites first (is_favorite = true)
+// 2. Tier 2: Missing images belonging to any gallery that contains a favorite
+// 3. Tier 3: Remaining missing images, alternating between newest and oldest galleries (followed by orphans)
+func PrioritizeImageRecoveryTasks(tasks []ImageRecoveryTask, favGalleryIDs map[uint]bool, galleryCreatedAt map[uint]time.Time) []ImageRecoveryTask {
+	var tier1 []ImageRecoveryTask
+	var tier2 []ImageRecoveryTask
+	tier3Galleries := make(map[uint][]ImageRecoveryTask)
+	var orphanTasks []ImageRecoveryTask
+
+	for _, t := range tasks {
+		if t.IsFavorite {
+			tier1 = append(tier1, t)
+			continue
+		}
+
+		hasFavGal := false
+		for _, gid := range t.GalleryIDs {
+			if favGalleryIDs[gid] {
+				hasFavGal = true
+				break
+			}
+		}
+
+		if hasFavGal {
+			tier2 = append(tier2, t)
+		} else if len(t.GalleryIDs) > 0 {
+			gid := t.GalleryIDs[0]
+			tier3Galleries[gid] = append(tier3Galleries[gid], t)
+		} else {
+			orphanTasks = append(orphanTasks, t)
+		}
+	}
+
+	// Sort non-favorite galleries by CreatedAt (oldest to newest)
+	galIDs := make([]uint, 0, len(tier3Galleries))
+	for gid := range tier3Galleries {
+		galIDs = append(galIDs, gid)
+	}
+
+	sort.Slice(galIDs, func(i, j int) bool {
+		timeI := galleryCreatedAt[galIDs[i]]
+		timeJ := galleryCreatedAt[galIDs[j]]
+		if !timeI.Equal(timeJ) {
+			return timeI.Before(timeJ)
+		}
+		return galIDs[i] < galIDs[j]
+	})
+
+	// Alternate between newest and oldest galleries
+	var tier3 []ImageRecoveryTask
+	left := 0
+	right := len(galIDs) - 1
+	takeNewest := true
+
+	for left <= right {
+		if takeNewest {
+			gid := galIDs[right]
+			tier3 = append(tier3, tier3Galleries[gid]...)
+			right--
+			takeNewest = false
+		} else {
+			gid := galIDs[left]
+			tier3 = append(tier3, tier3Galleries[gid]...)
+			left++
+			takeNewest = true
+		}
+	}
+	tier3 = append(tier3, orphanTasks...)
+
+	result := make([]ImageRecoveryTask, 0, len(tasks))
+	result = append(result, tier1...)
+	result = append(result, tier2...)
+	result = append(result, tier3...)
+	return result
+}
+
+// VerifyDownloadedImages checks all images in the database and re-downloads any missing files
+// VerifyDownloadedImages checks all images and re-downloads + fixes DB if needed
 func VerifyDownloadedImages() error {
 	logger.Info("Verifying downloaded images...")
 
@@ -73,15 +163,7 @@ func VerifyDownloadedImages() error {
 		missingCount := 0
 		var recoveredCount int32 = 0
 
-		type recoveryTask struct {
-			ID            uint
-			CurrentDBPath string
-			DownloadURL   string
-			SourceName    string
-		}
-
-		var tasks []recoveryTask
-		var mu sync.Mutex
+		var rawTasks []ImageRecoveryTask
 
 		type updateResult struct {
 			ID             uint
@@ -186,30 +268,14 @@ func VerifyDownloadedImages() error {
 						continue
 					}
 
-					sourceName := "uncategorized"
-					var sourceID *uint
-					err := database.DB.
-						Table("galleries").
-						Select("galleries.source_id").
-						Joins("JOIN image_galleries ON image_galleries.gallery_id = galleries.id").
-						Where("image_galleries.image_id = ?", img.ID).
-						Limit(1).
-						Scan(&sourceID).Error
-					if err == nil && sourceID != nil {
-						var src models.Source
-						if database.DB.Select("name").Find(&src, *sourceID).RowsAffected > 0 {
-							sourceName = src.Name
-						}
-					}
-
-					mu.Lock()
-					tasks = append(tasks, recoveryTask{
+					rawTasks = append(rawTasks, ImageRecoveryTask{
 						ID:            img.ID,
 						CurrentDBPath: img.Filename,
 						DownloadURL:   img.DownloadURL,
-						SourceName:    sourceName,
+						IsFavorite:    img.IsFavorite,
+						CreatedAt:     img.CreatedAt,
+						SourceName:    "uncategorized",
 					})
-					mu.Unlock()
 				}
 			}
 
@@ -220,102 +286,203 @@ func VerifyDownloadedImages() error {
 			fmt.Printf("Found %d missing images\n", missingCount)
 		}
 
-		// Phase 2: concurrent recovery – THE IMPORTANT PART
-		if len(tasks) > 0 {
-
-			// Per-provider semaphore system
-			const maxConcurrentPerProvider = 10
-			providerSemaphores := make(map[string]chan struct{})
-			var semMutex sync.Mutex
-
-			// Helper to get or create semaphore for a provider
-			getSemaphore := func(provider string) chan struct{} {
-				semMutex.Lock()
-				defer semMutex.Unlock()
-				if _, exists := providerSemaphores[provider]; !exists {
-					providerSemaphores[provider] = make(chan struct{}, maxConcurrentPerProvider)
-				}
-				return providerSemaphores[provider]
+		// Phase 2: prioritize and recover
+		if len(rawTasks) > 0 {
+			// 1. Batch load gallery associations and source names for missing images
+			type imgGalRel struct {
+				ImageID    uint
+				GalleryID  uint
+				SourceName *string
 			}
 
-			var wg sync.WaitGroup
+			imgToGalleries := make(map[uint][]uint)
+			imgToSource := make(map[uint]string)
+			referencedGalMap := make(map[uint]bool)
 
-			for _, task := range tasks {
-				wg.Add(1)
-				go func(t recoveryTask) {
-					defer wg.Done()
+			const queryBatchSize = 1000
+			for i := 0; i < len(rawTasks); i += queryBatchSize {
+				end := i + queryBatchSize
+				if end > len(rawTasks) {
+					end = len(rawTasks)
+				}
+				var ids []uint
+				for _, t := range rawTasks[i:end] {
+					ids = append(ids, t.ID)
+				}
 
-					// Extract provider and get its semaphore
-					provider := extractImageProvider(t.DownloadURL)
-					sem := getSemaphore(provider)
-
-					sem <- struct{}{}
-					UpdateProviderStatus(provider, len(sem), cap(sem))
-					AddActiveVerificationDownload(t.ID, filepath.Base(t.CurrentDBPath), t.DownloadURL, t.SourceName)
-					defer func() {
-						<-sem
-						UpdateProviderStatus(provider, len(sem), cap(sem))
-						RemoveActiveVerificationDownload(t.ID)
-					}()
-
-					start := time.Now()
-
-					// This returns the FINAL path where it saved the file
-					// (e.g. /uploads/MySource/abc123.jpg or whatever it decided)
-					// Use the download URL's origin as referer (some hosts validate referer)
-					referer := ""
-					if u, perr := urlpkg.Parse(t.DownloadURL); perr == nil {
-						referer = u.Scheme + "://" + u.Host
-					}
-					result, err := DownloadImage(t.DownloadURL, t.SourceName, referer)
-					if err != nil {
-						// If provider is imx and gallery-dl fallback is enabled, attempt fallback
-						if provider == "imx" && config.Global.GalleryDL.Enabled {
-							logger.Debugf("HTTP download failed for image ID %d; attempting gallery-dl fallback", t.ID)
-							gctx, gcancel := context.WithTimeout(context.Background(), time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
-							// Do not defer gcancel here since we are in a long-running goroutine; call explicitly below
-							result, err = DownloadImageWithGalleryDL(gctx, t.DownloadURL, t.SourceName, time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
-							gcancel()
-							if err != nil {
-								// Only warn now that both attempts failed
-								logger.Warnf("[%s] Failed to download image ID %d after gallery-dl fallback: %v", provider, t.ID, err)
-								return
-							}
-						} else {
-							// No fallback configured; warn and return
-							logger.Warnf("[%s] Failed to download image ID %d: %v", provider, t.ID, err)
-							return
+				var rels []imgGalRel
+				err := database.DB.Table("image_galleries").
+					Select("image_galleries.image_id, image_galleries.gallery_id, sources.name as source_name").
+					Joins("JOIN galleries ON galleries.id = image_galleries.gallery_id").
+					Joins("LEFT JOIN sources ON sources.id = galleries.source_id").
+					Where("image_galleries.image_id IN ?", ids).
+					Scan(&rels).Error
+				if err != nil {
+					logger.Errorf("Failed to query gallery relations for missing images: %v", err)
+				} else {
+					for _, r := range rels {
+						imgToGalleries[r.ImageID] = append(imgToGalleries[r.ImageID], r.GalleryID)
+						referencedGalMap[r.GalleryID] = true
+						if r.SourceName != nil && *r.SourceName != "" && imgToSource[r.ImageID] == "" {
+							imgToSource[r.ImageID] = *r.SourceName
 						}
 					}
-
-					// We now trust DownloadImage to handle hashing and storage consistently.
-					// We just need to calculate the relative path for the DB.
-					// result.Path is like "uploads\Source\hash.jpg"
-					// We want "Source\hash.jpg"
-					relPath, err := filepath.Rel(UploadsDir, result.Path)
-					if err != nil {
-						relPath = filepath.Join(t.SourceName, filepath.Base(result.Path)) // Fallback
-					}
-
-					// Send result to batch processor instead of updating directly
-					resultChan <- updateResult{
-						ID:             t.ID,
-						RelPath:        relPath,
-						DominantColors: result.DominantColors,
-					}
-
-					// Generate thumbnail
-					GenerateThumbnail(result.Path)
-
-					duration := time.Since(start)
-					logger.Debugf("[%s] Recovered image ID %d in %.2fs", provider, t.ID, duration.Seconds())
-					if duration > 5*time.Second {
-						time.Sleep(1 * time.Second) // polite pause
-					}
-				}(task)
+				}
 			}
 
-			wg.Wait()
+			// Apply resolved gallery IDs and source names to raw tasks
+			for i := range rawTasks {
+				if gids, ok := imgToGalleries[rawTasks[i].ID]; ok {
+					rawTasks[i].GalleryIDs = gids
+				}
+				if src, ok := imgToSource[rawTasks[i].ID]; ok && src != "" {
+					rawTasks[i].SourceName = src
+				}
+			}
+
+			// 2. Query all gallery IDs that contain at least one favorite
+			var favGalleryIDs []uint
+			if err := database.DB.Table("image_galleries").
+				Joins("JOIN images ON images.id = image_galleries.image_id").
+				Where("images.is_favorite = ?", true).
+				Distinct("image_galleries.gallery_id").
+				Pluck("image_galleries.gallery_id", &favGalleryIDs).Error; err != nil {
+				logger.Errorf("Failed to query favorite gallery IDs: %v", err)
+			}
+
+			favGalSet := make(map[uint]bool, len(favGalleryIDs))
+			for _, gid := range favGalleryIDs {
+				favGalSet[gid] = true
+			}
+			for _, t := range rawTasks {
+				if t.IsFavorite {
+					for _, gid := range t.GalleryIDs {
+						favGalSet[gid] = true
+					}
+				}
+			}
+
+			// 3. Query creation dates for all referenced galleries
+			var refGalIDs []uint
+			for gid := range referencedGalMap {
+				refGalIDs = append(refGalIDs, gid)
+			}
+			galleryCreatedAt := make(map[uint]time.Time)
+			if len(refGalIDs) > 0 {
+				for i := 0; i < len(refGalIDs); i += queryBatchSize {
+					end := i + queryBatchSize
+					if end > len(refGalIDs) {
+						end = len(refGalIDs)
+					}
+					var gals []struct {
+						ID        uint
+						CreatedAt time.Time
+					}
+					if err := database.DB.Model(&models.Gallery{}).
+						Select("id, created_at").
+						Where("id IN ?", refGalIDs[i:end]).
+						Find(&gals).Error; err == nil {
+						for _, g := range gals {
+							galleryCreatedAt[g.ID] = g.CreatedAt
+						}
+					}
+				}
+			}
+
+			// 4. Prioritize tasks
+			tasks := PrioritizeImageRecoveryTasks(rawTasks, favGalSet, galleryCreatedAt)
+			logger.Infof("Prioritized %d missing images for recovery (Favorites -> Favorite Galleries -> Alternating Galleries)", len(tasks))
+
+			// 5. Partition by provider and execute via worker pools
+			providerTasks := make(map[string][]ImageRecoveryTask)
+			for _, task := range tasks {
+				provider := extractImageProvider(task.DownloadURL)
+				providerTasks[provider] = append(providerTasks[provider], task)
+			}
+
+			const maxConcurrentPerProvider = 10
+			var wgProviders sync.WaitGroup
+
+			for provider, pTasks := range providerTasks {
+				wgProviders.Add(1)
+				go func(prov string, taskList []ImageRecoveryTask) {
+					defer wgProviders.Done()
+
+					taskChan := make(chan ImageRecoveryTask, len(taskList))
+					for _, t := range taskList {
+						taskChan <- t
+					}
+					close(taskChan)
+
+					numWorkers := maxConcurrentPerProvider
+					if len(taskList) < numWorkers {
+						numWorkers = len(taskList)
+					}
+
+					var wgWorkers sync.WaitGroup
+					for w := 0; w < numWorkers; w++ {
+						wgWorkers.Add(1)
+						go func() {
+							defer wgWorkers.Done()
+							for t := range taskChan {
+								func(task ImageRecoveryTask) {
+									IncProviderActive(prov, maxConcurrentPerProvider)
+									AddActiveVerificationDownload(task.ID, filepath.Base(task.CurrentDBPath), task.DownloadURL, task.SourceName, task.IsFavorite)
+									defer func() {
+										DecProviderActive(prov, maxConcurrentPerProvider)
+										RemoveActiveVerificationDownload(task.ID)
+									}()
+
+									start := time.Now()
+
+									referer := ""
+									if u, perr := urlpkg.Parse(task.DownloadURL); perr == nil {
+										referer = u.Scheme + "://" + u.Host
+									}
+									result, err := DownloadImage(task.DownloadURL, task.SourceName, referer)
+									if err != nil {
+										if prov == "imx" && config.Global.GalleryDL.Enabled {
+											logger.Debugf("HTTP download failed for image ID %d; attempting gallery-dl fallback", task.ID)
+											gctx, gcancel := context.WithTimeout(context.Background(), time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
+											result, err = DownloadImageWithGalleryDL(gctx, task.DownloadURL, task.SourceName, time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
+											gcancel()
+											if err != nil {
+												logger.Warnf("[%s] Failed to download image ID %d after gallery-dl fallback: %v", prov, task.ID, err)
+												return
+											}
+										} else {
+											logger.Warnf("[%s] Failed to download image ID %d: %v", prov, task.ID, err)
+											return
+										}
+									}
+
+									relPath, err := filepath.Rel(UploadsDir, result.Path)
+									if err != nil {
+										relPath = filepath.Join(task.SourceName, filepath.Base(result.Path))
+									}
+
+									resultChan <- updateResult{
+										ID:             task.ID,
+										RelPath:        relPath,
+										DominantColors: result.DominantColors,
+									}
+
+									GenerateThumbnail(result.Path)
+
+									duration := time.Since(start)
+									logger.Debugf("[%s] Recovered image ID %d in %.2fs", prov, task.ID, duration.Seconds())
+									if duration > 5*time.Second {
+										time.Sleep(1 * time.Second)
+									}
+								}(t)
+							}
+						}()
+					}
+					wgWorkers.Wait()
+				}(provider, pTasks)
+			}
+
+			wgProviders.Wait()
 			close(resultChan) // Signal batch processor to finish
 			wgBatch.Wait()    // Wait for batch processor to complete writes
 			database.Checkpoint()
