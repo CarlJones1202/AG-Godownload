@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { people } from '@/lib/api';
-import type { PersonScanResponse, TagSuggestion } from '@/types';
+import { people, admin } from '@/lib/api';
+import type { PersonScanResponse, TagSuggestion, NotWantedGallery } from '@/types';
 import {
   Badge,
   Button,
@@ -134,12 +134,24 @@ export function PersonDetailPage() {
   const { data: aliases, refetch: refetchAliases } = useQuery({
     queryKey: ['person-aliases', personId],
     queryFn: () => people.getProviderAliases(personId),
-    enabled: showTools,
   });
 
   const { data: scans, refetch: refetchScans } = useQuery({
     queryKey: ['person-scans', personId],
     queryFn: () => people.getScans(personId),
+  });
+
+  const { data: notWantedData, refetch: refetchNotWanted } = useQuery({
+    queryKey: ['person-not-wanted', personId],
+    queryFn: () => admin.notWantedGalleries(personId),
+    enabled: galleryTab === 'missing',
+  });
+  const notWanted = notWantedData?.data ?? [];
+  const notWantedUrls = new Set(notWanted.map((n) => n.source_url));
+
+  const unmarkNotWantedMut = useMutation({
+    mutationFn: (id: number) => admin.removeNotWanted(id),
+    onSuccess: () => { refetchNotWanted(); refetchScans(); },
   });
 
   const addAliasMut = useMutation({
@@ -148,8 +160,12 @@ export function PersonDetailPage() {
   });
 
   const deleteAliasMut = useMutation({
-    mutationFn: (aliasId: number) => people.deleteProviderAlias(personId, aliasId),
-    onSuccess: () => refetchAliases(),
+    mutationFn: (target: string) => people.deleteProviderAlias(personId, target),
+    onSuccess: () => {
+      refetchAliases();
+      refetchScans();
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+    },
   });
 
   const searchMut = useMutation({
@@ -169,7 +185,7 @@ export function PersonDetailPage() {
 
   const excludeScanResultMut = useMutation({
     mutationFn: (data: { provider: string; source_url?: string; title?: string; reason?: string }) => people.excludeScanResult(personId, data),
-    onSuccess: () => refetchScans(),
+    onSuccess: () => { refetchScans(); refetchNotWanted(); queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] }); },
   });
 
   const autoLinkGalleriesMut = useMutation({
@@ -338,6 +354,39 @@ export function PersonDetailPage() {
         </div>
       </div>
 
+      {/* Provider Aliases */}
+      <div className="bg-zinc-900/40 p-3 rounded-lg border border-zinc-800 mb-6">
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="text-xs font-semibold text-zinc-400">Provider Aliases ({aliases?.length ?? 0})</h4>
+        </div>
+        <div className="flex gap-2 items-end mb-2">
+          <select value={aliasProvider} onChange={(e) => setAliasProvider(e.target.value)}
+            className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none cursor-pointer h-7">
+            {PROVIDER_LIST.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <Input placeholder="Alias/ID" value={aliasName} onChange={(e) => setAliasName(e.target.value)} className="h-7 text-xs flex-1 max-w-[160px]" />
+          <Button size="sm" className="h-7" onClick={() => { if (aliasName) addAliasMut.mutate({ provider: aliasProvider, alias: aliasName }); }}
+            disabled={!aliasName || addAliasMut.isPending}>Add</Button>
+        </div>
+        {aliases && aliases.length > 0 ? (
+          <div className="space-y-1 max-h-48 overflow-y-auto">
+            {aliases.map((al) => (
+              <div key={al.id} className="flex items-center justify-between bg-zinc-900 border border-zinc-800 px-2.5 py-1.5 rounded text-xs">
+                <div className="flex items-center gap-1.5">
+                  <Badge variant="info">{al.provider}</Badge>
+                  <span className="text-zinc-200">{al.alias}</span>
+                </div>
+                <button onClick={() => deleteAliasMut.mutate(al.id > 0 ? String(al.id) : al.provider)} className="p-0.5 text-zinc-500 hover:text-red-400 rounded" title="Unlink">
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-zinc-500">No aliases yet.</p>
+        )}
+      </div>
+
       {/* Tools Section (separated from profile) */}
       {showTools && (
         <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4 md:p-5 mb-6">
@@ -356,44 +405,14 @@ export function PersonDetailPage() {
               </Button>
             </div>
 
-            {/* Link gallery + Provider Aliases row */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-zinc-900/40 p-3 rounded-lg border border-zinc-800">
-                <h4 className="text-xs font-semibold text-zinc-400 mb-2">Link Gallery</h4>
-                <div className="flex gap-2">
-                  <Input placeholder="Gallery ID number" value={linkGalleryId} onChange={(e) => setLinkGalleryId(e.target.value)} className="h-8 text-xs flex-1" />
-                  <Button size="sm" className="h-8" onClick={() => { const gid = parseInt(linkGalleryId, 10); if (gid) linkMut.mutate(gid); }} disabled={!linkGalleryId || linkMut.isPending}>
-                    <Link2 size={14} /> Link
-                  </Button>
-                </div>
-              </div>
-
-              <div className="bg-zinc-900/40 p-3 rounded-lg border border-zinc-800">
-                <h4 className="text-xs font-semibold text-zinc-400 mb-2">Provider Aliases</h4>
-                <div className="flex gap-2 items-end">
-                  <select value={aliasProvider} onChange={(e) => setAliasProvider(e.target.value)}
-                    className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 focus:outline-none cursor-pointer h-8 flex-1">
-                    {PROVIDER_LIST.map((p) => <option key={p} value={p}>{p}</option>)}
-                  </select>
-                  <Input placeholder="Alias/ID" value={aliasName} onChange={(e) => setAliasName(e.target.value)} className="h-8 text-xs flex-1" />
-                  <Button size="sm" className="h-8" onClick={() => { if (aliasProvider && aliasName) addAliasMut.mutate({ provider: aliasProvider, alias: aliasName }); }}
-                    disabled={!aliasProvider || !aliasName || addAliasMut.isPending}>Add</Button>
-                </div>
-                {aliases && aliases.length > 0 && (
-                  <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
-                    {aliases.map((al) => (
-                      <div key={al.id} className="flex items-center justify-between bg-zinc-900 border border-zinc-800 px-2.5 py-1.5 rounded text-xs">
-                        <div className="flex items-center gap-1.5">
-                          <Badge variant="info">{al.provider}</Badge>
-                          <span className="text-zinc-200">{al.alias}</span>
-                        </div>
-                        <button onClick={() => deleteAliasMut.mutate(al.id)} className="p-0.5 text-zinc-500 hover:text-red-400 rounded">
-                          <X size={12} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+            {/* Link gallery */}
+            <div className="bg-zinc-900/40 p-3 rounded-lg border border-zinc-800">
+              <h4 className="text-xs font-semibold text-zinc-400 mb-2">Link Gallery</h4>
+              <div className="flex gap-2">
+                <Input placeholder="Gallery ID number" value={linkGalleryId} onChange={(e) => setLinkGalleryId(e.target.value)} className="h-8 text-xs flex-1" />
+                <Button size="sm" className="h-8" onClick={() => { const gid = parseInt(linkGalleryId, 10); if (gid) linkMut.mutate(gid); }} disabled={!linkGalleryId || linkMut.isPending}>
+                  <Link2 size={14} /> Link
+                </Button>
               </div>
             </div>
 
@@ -455,8 +474,8 @@ export function PersonDetailPage() {
             {searchMut.isPending && <p className="text-xs text-zinc-400 animate-pulse text-center py-4">Searching {scanSource}...</p>}
 
             {scanResults && (() => {
-              const activeMissingFiltered = (scanResults.missing_galleries ?? []).filter((mg) => !linkedSourceUrls.has(mg.url));
-              const activeUnsureFiltered = (scanResults.unsure_galleries ?? []).filter((ug) => !linkedSourceUrls.has(ug.url));
+              const activeMissingFiltered = (scanResults.missing_galleries ?? []).filter((mg) => !linkedSourceUrls.has(mg.url) && !notWantedUrls.has(mg.url));
+              const activeUnsureFiltered = (scanResults.unsure_galleries ?? []).filter((ug) => !linkedSourceUrls.has(ug.url) && !notWantedUrls.has(ug.url));
               return (
                 <div className="space-y-3">
                   <div className="flex gap-3 text-[10px] text-zinc-400">
@@ -480,10 +499,14 @@ export function PersonDetailPage() {
                               <p className="text-[10px] text-zinc-200 font-medium line-clamp-2 mb-1">{mg.title}</p>
                               <span className="text-[8px] text-zinc-500 mt-auto">{mg.release_date ?? ''}</span>
                             </div>
-                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
                               <Button size="sm" className="h-7 px-2 text-[10px]" disabled={linkFoundMut.isPending}
                                 onClick={() => linkFoundMut.mutate({ provider: scanResults.provider, source_url: mg.url, name: mg.title, thumbnail_url: mg.thumbnail })}>
                                 Scrape
+                              </Button>
+                              <Button size="sm" variant="secondary" className="h-7 px-2 text-[10px]" disabled={excludeScanResultMut.isPending}
+                                onClick={() => excludeScanResultMut.mutate({ provider: scanResults.provider, source_url: mg.url, title: mg.title })}>
+                                Not Wanted
                               </Button>
                             </div>
                           </div>
@@ -536,7 +559,7 @@ export function PersonDetailPage() {
                 <div className="space-y-3">
                   {scans.slice().reverse().map((scan) => {
                     const res = scan.results;
-                    const missingGalsFiltered = (res?.missing_galleries || []).filter((mg: any) => !linkedSourceUrls.has(mg.url));
+                    const missingGalsFiltered = (res?.missing_galleries || []).filter((mg: any) => !linkedSourceUrls.has(mg.url) && !notWantedUrls.has(mg.url));
                     return (
                       <div key={scan.id} className="bg-zinc-900/80 border border-zinc-800 p-3 rounded text-xs space-y-2">
                         <div className="flex items-center justify-between">
@@ -573,6 +596,8 @@ export function PersonDetailPage() {
                                     <>
                                       <Button size="sm" className="h-7 px-2 text-[10px]" disabled={linkFoundMut.isPending}
                                         onClick={() => linkFoundMut.mutate({ provider: scan.provider ?? '', source_url: mg.url, name: mg.title, thumbnail_url: mg.thumbnail })}>Scrape</Button>
+                                      <Button size="sm" variant="secondary" className="h-7 px-2 text-[10px]" disabled={excludeScanResultMut.isPending}
+                                        onClick={() => excludeScanResultMut.mutate({ provider: scan.provider ?? '', source_url: mg.url ?? '', title: mg.title ?? '' })}>Not Wanted</Button>
                                       <a href={`https://vipergirls.to/search.php?do=process&query=${encodeURIComponent(`"${scan.alias || ''}" "${mg.title || ''}"`)}&titleonly=1&forumchoice%5B%5D=235&childforums=1`}
                                         target="_blank" rel="noopener noreferrer"
                                         className="h-7 px-2 text-[10px] inline-flex items-center justify-center rounded-md bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 border border-blue-500/30 transition-all"
@@ -587,6 +612,26 @@ export function PersonDetailPage() {
                       </div>
                     );
                   })}
+                </div>
+              </div>
+            )}
+
+            {/* Not Wanted */}
+            {notWanted.length > 0 && (
+              <div className="border-t border-zinc-800 pt-4">
+                <h4 className="text-xs font-semibold text-zinc-400 mb-3">Not Wanted ({notWanted.length})</h4>
+                <div className="space-y-1">
+                  {notWanted.map((nw: NotWantedGallery) => (
+                    <div key={nw.id} className="flex items-center justify-between bg-zinc-900 border border-zinc-800 px-2.5 py-1.5 rounded text-xs">
+                      <div className="min-w-0">
+                        <p className="text-zinc-200 truncate">{nw.title || nw.source_url}</p>
+                        <p className="text-zinc-500 text-[10px] truncate">{nw.provider} — {nw.person_name}</p>
+                      </div>
+                      <button onClick={() => unmarkNotWantedMut.mutate(nw.id)} className="shrink-0 p-1 text-zinc-400 hover:text-blue-400 rounded transition-colors" title="Unmark">
+                        Unmark
+                      </button>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

@@ -285,11 +285,32 @@ export interface MissingGalleriesResponse {
   meta: MissingGalleriesMeta;
 }
 
+export interface NotWantedGallery {
+  id: number;
+  person_id: number;
+  person_name: string;
+  provider: string;
+  source_url: string;
+  title: string;
+  reason?: string;
+  created_at: string;
+}
+
 export interface IdentifierResult {
   external_id: string;
   name: string;
   disambiguation: string;
   preview_data: Record<string, unknown>;
+}
+
+export interface AttentionCounts {
+  missing_galleries: number;
+  missing_images: number;
+  missing_videos: number;
+  failed_sources: number;
+  embed_pending: number;
+  embed_failed: number;
+  embed_deferred: number;
 }
 
 export interface DashboardStats {
@@ -299,6 +320,7 @@ export interface DashboardStats {
   videos: number;
   people: number;
   downloads: DownloadStatus;
+  attention?: AttentionCounts;
 }
 
 export interface ActiveSource {

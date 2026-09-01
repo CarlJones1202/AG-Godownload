@@ -10,6 +10,7 @@ import { VideosPage } from '@/pages/VideosPage';
 import { PeoplePage } from '@/pages/PeoplePage';
 import { PersonDetailPage } from '@/pages/PersonDetailPage';
 import { SimilarPage } from '@/pages/SimilarPage';
+import { FavoritesPage } from '@/pages/FavoritesPage';
 
 export function App() {
   return (
@@ -26,6 +27,7 @@ export function App() {
         <Route path="people/:id" element={<PersonDetailPage />} />
         <Route path="tags" element={<TagsPage />} />
         <Route path="similar" element={<SimilarPage />} />
+        <Route path="favorites" element={<FavoritesPage />} />
       </Route>
     </Routes>
   );

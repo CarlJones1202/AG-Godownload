@@ -65,6 +65,19 @@ func RecommendSimilar(seedID uint, limit int) ([]Recommendation, error) {
 		return nil, errors.New("no candidates found")
 	}
 
+	// Guard against duplicate candidates (e.g. a vector store that can hold
+	// the same image id more than once) so the result set has unique ids.
+	seen := make(map[uint]bool, len(pool))
+	uniquePool := pool[:0]
+	for _, sc := range pool {
+		if seen[sc.ImageID] {
+			continue
+		}
+		seen[sc.ImageID] = true
+		uniquePool = append(uniquePool, sc)
+	}
+	pool = uniquePool
+
 	ids := make([]uint, 0, len(pool))
 	for _, sc := range pool {
 		ids = append(ids, sc.ImageID)

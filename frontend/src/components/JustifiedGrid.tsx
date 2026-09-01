@@ -95,7 +95,7 @@ export function JustifiedGrid({
           >
             {row.cells.map((cell) => (
               <div
-                key={cell.item.id}
+                key={`${cell.item.id}-${cell.globalIndex}`}
                 className="relative overflow-hidden rounded-sm bg-zinc-800 group cursor-pointer"
                 style={{
                   width: cell.width,
@@ -104,23 +104,29 @@ export function JustifiedGrid({
                 }}
                 onClick={() => onItemClick?.(cell.globalIndex)}
               >
-                <img
-                  src={cell.item.thumbSrc ?? cell.item.src}
-                  alt=""
-                  className="w-full h-full object-cover"
-                  loading="lazy"
-                  onLoad={(e) => handleImageLoad(cell.item.id, e)}
-                  onError={(e) => {
-                    // Fall back to full-size src if thumbnail fails.
-                    const target = e.currentTarget;
-                    if (
-                      cell.item.thumbSrc &&
-                      target.src !== window.location.origin + cell.item.src
-                    ) {
-                      target.src = cell.item.src;
-                    }
-                  }}
-                />
+                {cell.item.thumbSrc || cell.item.src ? (
+                  <img
+                    src={cell.item.thumbSrc ?? cell.item.src}
+                    alt=""
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                    onLoad={(e) => handleImageLoad(cell.item.id, e)}
+                    onError={(e) => {
+                      // Fall back to full-size src if thumbnail fails.
+                      const target = e.currentTarget;
+                      if (
+                        cell.item.thumbSrc &&
+                        target.src !== window.location.origin + cell.item.src
+                      ) {
+                        target.src = cell.item.src;
+                      }
+                    }}
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-zinc-600 text-xs">
+                    No preview
+                  </div>
+                )}
                 {cell.item.persistentOverlay && (
                   <div className="absolute inset-0 pointer-events-none">
                     {cell.item.persistentOverlay}

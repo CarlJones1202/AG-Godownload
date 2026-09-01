@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"gallery_api/database"
 	"gallery_api/logger"
 	"gallery_api/models"
@@ -378,6 +379,21 @@ func GetAllMissingGalleries(c *gin.Context) {
 
 	var response []AllMissingGalleriesResponse
 
+	// Load exclusions for this person (or all people) up front so hidden
+	// ("not wanted") galleries stay filtered out of the list.
+	var exclusions []models.ScanResultExclusion
+	if personIDFilter != 0 {
+		database.DB.Where("person_id = ?", personIDFilter).Find(&exclusions)
+	} else {
+		database.DB.Find(&exclusions)
+	}
+	excludedByKey := make(map[string]bool)
+	for _, ex := range exclusions {
+		if ex.SourceURL != "" {
+			excludedByKey[fmt.Sprintf("%d|%s|%s", ex.PersonID, strings.ToLower(ex.Provider), ex.SourceURL)] = true
+		}
+	}
+
 	for _, scan := range latestScans {
 		if scan.Results == "" {
 			continue
@@ -420,6 +436,10 @@ func GetAllMissingGalleries(c *gin.Context) {
 			releaseDate, _ := gMap["release_date"].(string)
 
 			if url == "" {
+				continue
+			}
+
+			if excludedByKey[fmt.Sprintf("%d|%s|%s", scan.PersonID, strings.ToLower(scan.Provider), url)] {
 				continue
 			}
 
@@ -516,5 +536,84 @@ func RecheckAllPeople(c *gin.Context) {
 		"message": "Recheck triggered for all people across all alias+provider combos",
 		"queued":  queued,
 	})
+}
+
+// NotWantedExclusionResponse is an enriched scan-result exclusion (a missing
+// gallery marked "not wanted" for a given person+provider).
+type NotWantedExclusionResponse struct {
+	ID         uint   `json:"id"`
+	PersonID   uint   `json:"person_id"`
+	PersonName string `json:"person_name"`
+	Provider   string `json:"provider"`
+	SourceURL  string `json:"source_url"`
+	Title      string `json:"title"`
+	Reason     string `json:"reason"`
+	CreatedAt  string `json:"created_at"`
+}
+
+// GetNotWantedGalleries lists all missing galleries marked "not wanted"
+// (i.e. scan-result exclusions), optionally scoped to a person.
+func GetNotWantedGalleries(c *gin.Context) {
+	var exclusions []models.ScanResultExclusion
+	query := database.DB.Model(&models.ScanResultExclusion{})
+	if pid := c.Query("person_id"); pid != "" {
+		query = query.Where("person_id = ?", pid)
+	}
+	if err := query.Order("created_at DESC").Find(&exclusions).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch not-wanted galleries"})
+		return
+	}
+
+	personNames := make(map[uint]string)
+	var people []models.Person
+	if err := database.DB.Find(&people).Error; err == nil {
+		for _, p := range people {
+			personNames[p.ID] = p.Name
+		}
+	}
+
+	response := make([]NotWantedExclusionResponse, 0, len(exclusions))
+	for _, ex := range exclusions {
+		name := personNames[ex.PersonID]
+		if name == "" {
+			name = "Unknown Person"
+		}
+		response = append(response, NotWantedExclusionResponse{
+			ID:         ex.ID,
+			PersonID:   ex.PersonID,
+			PersonName: name,
+			Provider:   ex.Provider,
+			SourceURL:  ex.SourceURL,
+			Title:      ex.Title,
+			Reason:     ex.Reason,
+			CreatedAt:  ex.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": response})
+}
+
+// RemoveNotWantedGallery unmarks a gallery, allowing it to reappear in the
+// missing-galleries list.
+func RemoveNotWantedGallery(c *gin.Context) {
+	idStr := c.Param("id")
+	exclusionID, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid exclusion ID"})
+		return
+	}
+
+	var exclusion models.ScanResultExclusion
+	if err := database.DB.First(&exclusion, exclusionID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Not-wanted entry not found"})
+		return
+	}
+
+	if err := database.DB.Delete(&exclusion).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove not-wanted entry"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Gallery unmarked"})
 }
 

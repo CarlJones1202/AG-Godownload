@@ -1,4 +1,6 @@
-import { cn } from '@/lib/utils';
+import { useState } from 'react';
+import { Film } from 'lucide-react';
+import { cn, thumbnailUrl } from '@/lib/utils';
 
 interface PageHeaderProps {
   title: React.ReactNode;
@@ -200,6 +202,45 @@ export function Select({ label, options, className, ...props }: SelectProps) {
   );
 }
 
+interface TabsProps {
+  value: string;
+  onChange: (value: string) => void;
+  tabs: { value: string; label: string; count?: number }[];
+}
+
+export function Tabs({ value, onChange, tabs }: TabsProps) {
+  return (
+    <div className="flex items-center gap-1 border-b border-zinc-800 overflow-x-auto">
+      {tabs.map((t) => (
+        <button
+          key={t.value}
+          onClick={() => onChange(t.value)}
+          className={cn(
+            'flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap',
+            value === t.value
+              ? 'text-white border-blue-500'
+              : 'text-zinc-400 border-transparent hover:text-zinc-200 hover:border-zinc-700',
+          )}
+        >
+          {t.label}
+          {typeof t.count === 'number' && t.count > 0 && (
+            <span
+              className={cn(
+                'text-[10px] px-1.5 py-0.5 rounded-full font-semibold leading-none',
+                value === t.value
+                  ? 'bg-blue-900/60 text-blue-300'
+                  : 'bg-zinc-800 text-zinc-400',
+              )}
+            >
+              {t.count}
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 interface ConfirmDialogProps {
   open: boolean;
   title: string;
@@ -258,5 +299,35 @@ export function Pagination({ page, totalPages, onPrev, onNext, hasMore }: Pagina
         </Button>
       </div>
     </div>
+  );
+}
+
+interface VideoThumbProps {
+  filename: string;
+  alt?: string;
+}
+
+/** Video thumbnail with a film-icon fallback when the file is missing or the
+ *  thumbnail hasn't been generated yet (avoids broken-image requests/404s). */
+export function VideoThumb({ filename, alt = '' }: VideoThumbProps) {
+  const [failed, setFailed] = useState(false);
+  const src = filename ? thumbnailUrl(filename) : undefined;
+
+  if (!src || failed) {
+    return (
+      <div className="w-full h-full bg-zinc-800 flex items-center justify-center text-zinc-600">
+        <Film size={28} className="text-zinc-700" />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className="w-full h-full object-cover"
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
   );
 }

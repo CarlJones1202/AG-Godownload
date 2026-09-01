@@ -192,6 +192,8 @@ func main() {
 	// Admin: all missing galleries across all people
 	r.GET("/admin/missing-galleries", handlers.GetAllMissingGalleries)
 	r.POST("/admin/recheck-missing-galleries", handlers.RecheckAllPeople)
+	r.GET("/admin/missing-galleries/not-wanted", handlers.GetNotWantedGalleries)
+	r.DELETE("/admin/missing-galleries/not-wanted/:id", handlers.RemoveNotWantedGallery)
 
 	// Old StashDB routes (kept for backward compatibility)
 	r.GET("/stashdb/search", handlers.SearchStashDB)

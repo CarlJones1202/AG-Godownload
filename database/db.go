@@ -91,6 +91,21 @@ func Migrate() {
 	logger.Info("Database migrated successfully")
 
 	addPersonGalleriesIndex()
+	addPersonScanQueueIndexes()
+}
+
+// addPersonScanQueueIndexes helps the dashboard "missing galleries" attention
+// count pick the latest completed scan per (person, provider) quickly.
+func addPersonScanQueueIndexes() {
+	err := DB.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_person_scan_queue_person_provider_id
+		ON person_scan_queue(person_id, provider, id DESC)
+	`).Error
+	if err != nil {
+		logger.Warn("Failed to add person_scan_queue index:", err)
+		return
+	}
+	logger.Info("Added composite index on person_scan_queue(person_id, provider, id DESC)")
 }
 
 func addPersonGalleriesIndex() {

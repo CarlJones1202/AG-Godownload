@@ -8,6 +8,7 @@ import type {
   IdentifierResult,
   Image,
   MissingGalleriesResponse,
+  NotWantedGallery,
   PaginatedResult,
   PaginationParams,
   Person,
@@ -239,8 +240,8 @@ export const people = {
     request<ProviderAlias[]>(`/people/${id}/provider-aliases`),
   createProviderAlias: (id: number, data: { provider: string; alias: string }) =>
     request<ProviderAlias>(`/people/${id}/provider-aliases`, { method: 'POST', body: JSON.stringify(data) }),
-  deleteProviderAlias: (personId: number, aliasId: number) =>
-    request<void>(`/people/${personId}/provider-aliases/${aliasId}`, { method: 'DELETE' }),
+  deleteProviderAlias: (personId: number, target: string) =>
+    request<void>(`/people/${personId}/provider-aliases/${encodeURIComponent(target)}`, { method: 'DELETE' }),
   linkImage: (personId: number, imageId: number) =>
     request<{ message: string }>(`/people/${personId}/images/${imageId}`, { method: 'POST' }),
   unlinkImage: (personId: number, imageId: number) =>
@@ -276,6 +277,10 @@ export const maintenance = {
     request<{ total_images: number; deleted: number; url_duplicates: number; filename_duplicates: number; note: string }>(
       '/cleanup-dupes', { method: 'POST', headers: { 'X-Maintenance-Token': token, 'Content-Type': 'application/json' } },
     ),
+  purgePlaceholders: (token: string) =>
+    request<{ scanned_files: number; placeholders_found: number; deleted_from_db: number; deleted_files: number }>(
+      '/purge-placeholders', { method: 'POST', headers: { 'X-Maintenance-Token': token, 'Content-Type': 'application/json' } },
+    ),
 };
 
 export const admin = {
@@ -283,6 +288,10 @@ export const admin = {
     request<MissingGalleriesResponse>(`/admin/missing-galleries${qs(params)}`),
   recheckAll: () =>
     request<{ message: string; queued: number }>('/admin/recheck-missing-galleries', { method: 'POST' }),
+  notWantedGalleries: (personId?: number) =>
+    request<{ data: NotWantedGallery[] }>(`/admin/missing-galleries/not-wanted${qs({ person_id: personId })}`),
+  removeNotWanted: (id: number) =>
+    request<{ message: string }>(`/admin/missing-galleries/not-wanted/${id}`, { method: 'DELETE' }),
 };
 
 export const tagsApi = {

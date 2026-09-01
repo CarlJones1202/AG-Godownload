@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, X, Info, Heart, Link as LinkIcon, Play, Pause, Maximize, Minimize, Timer, UserPlus, Tag, Plus, Star, Sparkles } from 'lucide-react';
-import type { Image, Person } from '@/types';
-import { formatDate, parseColors, cn } from '@/lib/utils';
+import type { Image, Person, SimilarImage } from '@/types';
+import { formatDate, parseColors, cn, imageUrl } from '@/lib/utils';
 import { Link, useNavigate } from 'react-router-dom';
 import { tagsApi, people, ratings as ratingsApi, similar as similarApi } from '@/lib/api';
 import { Input } from '@/components/UI';
+
+function resolveSimilarSrc(s: SimilarImage): string {
+  return s.web_path || s.thumbnail_path || (s.filename ? imageUrl(s.filename) : '');
+}
 
 interface LightboxProps {
   images: { src: string; alt?: string }[];
@@ -27,6 +31,7 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
   const [linkPersonOpen, setLinkPersonOpen] = useState(false);
   const [personSearch, setPersonSearch] = useState('');
   const [similarOpen, setSimilarOpen] = useState(false);
+  const [similarViewState, setSimilarViewState] = useState<{ src: string; alt: string; key: string } | null>(null);
   const navigate = useNavigate();
 
   const { data: tagResults } = useQuery({
@@ -77,8 +82,11 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
     }
   }, []);
 
-  const hasPrev = index > 0;
-  const hasNext = index < images.length - 1;
+  const similarViewKey = `${imageData?.[index]?.id ?? index}`;
+  const similarView = similarViewState && similarViewState.key === similarViewKey ? similarViewState : null;
+
+  const hasPrev = !similarView && index > 0;
+  const hasNext = !similarView && index < images.length - 1;
 
   const currentImage = imageData?.[index];
 
@@ -133,17 +141,14 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
     enabled: similarOpen && isCurrentImage,
   });
 
-  const openSimilarImage = useCallback((sim: { gallery_id?: number; web_path?: string }) => {
-    if (sim.gallery_id) {
-      navigate(`/galleries/${sim.gallery_id}`);
-    } else if (sim.web_path) {
-      window.open(sim.web_path, '_blank');
-    }
-  }, [navigate]);
+  const openSimilarImage = useCallback((sim: SimilarImage) => {
+    const src = resolveSimilarSrc(sim);
+    if (src) setSimilarViewState({ src, alt: sim.filename, key: `${imageData?.[index]?.id ?? index}` });
+  }, [imageData, index]);
 
   useEffect(() => {
     let timer: number | undefined;
-    if (isPlaying) {
+    if (isPlaying && !similarView) {
       timer = window.setInterval(() => {
         onIndexChange((index + 1) % images.length);
       }, speed);
@@ -151,13 +156,13 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
     return () => {
       if (timer) clearInterval(timer);
     };
-  }, [isPlaying, index, images.length, onIndexChange, speed]);
+  }, [isPlaying, index, images.length, onIndexChange, speed, similarView]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
-      else if (e.key === 'ArrowLeft') goPrev();
-      else if (e.key === 'ArrowRight') goNext();
+      else if (e.key === 'ArrowLeft' && !similarView) goPrev();
+      else if (e.key === 'ArrowRight' && !similarView) goNext();
       else if (e.key === 'i' || e.key === 'I') setShowInfo((s) => !s);
       else if (e.key === 'f' || e.key === 'F') handleToggleFavorite();
       else if (e.key === ' ') {
@@ -167,7 +172,7 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [onClose, goPrev, goNext, handleToggleFavorite, isPlaying]);
+  }, [onClose, goPrev, goNext, handleToggleFavorite, isPlaying, similarView]);
 
   useEffect(() => {
     const handleFsChange = () => {
@@ -277,7 +282,11 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
 
           <div className="flex items-center gap-4">
             <div className="text-white/60 text-sm font-medium tracking-wider">
-              {index + 1} <span className="text-white/20 mx-1">/</span> {images.length}
+              {similarView ? (
+                '1'
+              ) : (
+                index + 1
+              )} <span className="text-white/20 mx-1">/</span> {similarView ? '1' : images.length}
             </div>
             <button
               onClick={onClose}
@@ -328,8 +337,8 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
         )}
 
         <img
-          src={images[index].src}
-          alt={images[index].alt ?? ''}
+          src={similarView ? similarView.src : images[index].src}
+          alt={similarView ? (similarView.alt ?? '') : (images[index].alt ?? '')}
           className={cn(
             "transition-all duration-500 ease-in-out select-none object-contain pointer-events-auto",
             isFullScreen 
@@ -357,7 +366,7 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
       {/* Bottom info bar */}
       {!isFullScreen && (
         <div className="px-8 py-6 bg-gradient-to-t from-black/80 to-transparent">
-          {currentImage ? (
+          {!similarView && currentImage ? (
             <div className="flex items-center justify-between text-white/90 text-sm">
               <div className="flex items-center gap-8">
                 {currentImage.width && currentImage.height && (
@@ -540,6 +549,20 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
                 </div>
               </div>
             </div>
+          ) : similarView ? (
+            <div className="flex items-center justify-between gap-4 text-white/90 text-sm">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-white/30 text-[10px] uppercase tracking-widest shrink-0">Similar</span>
+                <span className="truncate">{similarView.alt}</span>
+              </div>
+              <button
+                onClick={() => setSimilarView(null)}
+                className="shrink-0 text-[10px] px-2.5 py-1 rounded bg-white/10 hover:bg-white/20 text-white/70 transition-colors"
+                title="Back to the source image"
+              >
+                Back to source
+              </button>
+            </div>
           ) : (
             <div className="text-white/40 text-sm flex items-center justify-center font-mono">
               {index + 1} / {images.length}
@@ -577,31 +600,40 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
             <div className="text-white/20 text-[10px] py-4">Loading similar images…</div>
           ) : similarData && similarData.data.length > 0 ? (
             <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none">
-              {similarData.data.map((s) => (
-                <button
-                  key={s.id}
-                  onClick={() => openSimilarImage(s)}
-                  className="shrink-0 group text-left"
-                  title={s.reasons.length > 0 ? s.reasons.join(' · ') : `${Math.round(s.similarity * 100)}% similar`}
-                >
-                  <div className="relative">
-                    <img
-                      src={s.web_path}
-                      alt={s.filename}
-                      loading="lazy"
-                      className="h-24 w-20 object-cover rounded-md border border-zinc-800 opacity-80 group-hover:opacity-100 group-hover:border-zinc-500 transition-all"
-                    />
-                    <div className="absolute bottom-1 right-1 text-[9px] font-mono px-1 py-0.5 rounded bg-black/75 text-white/80">
-                      {Math.round(s.similarity * 100)}%
-                    </div>
-                    {s.favorite && (
-                      <div className="absolute top-1 left-1">
-                        <Heart size={10} className="fill-red-500 text-red-500" />
+              {similarData.data.map((s) => {
+                const src = resolveSimilarSrc(s);
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => openSimilarImage(s)}
+                    className="shrink-0 group text-left"
+                    title={s.reasons.length > 0 ? s.reasons.join(' · ') : `${Math.round(s.similarity * 100)}% similar`}
+                  >
+                    <div className="relative">
+                      {src ? (
+                        <img
+                          src={src}
+                          alt={s.filename}
+                          loading="lazy"
+                          className="h-24 w-20 object-cover rounded-md border border-zinc-800 opacity-80 group-hover:opacity-100 group-hover:border-zinc-500 transition-all"
+                        />
+                      ) : (
+                        <div className="h-24 w-40 flex items-center justify-center rounded-md border border-zinc-800 bg-zinc-900 text-zinc-700 text-[9px] overflow-hidden">
+                          {s.filename}
+                        </div>
+                      )}
+                      <div className="absolute bottom-1 right-1 text-[9px] font-mono px-1 py-0.5 rounded bg-black/75 text-white/80">
+                        {Math.round(s.similarity * 100)}%
                       </div>
-                    )}
-                  </div>
-                </button>
-              ))}
+                      {s.favorite && (
+                        <div className="absolute top-1 left-1">
+                          <Heart size={10} className="fill-red-500 text-red-500" />
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           ) : (
             <div className="text-white/20 text-[10px] py-4">

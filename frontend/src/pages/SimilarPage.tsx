@@ -55,7 +55,7 @@ function SimilarTile({ item }: { item: SimilarImage }) {
   const body = (
     <div className="relative overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/50 group hover:border-zinc-600 transition-colors">
       <img
-        src={item.thumbnail_path || item.web_path}
+        src={item.thumbnail_path || item.web_path || undefined}
         alt={item.filename}
         loading="lazy"
         className="aspect-[3/4] w-full object-cover"
@@ -234,7 +234,7 @@ export function SimilarPage() {
           {seed && seed.web_path && (
             <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4 flex items-center gap-4">
               <img
-                src={seed.thumbnail_path || seed.web_path}
+                src={seed.thumbnail_path || seed.web_path || undefined}
                 alt={seed.filename}
                 className="h-20 w-16 object-cover rounded-md border border-zinc-700"
               />

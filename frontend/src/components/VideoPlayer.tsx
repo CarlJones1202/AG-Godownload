@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, RotateCw } from 'lucide-react';
 import type { Image } from '@/types';
 import { videoUrl, trickplayVttUrl, formatDuration } from '@/lib/utils';
+import { VRPlayer } from './VRPlayer';
 
 interface VideoPlayerProps {
   video: Image;
@@ -14,6 +15,9 @@ export function VideoPlayer({ video, onClose }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const isVr = video.vr_mode === '180' || video.vr_mode === '360';
+  const [vrOpen, setVrOpen] = useState(false);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -151,6 +155,76 @@ export function VideoPlayer({ video, onClose }: VideoPlayerProps) {
   const vttSrc = trickplayVttUrl(video.filename);
 
   const formatSpeed = (s: number) => `${s === 1 ? 'Normal' : s + 'x'}`;
+
+  if (isVr) {
+    if (vrOpen) {
+      return <VRPlayer video={video} onClose={() => setVrOpen(false)} />;
+    }
+    // VR preview: show the video in a spherical preview with an "Enter VR" button.
+    const vrLabel = video.vr_mode === '360' ? 'VR 360' : 'VR 180';
+    return (
+      <div className="fixed inset-0 z-50 bg-black select-none flex flex-col">
+        <div className="relative flex-1 flex items-center justify-center overflow-hidden">
+          <div
+            className="relative w-full h-full"
+            style={{
+              transform: `perspective(1200px) rotateX(${video.vr_mode === '360' ? '0deg' : '12deg'})`,
+            }}
+          >
+            <video
+              ref={videoRef}
+              src={src}
+              autoPlay
+              muted
+              loop
+              playsInline
+              className="absolute inset-0 w-full h-full object-cover"
+              style={{
+                borderRadius: video.vr_mode === '360' ? '50%' : '50% 50% 0 0',
+                filter: video.vr_mode === '360' ? 'none' : 'blur(0px)',
+              }}
+            />
+            <div
+              className="absolute inset-0"
+              style={{
+                background:
+                  video.vr_mode === '360'
+                    ? 'radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.7) 100%)'
+                    : 'linear-gradient(to bottom, rgba(0,0,0,0) 60%, rgba(0,0,0,0.75) 100%)',
+              }}
+            />
+          </div>
+          {/* Center overlay */}
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 p-6 text-center">
+            <span className="px-3 py-1 rounded-full bg-white/10 text-white/90 text-sm font-semibold uppercase tracking-wider">{vrLabel}</span>
+            <h2 className="text-2xl font-bold text-white max-w-lg truncate">{video.title || video.filename}</h2>
+            <p className="text-sm text-white/60 max-w-md">Drag in VR view to look around. No headset needed.</p>
+            <div className="flex items-center gap-3 mt-2">
+              <button
+                onClick={() => setVrOpen(true)}
+                className="px-6 py-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold transition-colors"
+              >
+                Enter VR Viewer
+              </button>
+              <button
+                onClick={onClose}
+                className="px-5 py-3 rounded-lg bg-white/10 hover:bg-white/20 text-white font-medium transition-colors"
+              >
+                Back
+              </button>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 z-10 p-1.5 text-white/60 hover:text-white transition-colors"
+            aria-label="Close"
+          >
+            <X size={22} />
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

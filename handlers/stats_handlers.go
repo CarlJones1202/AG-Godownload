@@ -1,10 +1,14 @@
 package handlers
 
 import (
+	"encoding/json"
+	"fmt"
 	"gallery_api/database"
+	"gallery_api/logger"
 	"gallery_api/models"
 	"gallery_api/services"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -33,7 +37,93 @@ func GetDashboardStats(c *gin.Context) {
 		"videos":    videoCount,
 		"people":    personCount,
 		"downloads": services.GetGlobalDownloadStatus(),
+		"attention": getAttentionCounts(),
 	})
+}
+
+// getAttentionCounts computes lightweight "needs attention" counts for the
+// dashboard badge and overview strip. All queries are indexed except the
+// missing-galleries scan, which uses the person_scan_queue composite index.
+func getAttentionCounts() gin.H {
+	var missingImages, missingVideos int64
+	database.DB.Model(&models.Image{}).Where("type != ? AND file_exists = ?", "video", false).Count(&missingImages)
+	database.DB.Model(&models.Image{}).Where("type = ? AND file_exists = ?", "video", false).Count(&missingVideos)
+
+	var failedSources int64
+	database.DB.Model(&models.Source{}).Where("status = ?", "error").Count(&failedSources)
+
+	var embedPending, embedFailed, embedDeferred int64
+	database.DB.Model(&models.EmbedQueue{}).Where("status = ?", "pending").Count(&embedPending)
+	database.DB.Model(&models.EmbedQueue{}).Where("status = ?", "failed").Count(&embedFailed)
+	database.DB.Model(&models.EmbedQueue{}).Where("status = ?", "deferred").Count(&embedDeferred)
+
+	return gin.H{
+		"missing_galleries": countMissingGalleries(),
+		"missing_images":    missingImages,
+		"missing_videos":    missingVideos,
+		"failed_sources":    failedSources,
+		"embed_pending":     embedPending,
+		"embed_failed":      embedFailed,
+		"embed_deferred":    embedDeferred,
+	}
+}
+
+// countMissingGalleries totals the missing-gallery entries in the latest
+// completed scan per (person, provider), mirroring GetAllMissingGalleries.
+// Entries hidden via "not wanted" (scan-result exclusions) are excluded.
+func countMissingGalleries() int {
+	type latestScan struct {
+		PersonID uint
+		Provider string
+		Results  string
+	}
+	var recent []latestScan
+	if err := database.DB.Raw(`
+		SELECT DISTINCT ON (person_id, provider) person_id, provider, results
+		FROM person_scan_queue
+		WHERE status = ? AND deleted_at IS NULL AND results IS NOT NULL AND results != ''
+		ORDER BY person_id, provider, id DESC
+	`, models.ScanStatusCompleted).Scan(&recent).Error; err != nil {
+		logger.Warnf("Failed to count missing galleries: %v", err)
+		return 0
+	}
+
+	var exclusions []models.ScanResultExclusion
+	if err := database.DB.Find(&exclusions).Error; err != nil {
+		logger.Warnf("Failed to load scan exclusions: %v", err)
+		exclusions = []models.ScanResultExclusion{}
+	}
+	excludedByKey := make(map[string]bool)
+	for _, ex := range exclusions {
+		if ex.SourceURL != "" {
+			excludedByKey[fmt.Sprintf("%d|%s|%s", ex.PersonID, strings.ToLower(ex.Provider), ex.SourceURL)] = true
+		}
+	}
+
+	total := 0
+	for _, s := range recent {
+		var results map[string]interface{}
+		if err := json.Unmarshal([]byte(s.Results), &results); err != nil {
+			continue
+		}
+		if missing, ok := results["missing_galleries"].([]interface{}); ok {
+			for _, g := range missing {
+				gMap, ok := g.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				url, _ := gMap["url"].(string)
+				if url == "" {
+					continue
+				}
+				if excludedByKey[fmt.Sprintf("%d|%s|%s", s.PersonID, strings.ToLower(s.Provider), url)] {
+					continue
+				}
+				total++
+			}
+		}
+	}
+	return total
 }
 
 // GetPersonStats returns statistics for a person

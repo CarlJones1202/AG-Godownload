@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { videos, images as imagesApi, people } from '@/lib/api';
-import { formatDate, formatDuration, thumbnailUrl } from '@/lib/utils';
+import { formatDate, formatDuration } from '@/lib/utils';
 import {
   PageHeader,
   Spinner,
@@ -11,6 +11,7 @@ import {
   Input,
   Pagination,
   ConfirmDialog,
+  VideoThumb,
 } from '@/components/UI';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { Heart, Play, Trash2, UserPlus, X, Pencil } from 'lucide-react';
@@ -97,13 +98,7 @@ export function VideosPage() {
                 onClick={() => setActiveVideo(vid)}
               >
                 <div className="relative aspect-video bg-zinc-800 overflow-hidden">
-                  <img
-                    src={thumbnailUrl(vid.filename)}
-                    alt={vid.filename}
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                  />
+                  <VideoThumb filename={vid.filename} alt={vid.filename} />
                   <div className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity">
                     <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center">
                       <Play size={24} className="text-white ml-0.5" />
