@@ -259,6 +259,32 @@ export interface PersonScanResponse {
   unsure_galleries: GallerySearchResult[];
 }
 
+export interface MissingGallery {
+  person_id: number;
+  person_name: string;
+  provider: string;
+  alias: string;
+  gallery_url: string;
+  gallery_name: string;
+  thumbnail: string;
+  found_count: number;
+  missing_count: number;
+  release_date: string;
+}
+
+export interface MissingGalleriesMeta {
+  current_page: number;
+  total_pages: number;
+  total_items: number;
+  limit: number;
+  pending_scans: number;
+}
+
+export interface MissingGalleriesResponse {
+  data: MissingGallery[];
+  meta: MissingGalleriesMeta;
+}
+
 export interface IdentifierResult {
   external_id: string;
   name: string;

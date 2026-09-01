@@ -6,9 +6,10 @@ export function useWebSocket() {
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const unmountedRef = useRef(false);
 
   const connect = useCallback(() => {
-    if (wsRef.current) return;
+    if (wsRef.current || unmountedRef.current) return;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws`;
@@ -30,7 +31,9 @@ export function useWebSocket() {
     socket.onclose = () => {
       setConnected(false);
       wsRef.current = null;
-      reconnectTimer.current = setTimeout(connect, 3000);
+      if (!unmountedRef.current) {
+        reconnectTimer.current = setTimeout(connect, 3000);
+      }
     };
 
     socket.onerror = () => socket.close();
@@ -38,8 +41,10 @@ export function useWebSocket() {
   }, []);
 
   useEffect(() => {
+    unmountedRef.current = false;
     connect();
     return () => {
+      unmountedRef.current = true;
       clearTimeout(reconnectTimer.current);
       wsRef.current?.close();
       wsRef.current = null;

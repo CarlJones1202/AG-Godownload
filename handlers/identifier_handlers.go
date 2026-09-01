@@ -11,6 +11,25 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// GetPersonIdentifiers returns all identifiers for a person
+func GetPersonIdentifiers(c *gin.Context) {
+	personID := c.Param("id")
+
+	var person models.Person
+	if err := database.DB.First(&person, personID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Person not found"})
+		return
+	}
+
+	var identifiers []models.PersonIdentifier
+	if err := database.DB.Where("person_id = ?", person.ID).Find(&identifiers).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch identifiers"})
+		return
+	}
+
+	c.JSON(http.StatusOK, identifiers)
+}
+
 // ListIdentifierSources returns all available identifier sources
 func ListIdentifierSources(c *gin.Context) {
 	registry := services.GetIdentifierRegistry()

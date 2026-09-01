@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -322,7 +323,24 @@ type AllMissingGalleriesResponse struct {
 }
 
 func GetAllMissingGalleries(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 50
+	}
+
 	sortBy := c.DefaultQuery("sort", "name")
+	providerFilter := strings.ToLower(c.Query("provider"))
+	q := strings.ToLower(c.Query("q"))
+	var personIDFilter uint
+	if pid := c.Query("person_id"); pid != "" {
+		if parsed, err := strconv.ParseUint(pid, 10, 32); err == nil {
+			personIDFilter = uint(parsed)
+		}
+	}
 
 	var scans []models.PersonScanQueue
 	if err := database.DB.Where("status = ?", models.ScanStatusCompleted).
@@ -345,6 +363,19 @@ func GetAllMissingGalleries(c *gin.Context) {
 		}
 	}
 
+	// Preload person names in one query to avoid N+1 lookups
+	personNames := make(map[uint]string)
+	{
+		var people []models.Person
+		if err := database.DB.Find(&people).Error; err != nil {
+			logger.Warnf("Failed to load people for missing galleries: %v", err)
+		} else {
+			for _, p := range people {
+				personNames[p.ID] = p.Name
+			}
+		}
+	}
+
 	var response []AllMissingGalleriesResponse
 
 	for _, scan := range latestScans {
@@ -362,10 +393,16 @@ func GetAllMissingGalleries(c *gin.Context) {
 			continue
 		}
 
-		personName := "Unknown Person"
-		var person models.Person
-		if err := database.DB.First(&person, scan.PersonID).Error; err == nil {
-			personName = person.Name
+		if personIDFilter != 0 && scan.PersonID != personIDFilter {
+			continue
+		}
+		if providerFilter != "" && strings.ToLower(scan.Provider) != providerFilter {
+			continue
+		}
+
+		personName := personNames[scan.PersonID]
+		if personName == "" {
+			personName = "Unknown Person"
 		}
 
 		foundCount, _ := results["found_count"].(float64)
@@ -390,6 +427,10 @@ func GetAllMissingGalleries(c *gin.Context) {
 				title = "Untitled"
 			}
 
+			if q != "" && !strings.Contains(strings.ToLower(title), q) && !strings.Contains(strings.ToLower(personName), q) {
+				continue
+			}
+
 			response = append(response, AllMissingGalleriesResponse{
 				PersonID:     scan.PersonID,
 				PersonName:   personName,
@@ -407,7 +448,7 @@ func GetAllMissingGalleries(c *gin.Context) {
 
 	switch sortBy {
 	case "date":
-		sort.Slice(response, func(i, j int) bool {
+		sort.SliceStable(response, func(i, j int) bool {
 			if response[i].ReleaseDate == "" && response[j].ReleaseDate == "" {
 				return response[i].PersonName < response[j].PersonName
 			}
@@ -420,12 +461,48 @@ func GetAllMissingGalleries(c *gin.Context) {
 			return response[i].ReleaseDate > response[j].ReleaseDate
 		})
 	default:
-		sort.Slice(response, func(i, j int) bool {
+		sort.SliceStable(response, func(i, j int) bool {
+			if response[i].PersonName == response[j].PersonName {
+				return response[i].GalleryName < response[j].GalleryName
+			}
 			return response[i].PersonName < response[j].PersonName
 		})
 	}
 
-	c.JSON(http.StatusOK, response)
+	total := len(response)
+
+	// Paginate
+	start := (page - 1) * limit
+	if start > total {
+		start = total
+	}
+	end := start + limit
+	if end > total {
+		end = total
+	}
+	paged := response[start:end]
+
+	// Count in-flight scans so the UI can show live recheck progress
+	var pendingScans int64
+	database.DB.Model(&models.PersonScanQueue{}).
+		Where("status IN ?", []models.ScanStatus{models.ScanStatusPending, models.ScanStatusProcessing}).
+		Count(&pendingScans)
+
+	totalPages := 0
+	if limit > 0 {
+		totalPages = (total + limit - 1) / limit
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": paged,
+		"meta": gin.H{
+			"current_page":  page,
+			"total_pages":   totalPages,
+			"total_items":   total,
+			"limit":         limit,
+			"pending_scans": pendingScans,
+		},
+	})
 }
 
 func RecheckAllPeople(c *gin.Context) {

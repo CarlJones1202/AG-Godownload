@@ -698,6 +698,13 @@ func ProcessVideoSource(source models.Source) error {
 			localPath = localPath
 			videoURL = ""
 		}
+	} else if strings.Contains(source.Location, "drive.google.com") {
+		logger.Infof("Detected Google Drive URL, using yt-dlp...")
+		localPath, videoTitle, err = RipYouTube(source.Location)
+		if err != nil {
+			return fmt.Errorf("failed to download video from Google Drive (make sure the file is shared with anyone and is a video): %w", err)
+		}
+		isLocalFile = true
 	} else if strings.Contains(source.Location, "youtube.com") || strings.Contains(source.Location, "youtu.be") {
 		logger.Infof("Detected YouTube URL, invoking RipYouTube...")
 		localPath, videoTitle, err = RipYouTube(source.Location)

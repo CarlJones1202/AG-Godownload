@@ -119,6 +119,12 @@ func IsVideoFile(path string) bool {
 	return false
 }
 
+// isYouTubeURL reports whether url points to a YouTube watch page or short link
+func isYouTubeURL(url string) bool {
+	lower := strings.ToLower(url)
+	return strings.Contains(lower, "youtube.com") || strings.Contains(lower, "youtu.be")
+}
+
 // IsVideoURL checks if a URL points to a video based on extension or domain
 func IsVideoURL(url string) bool {
 	// Check extension
@@ -136,6 +142,9 @@ func IsVideoURL(url string) bool {
 		return true
 	}
 	if strings.Contains(url, "youtube.com") || strings.Contains(url, "youtu.be") {
+		return true
+	}
+	if strings.Contains(url, "drive.google.com") {
 		return true
 	}
 	return false

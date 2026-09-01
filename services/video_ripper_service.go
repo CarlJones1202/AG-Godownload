@@ -459,6 +459,25 @@ func formatBytes(b int64) string {
 func DownloadVideo(videoURL string, sourceName string, pageURL string, title string) (*DownloadImageResult, error) {
 	logger.Infof("Downloading video from %s", videoURL)
 
+	// YouTube pages / short links can't be streamed directly — rip through yt-dlp
+	if isYouTubeURL(videoURL) {
+		logger.Infof("Detected YouTube URL, invoking RipYouTube...")
+		localPath, ytTitle, err := RipYouTube(videoURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to download YouTube video: %w", err)
+		}
+		if title == "" && ytTitle != "" {
+			title = ytTitle
+		}
+		result, err := ImportLocalVideo(localPath, sourceName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to import YouTube video: %w", err)
+		}
+		result.Title = title
+		logger.Infof("Saved YouTube video to: %s", result.Path)
+		return result, nil
+	}
+
 	// Use the appropriate HTTP client (WireGuard for blocked domains, default otherwise)
 	client := GetHTTPClient(videoURL)
 

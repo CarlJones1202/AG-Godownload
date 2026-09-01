@@ -165,6 +165,7 @@ func main() {
 	// New identifier system routes
 	r.GET("/identifiers/sources", handlers.ListIdentifierSources)
 	r.GET("/identifiers/:source/search", handlers.SearchIdentifier)
+	r.GET("/people/:id/identifiers", handlers.GetPersonIdentifiers)
 	r.POST("/people/:id/identifiers", handlers.LinkIdentifier)
 	r.DELETE("/people/:id/identifiers/:identifierId", handlers.UnlinkIdentifier)
 

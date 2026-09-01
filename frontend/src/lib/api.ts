@@ -7,6 +7,7 @@ import type {
   GallerySearchResult,
   IdentifierResult,
   Image,
+  MissingGalleriesResponse,
   PaginatedResult,
   PaginationParams,
   Person,
@@ -217,7 +218,7 @@ export const people = {
   identifiers: (id: number) =>
     request<PersonIdentifier[]>(`/people/${id}/identifiers`),
   linkIdentifier: (id: number, data: { provider: string; external_id: string }) =>
-    request<PersonIdentifier>(`/people/${id}/identifiers`, { method: 'POST', body: JSON.stringify(data) }),
+    request<PersonIdentifier>(`/people/${id}/identifiers`, { method: 'POST', body: JSON.stringify({ source: data.provider, external_id: data.external_id }) }),
   unlinkIdentifier: (personId: number, identifierId: number) =>
     request<void>(`/people/${personId}/identifiers/${identifierId}`, { method: 'DELETE' }),
   getStats: (id: number) =>
@@ -278,8 +279,8 @@ export const maintenance = {
 };
 
 export const admin = {
-  missingGalleries: (_params?: PaginationParams & { q?: string; provider?: string; person_id?: number }) =>
-    request<{ data: any[]; meta: any }>('/admin/missing-galleries'),
+  missingGalleries: (params: PaginationParams & { q?: string; provider?: string; person_id?: number; sort?: string } = {}) =>
+    request<MissingGalleriesResponse>(`/admin/missing-galleries${qs(params)}`),
   recheckAll: () =>
     request<{ message: string; queued: number }>('/admin/recheck-missing-galleries', { method: 'POST' }),
 };

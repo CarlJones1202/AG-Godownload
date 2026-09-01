@@ -265,6 +265,12 @@ func VerifyDownloadedVideos() error {
 										newVideoURL, newTitle, ripErr = RipTnaFlix(t.OriginalURL)
 									} else if strings.Contains(t.OriginalURL, "pornhub.com") {
 										newVideoURL, newTitle, ripErr = RipPornhub(t.OriginalURL)
+									} else if isYouTubeURL(t.OriginalURL) {
+										// YouTube stream URLs go stale; re-rip the page and import the fresh file
+										result, err = DownloadVideo(t.OriginalURL, t.SourceName, t.OriginalURL, t.Title)
+										if err == nil {
+											refreshed = true
+										}
 									}
 									if ripErr == nil && newVideoURL != "" {
 										database.DB.Model(&models.Image{ID: t.ID}).Update("download_url", newVideoURL)

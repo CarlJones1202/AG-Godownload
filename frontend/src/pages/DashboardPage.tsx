@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sources, admin, maintenance, stats, adminApi } from '@/lib/api';
-import { Spinner, Badge, Button } from '@/components/UI';
+import { Spinner, Badge, Button, Input } from '@/components/UI';
 import { Link } from 'react-router-dom';
 import {
   Globe,
@@ -18,8 +18,16 @@ import {
   ListChecks,
   Settings2,
   ChevronRight,
+  ExternalLink,
+  Search,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+const PROVIDER_OPTIONS = [
+  "MetArt", "MetartX", "Playboy", "PlayboyPlus", "Vixen",
+  "SexArt", "LifeErotic", "EternalDesire", "MPLStudios",
+  "VivThomas", "WowGirls", "RylskyArt",
+];
 
 const quickLinks = [
   { to: '/galleries', label: 'Galleries', icon: Images, desc: 'Browse collections', color: 'text-blue-400' },
@@ -46,10 +54,21 @@ export function DashboardPage() {
     enabled: showAdmin,
   });
 
-  const { data: missingData, isLoading: loadingMissing } = useQuery({
-    queryKey: ['admin', 'missing-galleries'],
-    queryFn: () => admin.missingGalleries({ limit: 50 }),
+  const [missingPage, setMissingPage] = useState(1);
+  const [missingQ, setMissingQ] = useState('');
+  const [missingProvider, setMissingProvider] = useState('');
+  const [rechecking, setRechecking] = useState(false);
+
+  const { data: missingData, isLoading: loadingMissing, dataUpdatedAt: missingUpdatedAt } = useQuery({
+    queryKey: ['admin', 'missing-galleries', { page: missingPage, q: missingQ, provider: missingProvider }],
+    queryFn: () => admin.missingGalleries({
+      page: missingPage,
+      limit: 25,
+      q: missingQ || undefined,
+      provider: missingProvider || undefined,
+    }),
     enabled: showAdmin,
+    refetchInterval: rechecking ? 4000 : false,
   });
 
   const { data: failedImagesData } = useQuery({
@@ -121,6 +140,7 @@ export function DashboardPage() {
   };
 
   const [recheckStatus, setRecheckStatus] = useState<string | null>(null);
+  const [recheckTriggeredAt, setRecheckTriggeredAt] = useState(0);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
 
@@ -157,13 +177,29 @@ export function DashboardPage() {
   const recheckAllMut = useMutation({
     mutationFn: () => admin.recheckAll(),
     onSuccess: (data) => {
-      setRecheckStatus(`Recheck queued for ${data.queued} alias+provider combos across all people.`);
+      setRechecking(true);
+      setRecheckTriggeredAt(Date.now());
+      setRecheckStatus(`Recheck queued for ${data.queued} alias+provider combos. Scanning...`);
+      setMissingPage(1);
       queryClient.invalidateQueries({ queryKey: ['admin', 'missing-galleries'] });
     },
     onError: (err: any) => {
+      setRechecking(false);
       setRecheckStatus(`Error: ${err.message || 'Failed to trigger recheck'}`);
     },
   });
+
+  useEffect(() => {
+    if (
+      rechecking &&
+      missingData &&
+      missingData.meta.pending_scans === 0 &&
+      missingUpdatedAt > recheckTriggeredAt
+    ) {
+      setRechecking(false);
+      setRecheckStatus('Recheck complete.');
+    }
+  }, [rechecking, missingData, missingUpdatedAt, recheckTriggeredAt]);
 
   if (!d) return <Spinner />;
 
@@ -173,6 +209,10 @@ export function DashboardPage() {
   const totalActive = activeCrawls.length + (verificationActive ? 1 : 0) + (videosActive ? 1 : 0);
   const sourceItems = sourceList?.data ?? [];
   const missingGalleries = missingData?.data ?? [];
+  const missingTotal = missingData?.meta?.total_items ?? 0;
+  const missingPendingScans = missingData?.meta?.pending_scans ?? 0;
+  const missingTotalPages = missingData?.meta?.total_pages ?? 1;
+  const recheckBusy = recheckAllMut.isPending || rechecking;
 
   return (
     <div className="space-y-10">
@@ -356,7 +396,7 @@ export function DashboardPage() {
           {/* Missing Galleries */}
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/20">
             <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
-              <h3 className="text-sm font-medium text-zinc-200">Missing Galleries ({missingGalleries.length})</h3>
+              <h3 className="text-sm font-medium text-zinc-200">Missing Galleries ({missingTotal})</h3>
               <Button
                 size="sm"
                 variant="ghost"
@@ -364,11 +404,11 @@ export function DashboardPage() {
                   setRecheckStatus(null);
                   recheckAllMut.mutate();
                 }}
-                disabled={recheckAllMut.isPending}
+                disabled={recheckBusy}
                 className="gap-1.5 text-xs"
               >
-                <RefreshCw size={13} className={cn(recheckAllMut.isPending && 'animate-spin')} />
-                {recheckAllMut.isPending ? 'Rechecking...' : 'Recheck All People'}
+                <RefreshCw size={13} className={cn(recheckBusy && 'animate-spin')} />
+                {recheckBusy ? 'Rechecking...' : 'Recheck All People'}
               </Button>
             </div>
             <div className="p-4">
@@ -384,21 +424,72 @@ export function DashboardPage() {
                   {recheckStatus}
                 </div>
               )}
+              {missingPendingScans > 0 && (
+                <div className="mb-3 flex items-center gap-2 p-2.5 rounded text-xs bg-blue-950/40 text-blue-300 border border-blue-800/60">
+                  <Loader2 size={12} className="animate-spin" />
+                  {missingPendingScans} scan{missingPendingScans === 1 ? '' : 's'} in progress — list updates automatically
+                </div>
+              )}
+              <div className="flex gap-2 mb-3">
+                <div className="relative flex-1">
+                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+                  <Input
+                    placeholder="Search title or person..."
+                    value={missingQ}
+                    onChange={(e) => { setMissingQ(e.target.value); setMissingPage(1); }}
+                    className="pl-8 h-8 text-xs"
+                  />
+                </div>
+                <select
+                  value={missingProvider}
+                  onChange={(e) => { setMissingProvider(e.target.value); setMissingPage(1); }}
+                  className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none cursor-pointer h-8"
+                >
+                  <option value="">All providers</option>
+                  {PROVIDER_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
               {loadingMissing ? (
                 <Spinner size="sm" />
               ) : missingGalleries.length === 0 ? (
                 <p className="text-sm text-zinc-500">No missing galleries found.</p>
               ) : (
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {missingGalleries.map((mg: any, i: number) => (
-                    <div key={i} className="flex items-center justify-between py-2">
-                      <div className="min-w-0 flex-1">
-                        <span className="text-sm text-zinc-300 truncate block">{mg.gallery_url || mg.gallery_name || `Missing #${i + 1}`}</span>
-                        <span className="text-xs text-zinc-500">{mg.provider && `${mg.provider} · `}{mg.person_name && <Link to={`/people/${mg.person_id}`} className="hover:text-blue-400">{mg.person_name}</Link>}</span>
+                <>
+                  <div className="space-y-2 max-h-96 overflow-y-auto">
+                    {missingGalleries.map((mg, i) => (
+                      <div key={`${mg.person_id}-${mg.gallery_url}-${i}`} className="flex items-center gap-3 py-1.5">
+                        <div className="h-10 w-7 rounded overflow-hidden bg-zinc-800 shrink-0">
+                          {mg.thumbnail ? <img src={mg.thumbnail} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                          : <div className="w-full h-full flex items-center justify-center text-zinc-600"><Image size={12} /></div>}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm text-zinc-200 truncate">{mg.gallery_name}</p>
+                          <div className="flex items-center gap-2 text-xs text-zinc-500">
+                            <Badge variant="info">{mg.provider}</Badge>
+                            <Link to={`/people/${mg.person_id}`} className="hover:text-blue-400">{mg.person_name}</Link>
+                            {mg.release_date && <span>{mg.release_date}</span>}
+                          </div>
+                        </div>
+                        <a href={mg.gallery_url} target="_blank" rel="noopener noreferrer" className="p-1 text-zinc-500 hover:text-white transition-colors" title="Open gallery">
+                          <ExternalLink size={12} />
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                  {missingTotalPages > 1 && (
+                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-zinc-800">
+                      <span className="text-xs text-zinc-500">Page {missingData?.meta?.current_page ?? 1} of {missingTotalPages}</span>
+                      <div className="flex gap-2">
+                        <Button variant="ghost" size="sm" disabled={missingPage <= 1} onClick={() => setMissingPage((p) => Math.max(1, p - 1))}>
+                          Previous
+                        </Button>
+                        <Button variant="ghost" size="sm" disabled={(missingData?.meta?.current_page ?? 1) >= missingTotalPages} onClick={() => setMissingPage((p) => p + 1)}>
+                          Next
+                        </Button>
                       </div>
                     </div>
-                  ))}
-                </div>
+                  )}
+                </>
               )}
             </div>
           </div>
