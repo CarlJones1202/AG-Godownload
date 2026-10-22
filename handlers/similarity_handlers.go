@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"gallery_api/config"
 	"gallery_api/database"
 	"gallery_api/models"
 	"gallery_api/services"
@@ -101,9 +100,22 @@ func GetSimilarImages(c *gin.Context) {
 	seed := loadSeedImage(seeds[0])
 
 	seedsOut := make([]gin.H, 0, len(seeds))
-	seedImages := make([]models.Image, 0, len(seeds))
+	var seedImages []models.Image
+	if err := database.DB.Select("id, filename").Where("id IN ?", seeds).Find(&seedImages).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	seedByID := make(map[uint]models.Image, len(seedImages))
+	for _, im := range seedImages {
+		seedByID[im.ID] = im
+	}
+	seedImages = make([]models.Image, 0, len(seeds))
 	for _, id := range seeds {
-		seedImages = append(seedImages, models.Image{ID: id})
+		im, ok := seedByID[id]
+		if !ok {
+			im = models.Image{ID: id}
+		}
+		seedImages = append(seedImages, im)
 	}
 	populateImagePaths(seedImages)
 	skipped := map[uint]bool{}
@@ -113,6 +125,7 @@ func GetSimilarImages(c *gin.Context) {
 	for _, im := range seedImages {
 		seedsOut = append(seedsOut, gin.H{
 			"id":             im.ID,
+			"filename":       im.Filename,
 			"web_path":       im.WebPath,
 			"thumbnail_path": im.ThumbnailPath,
 			"embedded":       !skipped[im.ID],
@@ -136,8 +149,8 @@ func GetSimilarImages(c *gin.Context) {
 		},
 		// All seeds with embedding status, so the UI can show the
 		// favorites the consensus was built from.
-		"seeds":        seedsOut,
-		"common_tags":  consensus.CommonTagNames,
+		"seeds":       seedsOut,
+		"common_tags": consensus.CommonTagNames,
 		"profile": gin.H{
 			"n_likes":    nLikes,
 			"n_dislikes": nDislikes,
@@ -150,14 +163,13 @@ func GetSimilarImages(c *gin.Context) {
 	})
 }
 
-// favoriteSeedIDs returns the most recent favorited, existing image ids, most
-// recent first, capped by config — these seed the favorites-consensus mode.
+// favoriteSeedIDs returns every favorited image, most recent first. Images
+// without embeddings are included in the seed metadata and skipped by scoring.
 func favoriteSeedIDs() ([]uint, error) {
 	var ids []uint
 	err := database.DB.Model(&models.Image{}).
-		Where("is_favorite = ? AND type = ? AND file_exists = ?", true, "image", true).
+		Where("is_favorite = ? AND type = ?", true, "image").
 		Order("id DESC").
-		Limit(config.Global.Embedding.FavoriteSeedCap).
 		Pluck("id", &ids).Error
 	return ids, err
 }

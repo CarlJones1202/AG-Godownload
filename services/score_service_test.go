@@ -51,8 +51,8 @@ func TestCentralityWeightsCoherentSetEven(t *testing.T) {
 		unitVec(1, -0.05, 0),
 	})
 	for i, v := range w {
-		if math.Abs(v-w[0]) > 1e-9 {
-			t.Fatalf("nearly-identical seeds should weight evenly, index %d: %v", i, w)
+		if math.Abs(v-w[0]) > 0.01 {
+			t.Fatalf("nearly-identical seeds should receive similar weights, index %d: %v", i, w)
 		}
 	}
 }
@@ -88,5 +88,12 @@ func TestComputeTagSimWeightedEmpty(t *testing.T) {
 	}
 	if v := computeTagSimWeighted(map[uint]float64{1: 1}, nil, nil); v != 0 {
 		t.Fatalf("empty candidate tags should score 0, got %f", v)
+	}
+}
+
+func TestPaletteSimilarityUsesEverySeedColor(t *testing.T) {
+	sim := paletteSimilarity([]string{"#FF0000", "#00FF00"}, []string{"#FF0000"})
+	if sim >= 1 || sim <= 0 {
+		t.Fatalf("expected both seed colors to contribute, got %f", sim)
 	}
 }

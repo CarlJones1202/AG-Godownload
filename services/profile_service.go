@@ -25,14 +25,14 @@ const (
 // (sum, count) statistics in embedding space plus per-tag like/dislike counts,
 // so a rating event is an O(1) update.
 type TasteProfile struct {
-	mu          sync.RWMutex
-	embedder    string
-	likeSum     []float32
-	dislikeSum  []float32
-	nLikes      int
-	nDislikes   int
-	tagLike     map[uint]int
-	tagDislike  map[uint]int
+	mu         sync.RWMutex
+	embedder   string
+	likeSum    []float32
+	dislikeSum []float32
+	nLikes     int
+	nDislikes  int
+	tagLike    map[uint]int
+	tagDislike map[uint]int
 }
 
 func NewTasteProfile() *TasteProfile {
@@ -249,6 +249,15 @@ func (p *TasteProfile) Counts() (int, int) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.nLikes, p.nDislikes
+}
+
+// DislikedImageIDs returns images rated at or below the dislike threshold.
+func (p *TasteProfile) DislikedImageIDs() ([]uint, error) {
+	var ids []uint
+	err := database.DB.Model(&models.ImageRating{}).
+		Where("user_id = ? AND rating <= ?", defaultUserID, dislikeThreshold).
+		Pluck("image_id", &ids).Error
+	return ids, err
 }
 
 // Vector returns the normalized preference vector (like centroid - dislike

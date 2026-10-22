@@ -4,7 +4,7 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { similar, ratings, profile as profileApi, images } from '@/lib/api';
 import { PageHeader, Spinner, EmptyState, Button, Badge } from '@/components/UI';
 import { Star, Heart, Link as LinkIcon, Trash2, Sparkles, RefreshCw } from 'lucide-react';
-import { cn, thumbnailUrl } from '@/lib/utils';
+import { cn, imageUrl, thumbnailUrl } from '@/lib/utils';
 import type { SimilarImage } from '@/types';
 
 function decodeIds(raw: string): number[] | null {
@@ -20,6 +20,36 @@ function decodeIds(raw: string): number[] | null {
   return null;
 }
 
+function PreviewImage({
+  sources,
+  alt,
+  className,
+  title,
+}: {
+  sources: string[];
+  alt: string;
+  className: string;
+  title?: string;
+}) {
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const src = sources[sourceIndex];
+
+  if (!src) {
+    return <div aria-label={alt} className={cn(className, 'bg-zinc-800')} title={title} />;
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      title={title}
+      loading="lazy"
+      className={className}
+      onError={() => setSourceIndex((index) => index + 1)}
+    />
+  );
+}
+
 function SimilarTile({ item }: { item: SimilarImage }) {
   const queryClient = useQueryClient();
   const [favorite, setFavorite] = useState(item.favorite);
@@ -31,12 +61,18 @@ function SimilarTile({ item }: { item: SimilarImage }) {
 
   const setRatingMut = useMutation({
     mutationFn: (r: number) => ratings.set(item.id, r),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ratings', item.id] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ratings', item.id] });
+      queryClient.invalidateQueries({ queryKey: ['similar'] });
+    },
   });
 
   const clearRatingMut = useMutation({
     mutationFn: () => ratings.clear(item.id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ratings', item.id] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ratings', item.id] });
+      queryClient.invalidateQueries({ queryKey: ['similar'] });
+    },
   });
 
   const favMut = useMutation({
@@ -54,10 +90,14 @@ function SimilarTile({ item }: { item: SimilarImage }) {
 
   const body = (
     <div className="relative overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/50 group hover:border-zinc-600 transition-colors">
-      <img
-        src={item.thumbnail_path || (item.filename ? thumbnailUrl(item.filename) : undefined) || item.web_path || undefined}
+      <PreviewImage
+        sources={[
+          item.thumbnail_path,
+          item.filename ? thumbnailUrl(item.filename) : '',
+          item.web_path,
+          item.filename ? imageUrl(item.filename) : '',
+        ].filter(Boolean)}
         alt={item.filename}
-        loading="lazy"
         className="aspect-[3/4] w-full object-cover"
       />
       <div className="absolute top-2 right-2 text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/75 text-white/90">
@@ -245,7 +285,7 @@ export function SimilarPage() {
               <div className="flex items-center gap-2 text-xs text-zinc-500 mb-3">
                 <Sparkles size={12} className="text-blue-400" />
                 <span className="uppercase tracking-widest text-[10px]">
-                  Based on {data.seeds.filter((s) => s.embedded).length} of your favorites
+                  Based on {data.seeds.filter((s) => s.embedded).length} of {data.seeds.length} favorites
                 </span>
                 {data.seeds.some((s) => !s.embedded) && (
                   <Badge variant="warning">{data.seeds.filter((s) => !s.embedded).length} not embedded yet</Badge>
@@ -253,9 +293,14 @@ export function SimilarPage() {
               </div>
               <div className="flex gap-2 overflow-x-auto pb-1">
                 {data.seeds.map((s) => (
-                  <img
+                  <PreviewImage
                     key={s.id}
-                    src={s.thumbnail_path || s.web_path || undefined}
+                    sources={[
+                      s.filename ? thumbnailUrl(s.filename) : '',
+                      s.thumbnail_path,
+                      s.web_path,
+                      s.filename ? imageUrl(s.filename) : '',
+                    ].filter(Boolean)}
                     alt={`Favorite seed ${s.id}`}
                     title={s.embedded ? undefined : 'Not embedded yet'}
                     className={cn(

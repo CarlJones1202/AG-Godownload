@@ -58,9 +58,10 @@ func RecommendSimilar(seedID uint, limit int) ([]Recommendation, error) {
 	return recs, err
 }
 
-// centralityWeights assigns each seed a weight based on its mean cosine
-// similarity to the other seeds, soft-floored so outliers keep a small voice
-// instead of being dropped (or dominating). A single seed gets weight 1.
+// centralityWeights assigns each seed a weight based on its similarity to the
+// mean of the other seeds, soft-floored so outliers keep a small voice instead
+// of being dropped (or dominating). This keeps weighting linear in the number
+// of seeds rather than comparing every pair. A single seed gets weight 1.
 func centralityWeights(vecs [][]float32) []float64 {
 	n := len(vecs)
 	weights := make([]float64, n)
@@ -71,16 +72,27 @@ func centralityWeights(vecs [][]float32) []float64 {
 		weights[0] = 1
 		return weights
 	}
+	dim := len(vecs[0])
+	sum := make([]float64, dim)
+	for _, v := range vecs {
+		if len(v) != dim {
+			continue
+		}
+		for i, x := range v {
+			sum[i] += float64(x)
+		}
+	}
 	const floor = 0.15
 	for i, v := range vecs {
-		sum := 0.0
-		for j, o := range vecs {
-			if i == j {
-				continue
-			}
-			sum += cosineVec(v, o)
+		if len(v) != dim {
+			weights[i] = floor
+			continue
 		}
-		c := sum / float64(n-1) // mean cosine to the other seeds
+		others := make([]float32, dim)
+		for j, x := range v {
+			others[j] = float32((sum[j] - float64(x)) / float64(n-1))
+		}
+		c := cosineVec(v, others)
 		if c < floor {
 			c = floor
 		}
@@ -131,6 +143,13 @@ func RecommendFromSeeds(seedIDs []uint, limit int) ([]Recommendation, *Consensus
 	}
 	if len(embedded) == 0 {
 		return nil, consensus, fmt.Errorf("%w: none of the %d seed images have vectors", ErrSeedNotEmbedded, len(seedIDs))
+	}
+	dislikedIDs, err := DefaultProfile.DislikedImageIDs()
+	if err != nil {
+		return nil, consensus, fmt.Errorf("load disliked images: %w", err)
+	}
+	for _, id := range dislikedIDs {
+		exclude[id] = true
 	}
 
 	// Centrality weighting: a seed that resembles the rest of the set gets a
@@ -187,7 +206,7 @@ func RecommendFromSeeds(seedIDs []uint, limit int) ([]Recommendation, *Consensus
 		consensus.CommonTagNames = append(consensus.CommonTagNames, nameByTagID[tid])
 	}
 
-	// Merged color palette: union of seed palettes, exact-hex deduped.
+	// Merged color palette: union of every embedded seed palette, exact-hex deduped.
 	seedColorMap := bulkImageColors(consensus.EmbeddedIDs)
 	seenColors := map[string]bool{}
 	var mergedPalette []string
@@ -198,9 +217,6 @@ func RecommendFromSeeds(seedIDs []uint, limit int) ([]Recommendation, *Consensus
 			}
 			seenColors[hex] = true
 			mergedPalette = append(mergedPalette, hex)
-		}
-		if len(mergedPalette) >= 10 {
-			break
 		}
 	}
 
@@ -246,12 +262,12 @@ func RecommendFromSeeds(seedIDs []uint, limit int) ([]Recommendation, *Consensus
 	cands := make([]candidate, 0, len(pool))
 	for _, sc := range pool {
 		c := candidate{
-			imageID:  sc.ImageID,
-			vec:      vecMap[sc.ImageID],
-			vecSim:   sc.Score,
+			imageID:   sc.ImageID,
+			vec:       vecMap[sc.ImageID],
+			vecSim:    sc.Score,
 			galleries: galMap[sc.ImageID],
-			tagIDs:   tagDataMap[sc.ImageID].ids,
-			tagNames: tagDataMap[sc.ImageID].names,
+			tagIDs:    tagDataMap[sc.ImageID].ids,
+			tagNames:  tagDataMap[sc.ImageID].names,
 		}
 		c.tagSim = computeTagSimWeighted(consensus.CommonTags, c.tagIDs, affinities)
 		c.colorSim = paletteSimilarity(mergedPalette, colorMap[sc.ImageID])
@@ -437,16 +453,26 @@ func paletteSimilarity(seed, cand []string) float64 {
 	if len(seed) == 0 || len(cand) == 0 {
 		return 0
 	}
-	paletteJSON, err := json.Marshal(cand)
-	if err != nil {
-		return 0
+	candidateColors := make([][3]int, 0, len(cand))
+	for _, hex := range cand {
+		r, g, b, err := HexToRGB(hex)
+		if err == nil {
+			candidateColors = append(candidateColors, [3]int{r, g, b})
+		}
 	}
 	sum := 0.0
 	count := 0
 	for _, sc := range seed {
-		distance, _, err := FindSimilarColorInPalette(sc, string(paletteJSON))
-		if err != nil {
+		r, g, b, err := HexToRGB(sc)
+		if err != nil || len(candidateColors) == 0 {
 			continue
+		}
+		distance := math.MaxFloat64
+		for _, color := range candidateColors {
+			d := ColorDistance(r, g, b, color[0], color[1], color[2])
+			if d < distance {
+				distance = d
+			}
 		}
 		sum += CalculateColorSimilarity(distance) / 100.0
 		count++

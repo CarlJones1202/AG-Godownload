@@ -101,6 +101,7 @@ export interface SimilarImagesResponse {
   /** All seeds with embedding status; present in multi/favorites modes. */
   seeds?: {
     id: number;
+    filename?: string;
     web_path: string;
     thumbnail_path: string;
     embedded: boolean;
