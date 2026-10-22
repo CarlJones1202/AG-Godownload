@@ -83,57 +83,6 @@ if (-not (Get-Command "node" -ErrorAction SilentlyContinue)) {
 }
 
 # 6. Install Python + gallery-dl
-Write-Step "Checking for Python..."
-if (-not (Get-Command "python" -ErrorAction SilentlyContinue)) {
-    Write-Host "Python not found. Attempting to install via winget..."
-    if (Get-Command "winget" -ErrorAction SilentlyContinue) {
-        winget install --id Python.Python.3 -e --silent --accept-package-agreements --accept-source-agreements
-        # Refresh path
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-    } else {
-        Write-Warning-Host "winget not available; please install Python 3.8+ manually and ensure 'python' is on PATH."
-    }
-}
-
-if (Get-Command "python" -ErrorAction SilentlyContinue) {
-    Write-Success "Python is available ($(python --version 2>&1).Trim())"
-
-    Write-Step "Installing/upgrading pip and gallery-dl (user install)..."
-    python -m pip install --upgrade pip
-    python -m pip install --user --upgrade gallery-dl
-
-    # Ensure user scripts dir is in PATH for this session
-    $userBase = & python -c "import site; print(site.USER_BASE)"
-    $userBase = $userBase.Trim()
-    if ($userBase -ne "") {
-        $scriptDir = Join-Path $userBase "Scripts"
-        if (Test-Path $scriptDir) {
-            if ($env:PATH -notlike "*$scriptDir*") {
-                $env:PATH = "$env:PATH;$scriptDir"
-            }
-        }
-    }
-
-    # Copy repo gallery-dl config to user config if present
-    if (Test-Path ".gallery-dl\config.json") {
-        $appData = $env:APPDATA
-        if ($appData -eq $null -or $appData -eq '') {
-            Write-Warning-Host "Could not determine APPDATA; skipping gallery-dl config copy."
-        } else {
-            $targetDir = Join-Path $appData "gallery-dl"
-            if (-not (Test-Path $targetDir)) { New-Item -ItemType Directory -Path $targetDir -Force | Out-Null }
-            Copy-Item -Path ".gallery-dl\config.json" -Destination (Join-Path $targetDir "config.json") -Force
-            Write-Success "Copied .gallery-dl/config.json to $targetDir\config.json"
-        }
-    }
-} else {
-    Write-Warning-Host "Python is not available; skipping gallery-dl installation."
-}
-if (Get-Command "node" -ErrorAction SilentlyContinue) {
-    Write-Success "Node.js is ready ($(node -v))."
-} else {
-    Write-Warning-Host "Node.js was installed but 'node' command is not in the current session path."
-}
 
 # 7. PostgreSQL
 Write-Step "Setting up PostgreSQL (portable, local)..."

@@ -99,7 +99,7 @@ func Migrate() {
 func addPersonScanQueueIndexes() {
 	err := DB.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_person_scan_queue_person_provider_id
-		ON person_scan_queue(person_id, provider, id DESC)
+		ON person_scan_queues(person_id, provider, id DESC)
 	`).Error
 	if err != nil {
 		logger.Warn("Failed to add person_scan_queue index:", err)

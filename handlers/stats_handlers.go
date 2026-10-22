@@ -80,7 +80,7 @@ func countMissingGalleries() int {
 	var recent []latestScan
 	if err := database.DB.Raw(`
 		SELECT DISTINCT ON (person_id, provider) person_id, provider, results
-		FROM person_scan_queue
+		FROM person_scan_queues
 		WHERE status = ? AND deleted_at IS NULL AND results IS NOT NULL AND results != ''
 		ORDER BY person_id, provider, id DESC
 	`, models.ScanStatusCompleted).Scan(&recent).Error; err != nil {

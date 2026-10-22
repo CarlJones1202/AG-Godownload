@@ -20,6 +20,14 @@ A Go-based image gallery API with automatic crawling and image ripping capabilit
 
 ## Running the Application
 
+1. Ensure the PostgreSQL database is running:
+   ```powershell
+   ./start-db.ps1
+   ```
+   *(To stop the database later: `./stop-db.ps1`)*
+
+2. Start the server:
+
 ```bash
 go run .
 ```
