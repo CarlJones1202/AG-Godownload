@@ -4,7 +4,7 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { similar, ratings, profile as profileApi, images } from '@/lib/api';
 import { PageHeader, Spinner, EmptyState, Button, Badge } from '@/components/UI';
 import { Star, Heart, Link as LinkIcon, Trash2, Sparkles, RefreshCw } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, thumbnailUrl } from '@/lib/utils';
 import type { SimilarImage } from '@/types';
 
 function decodeIds(raw: string): number[] | null {
@@ -55,7 +55,7 @@ function SimilarTile({ item }: { item: SimilarImage }) {
   const body = (
     <div className="relative overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/50 group hover:border-zinc-600 transition-colors">
       <img
-        src={item.thumbnail_path || item.web_path || undefined}
+        src={item.thumbnail_path || (item.filename ? thumbnailUrl(item.filename) : undefined) || item.web_path || undefined}
         alt={item.filename}
         loading="lazy"
         className="aspect-[3/4] w-full object-cover"
@@ -129,7 +129,7 @@ function SimilarTile({ item }: { item: SimilarImage }) {
 
   if (item.gallery_id) {
     return (
-      <Link to={`/galleries/${item.gallery_id}`} className="block" title={item.reasons.join(' · ')}>
+      <Link to={`/galleries/${item.gallery_id}?focus=${item.id}`} className="block" title={item.reasons.join(' · ')}>
         {body}
       </Link>
     );
@@ -234,7 +234,7 @@ export function SimilarPage() {
           {seed && seed.web_path && (
             <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4 flex items-center gap-4">
               <img
-                src={seed.thumbnail_path || seed.web_path || undefined}
+                src={seed.thumbnail_path || (seed.filename ? thumbnailUrl(seed.filename) : undefined) || seed.web_path || undefined}
                 alt={seed.filename}
                 className="h-20 w-16 object-cover rounded-md border border-zinc-700"
               />

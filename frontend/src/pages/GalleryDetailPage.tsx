@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useState, useMemo, useEffect } from 'react';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, useQueries } from '@tanstack/react-query';
 import { galleries, images as imagesApi, people } from '@/lib/api';
 import { formatDate, parseColors, thumbnailUrl, imageUrl } from '@/lib/utils';
@@ -12,7 +12,7 @@ import {
   Input,
 } from '@/components/UI';
 import { JustifiedGrid } from '@/components/JustifiedGrid';
-import type { GallerySearchResult } from '@/types';
+import type { GallerySearchResult, Image, PaginatedResult } from '@/types';
 import type { JustifiedItem } from '@/components/JustifiedGrid';
 import { Lightbox } from '@/components/Lightbox';
 
@@ -41,6 +41,7 @@ export function GalleryDetailPage() {
   const galleryId = Number(id);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [confirmDeleteGallery, setConfirmDeleteGallery] = useState(false);
   const [confirmDeleteImageId, setConfirmDeleteImageId] = useState<number | null>(null);
@@ -66,6 +67,70 @@ export function GalleryDetailPage() {
     queryKey: ['images', { gallery_id: galleryId, sort_by: sortBy }],
     queryFn: () => imagesApi.list({ gallery_id: galleryId, limit: 200, sort_by: sortBy }),
   });
+
+  // Deep-link focus: /galleries/:id?focus=<image_id> opens the lightbox on that image.
+  const focusParam = searchParams.get('focus');
+  const focusId = focusParam ? Number(focusParam) : null;
+  const focusKey = focusId ? `${galleryId}:${focusId}` : null;
+  const [handledFocus, setHandledFocus] = useState<string | null>(null);
+  const [lastFocusKey, setLastFocusKey] = useState<string | null>(null);
+  const [focusFetches, setFocusFetches] = useState(0);
+
+  // Reset the extra-page fetch budget when the focus target changes.
+  if (lastFocusKey !== focusKey) {
+    setLastFocusKey(focusKey);
+    if (focusFetches !== 0) setFocusFetches(0);
+  }
+
+  // Adjust state during render (React's derived-state pattern): resolve the
+  // focus target once it's in the loaded list, or give up when the gallery is
+  // fully loaded (or we've pulled enough extra pages).
+  if (focusKey && imageList && handledFocus !== focusKey) {
+    const focusIdx = imageList.data.findIndex((img) => img.id === focusId);
+    if (focusIdx >= 0) {
+      setHandledFocus(focusKey);
+      setLightboxIndex(focusIdx);
+    } else if (imageList.meta.current_page >= imageList.meta.total_pages || focusFetches >= 5) {
+      setHandledFocus(focusKey);
+    }
+  }
+
+  const focusHandled = handledFocus === focusKey;
+
+  // Pull additional pages while the focus target isn't in the loaded slice yet.
+  useEffect(() => {
+    if (!focusKey || !imageList || focusHandled) return;
+    const idx = imageList.data.findIndex((img) => img.id === focusId);
+    if (idx >= 0) return; // the render pass above resolves it
+    if (imageList.meta.current_page >= imageList.meta.total_pages || focusFetches >= 5) return;
+    imagesApi
+      .list({ gallery_id: galleryId, limit: 200, sort_by: sortBy, page: imageList.meta.current_page + 1 })
+      .then((next) => {
+        queryClient.setQueryData<PaginatedResult<Image>>(
+          ['images', { gallery_id: galleryId, sort_by: sortBy }],
+          (old) => {
+            if (!old) return next;
+            const seen = new Set(old.data.map((i) => i.id));
+            return {
+              data: [...old.data, ...next.data.filter((i) => !seen.has(i.id))],
+              meta: { ...next.meta },
+            };
+          },
+        );
+        setFocusFetches((n) => n + 1);
+      })
+      .catch(() => setFocusFetches(5)); // give up on error
+  }, [focusKey, focusId, focusHandled, focusFetches, imageList, galleryId, sortBy, queryClient]);
+
+  // Once resolved, drop the param so closing/refreshing doesn't reopen the
+  // lightbox, and bring the tile into view for when the lightbox is closed.
+  useEffect(() => {
+    if (!focusHandled || !focusId || !focusParam) return;
+    setSearchParams({}, { replace: true });
+    requestAnimationFrame(() => {
+      document.querySelector(`[data-image-id="${focusId}"]`)?.scrollIntoView({ block: 'center' });
+    });
+  }, [focusHandled, focusId, focusParam, setSearchParams]);
 
   const { data: linkedPeople } = useQuery({
     queryKey: ['gallery-people', galleryId],

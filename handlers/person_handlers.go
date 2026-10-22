@@ -51,7 +51,15 @@ func GetPeople(c *gin.Context) {
 	if limit < 1 {
 		limit = 50
 	}
+	// Support offset-based pagination (used by the new UI) as well as page-based
 	offset := (page - 1) * limit
+	if offsetStr := c.Query("offset"); offsetStr != "" {
+		if parsedOffset, err := strconv.Atoi(offsetStr); err == nil {
+			offset = parsedOffset
+			// Recalculate page from offset for the response meta
+			page = (offset / limit) + 1
+		}
+	}
 
 	query := c.Query("q")
 

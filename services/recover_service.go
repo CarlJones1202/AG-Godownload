@@ -87,6 +87,7 @@ func RecoverImage(imageID uint) error {
 	if err := database.DB.Model(&models.Image{}).Where("id = ?", img.ID).Updates(map[string]interface{}{
 		"filename":        relPath,
 		"dominant_colors": result.DominantColors,
+		"file_exists":     true,
 	}).Error; err != nil {
 		logger.Errorf("Failed to update image %d after recovery: %v", img.ID, err)
 		return err

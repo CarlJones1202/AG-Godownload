@@ -65,8 +65,8 @@ func GetSimilarImages(c *gin.Context) {
 	populateImagePaths(images)
 
 	items := make([]gin.H, 0, len(recs))
-	for _, r := range recs {
-		im := r.Image
+	for i, r := range recs {
+		im := images[i]
 		items = append(items, gin.H{
 			"id":             im.ID,
 			"filename":       im.Filename,
@@ -84,7 +84,9 @@ func GetSimilarImages(c *gin.Context) {
 		seedImage = models.Image{ID: seed}
 	}
 	_, seedErr := services.LoadVector(seed)
-	populateImagePaths([]models.Image{seedImage})
+	seedSlice := []models.Image{seedImage}
+	populateImagePaths(seedSlice)
+	seedImage = seedSlice[0]
 
 	nLikes, nDislikes := services.DefaultProfile.Counts()
 

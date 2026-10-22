@@ -60,11 +60,26 @@ export function SourcesPage() {
     setNewSource((prev) => ({ ...prev, name: value }));
   };
 
-  const { data: sourceData, isLoading } = useQuery({
-    queryKey: ['sources'],
-    queryFn: () => sources.list({ limit: 200 }),
+  const { data: fetchedSources, isLoading } = useQuery({
+    queryKey: ['sources', 'full-list'],
+    queryFn: async () => {
+      // The API is paginated; fetch every page so the full list is shown.
+      const pageSize = 200;
+      const first = await sources.list({ page: 1, limit: pageSize });
+      const all = [...(first.data ?? [])];
+      const totalPages = first.meta?.total_pages ?? 1;
+      if (totalPages > 1) {
+        const rest = await Promise.all(
+          Array.from({ length: totalPages - 1 }, (_, i) =>
+            sources.list({ page: i + 2, limit: pageSize }),
+          ),
+        );
+        for (const r of rest) all.push(...(r.data ?? []));
+      }
+      return all;
+    },
   });
-  const sourceList = sourceData?.data ?? [];
+  const sourceList = fetchedSources ?? [];
 
   const createMut = useMutation({
     mutationFn: () => sources.create({

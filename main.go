@@ -40,6 +40,11 @@ func main() {
 
 	// Run startup verification tasks sequentially to avoid memory thrashing
 	go func() {
+		logger.Info("Syncing file_exists column...")
+		if err := services.SyncFileExists(); err != nil {
+			logger.Error("File exists sync failed:", err)
+		}
+
 		logger.Info("Starting migration for missing provider thumbnails...")
 		if err := services.MigrateMissingProviderThumbnails(); err != nil {
 			logger.Error("Provider thumbnail migration failed:", err)
@@ -79,11 +84,6 @@ func main() {
 			logger.Error("Video verification failed:", err)
 		} else {
 			logger.Info("Video verification started successfully")
-		}
-
-		logger.Info("Syncing file_exists column...")
-		if err := services.SyncFileExists(); err != nil {
-			logger.Error("File exists sync failed:", err)
 		}
 
 		logger.Info("Syncing retroactive video titles to source names...")
@@ -136,6 +136,7 @@ func main() {
 	r.POST("/cleanup-dupes", handlers.CleanupDupes)
 	// Maintenance: purge known hotlinking-placeholder images (imagetwist etc.)
 	r.POST("/purge-placeholders", handlers.PurgePlaceholders)
+	r.POST("/admin/sync-file-exists", handlers.SyncFileExists)
 
 	r.POST("/galleries", handlers.CreateGallery)
 	r.GET("/galleries", handlers.GetGalleries)

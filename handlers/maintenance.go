@@ -118,3 +118,11 @@ func PurgePlaceholders(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, result)
 }
+
+// SyncFileExists triggers a disk scan to update the file_exists boolean for all images.
+func SyncFileExists(c *gin.Context) {
+	go func() {
+		_ = services.SyncFileExists()
+	}()
+	c.JSON(http.StatusOK, gin.H{"message": "File exists synchronization initiated in background"})
+}

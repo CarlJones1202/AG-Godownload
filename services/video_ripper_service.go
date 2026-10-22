@@ -47,7 +47,13 @@ func RipYouTube(pageURL string) (string, string, error) {
 		"-o", outputPathTemplate,
 	}
 
+	// Pick cookie file based on the site domain
 	cookieFile := "youtube_cookies.txt"
+	if strings.Contains(pageURL, "xhamster.com") {
+		cookieFile = "xhamster_cookies.txt"
+	} else if strings.Contains(pageURL, "pornhub.com") {
+		cookieFile = "pornhub_cookies.txt"
+	}
 	if _, err := os.Stat(cookieFile); err == nil {
 		args = append(args, "--cookies", cookieFile)
 		logger.Infof("Using cookies from %s", cookieFile)

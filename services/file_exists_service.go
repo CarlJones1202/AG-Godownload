@@ -6,6 +6,7 @@ import (
 	"gallery_api/models"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // SyncFileExists scans all images in the database in batches and updates their file_exists column
@@ -45,9 +46,13 @@ func SyncFileExists() error {
 
 		for _, img := range page {
 			totalScanned++
-			fullPath := filepath.Join(UploadsDir, img.Filename)
-			_, err := os.Stat(fullPath)
-			existsOnDisk := (err == nil)
+			trimmed := strings.TrimSpace(img.Filename)
+			var existsOnDisk bool
+			if trimmed != "" {
+				_, err := os.Stat(filepath.Join(UploadsDir, trimmed))
+				existsOnDisk = (err == nil)
+			}
+
 
 			if existsOnDisk {
 				onDiskCount++

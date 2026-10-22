@@ -51,6 +51,7 @@ func ProcessLocalSource(source models.Source) error {
 			SizeMB:         result.SizeMB,
 			DominantColors: "[]",
 			Type:           "video",
+			FileExists:     true,
 		}
 
 		if err := database.DB.Create(&image).Error; err != nil {
@@ -86,6 +87,7 @@ func ProcessLocalSource(source models.Source) error {
 			DominantColors: result.DominantColors,
 			Type:           "image",
 			Galleries:      []*models.Gallery{&gallery},
+			FileExists:     true,
 		}
 
 		// If it's an image, we should try to extract colors/thumb

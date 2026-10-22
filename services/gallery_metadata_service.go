@@ -27,7 +27,8 @@ type GallerySearchResult struct {
 	Thumbnail   string `json:"thumbnail"`
 	ReleaseDate string `json:"release_date"`
 	SourceID    string `json:"source_id"` // UUID for MetArt or similar ID
-	ID          uint   `json:"id"`        // Database gallery ID if matched
+	ID          uint     `json:"id"`        // Database gallery ID if matched
+	Models      []string `json:"models,omitempty"` // Model names from the API (for filtering)
 }
 
 // GalleryMetadata represents scraped metadata from a gallery
@@ -261,12 +262,19 @@ func searchMetArt(query string) ([]GallerySearchResult, error) {
 			dateStr = dateStr[:10]
 		}
 
+		var modelNames []string
+		for _, m := range item.Models {
+			if m.Name != "" {
+				modelNames = append(modelNames, m.Name)
+			}
+		}
 		results = append(results, GallerySearchResult{
 			Provider:    "MetArt",
 			Title:       item.Name,
 			URL:         galleryURL,
 			Thumbnail:   thumbURL,
 			ReleaseDate: dateStr,
+			Models:      modelNames,
 		})
 	}
 
@@ -326,12 +334,19 @@ func searchMetartX(query string) ([]GallerySearchResult, error) {
 			dateStr = dateStr[:10]
 		}
 
+		var modelNames []string
+		for _, m := range item.Models {
+			if m.Name != "" {
+				modelNames = append(modelNames, m.Name)
+			}
+		}
 		results = append(results, GallerySearchResult{
 			Provider:    "MetartX",
 			Title:       item.Name,
 			URL:         galleryURL,
 			Thumbnail:   thumbURL,
 			ReleaseDate: dateStr,
+			Models:      modelNames,
 		})
 	}
 
@@ -391,12 +406,19 @@ func searchSexArt(query string) ([]GallerySearchResult, error) {
 			dateStr = dateStr[:10]
 		}
 
+		var modelNames []string
+		for _, m := range item.Models {
+			if m.Name != "" {
+				modelNames = append(modelNames, m.Name)
+			}
+		}
 		results = append(results, GallerySearchResult{
 			Provider:    "SexArt",
 			Title:       item.Name,
 			URL:         galleryURL,
 			Thumbnail:   thumbURL,
 			ReleaseDate: dateStr,
+			Models:      modelNames,
 		})
 	}
 
@@ -456,12 +478,19 @@ func searchLifeErotic(query string) ([]GallerySearchResult, error) {
 			dateStr = dateStr[:10]
 		}
 
+		var modelNames []string
+		for _, m := range item.Models {
+			if m.Name != "" {
+				modelNames = append(modelNames, m.Name)
+			}
+		}
 		results = append(results, GallerySearchResult{
 			Provider:    "LifeErotic",
 			Title:       item.Name,
 			URL:         galleryURL,
 			Thumbnail:   thumbURL,
 			ReleaseDate: dateStr,
+			Models:      modelNames,
 		})
 	}
 
@@ -525,12 +554,19 @@ func searchRylskyArt(query string) ([]GallerySearchResult, error) {
 			dateStr = dateStr[:10]
 		}
 
+		var modelNames []string
+		for _, m := range item.Models {
+			if m.Name != "" {
+				modelNames = append(modelNames, m.Name)
+			}
+		}
 		results = append(results, GallerySearchResult{
 			Provider:    "RylskyArt",
 			Title:       item.Name,
 			URL:         galleryURL,
 			Thumbnail:   thumbURL,
 			ReleaseDate: dateStr,
+			Models:      modelNames,
 		})
 	}
 
@@ -988,12 +1024,19 @@ func searchEternalDesire(query string) ([]GallerySearchResult, error) {
 			dateStr = dateStr[:10]
 		}
 
+		var modelNames []string
+		for _, m := range item.Models {
+			if m.Name != "" {
+				modelNames = append(modelNames, m.Name)
+			}
+		}
 		results = append(results, GallerySearchResult{
 			Provider:    "EternalDesire",
 			Title:       item.Name,
 			URL:         galleryURL,
 			Thumbnail:   thumbURL,
 			ReleaseDate: dateStr,
+			Models:      modelNames,
 		})
 	}
 
@@ -2548,6 +2591,19 @@ type PersonScanResult struct {
 	UnsureGalleries  []GallerySearchResult `json:"unsure_galleries"`
 }
 
+// filterResultsByModel filters search results using modelMatchesSearchTerm to ensure
+// results actually feature the requested person/alias and not partial name collisions.
+func filterResultsByModel(results []GallerySearchResult, term string, provider string) []GallerySearchResult {
+	filtered := make([]GallerySearchResult, 0, len(results))
+	for _, r := range results {
+		if modelMatchesSearchTerm(r, term) {
+			filtered = append(filtered, r)
+		} else {
+			logger.Infof("[%s] Filtered out '%s' (models: %v) - does not match term '%s'", provider, r.Title, r.Models, term)
+		}
+	}
+	return filtered
+}
 func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonScanResult, error) {
 	var person models.Person
 	if err := database.DB.First(&person, personID).Error; err != nil {
@@ -2577,7 +2633,7 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 				logger.Warnf("MetArt search failed for term %s: %v", term, err)
 				continue
 			}
-			allResults = append(allResults, results...)
+			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
 		}
 	case "metartx":
 		for _, term := range searchTerms {
@@ -2586,7 +2642,7 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 				logger.Warnf("MetartX search failed for term %s: %v", term, err)
 				continue
 			}
-			allResults = append(allResults, results...)
+			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
 		}
 	case "playboy":
 		for _, term := range searchTerms {
@@ -2595,7 +2651,7 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 				logger.Warnf("Playboy search failed for term %s: %v", term, err)
 				continue
 			}
-			allResults = append(allResults, results...)
+			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
 		}
 	case "playboyplus":
 		for _, term := range searchTerms {
@@ -2604,7 +2660,7 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 				logger.Warnf("PlayboyPlus search failed for term %s: %v", term, err)
 				continue
 			}
-			allResults = append(allResults, results...)
+			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
 		}
 	case "vixen":
 		for _, term := range searchTerms {
@@ -2613,7 +2669,7 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 				logger.Warnf("Vixen search failed for term %s: %v", term, err)
 				continue
 			}
-			allResults = append(allResults, results...)
+			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
 		}
 	case "sexart":
 		for _, term := range searchTerms {
@@ -2622,7 +2678,7 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 				logger.Warnf("SexArt search failed for term %s: %v", term, err)
 				continue
 			}
-			allResults = append(allResults, results...)
+			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
 		}
 	case "lifeerotic":
 		for _, term := range searchTerms {
@@ -2631,7 +2687,7 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 				logger.Warnf("LifeErotic search failed for term %s: %v", term, err)
 				continue
 			}
-			allResults = append(allResults, results...)
+			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
 		}
 	case "eternaldesire":
 		for _, term := range searchTerms {
@@ -2640,7 +2696,7 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 				logger.Warnf("EternalDesire search failed for term %s: %v", term, err)
 				continue
 			}
-			allResults = append(allResults, results...)
+			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
 		}
 	case "mplstudios":
 		for _, term := range searchTerms {
@@ -2649,7 +2705,7 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 				logger.Warnf("MPLStudios search failed for term %s: %v", term, err)
 				continue
 			}
-			allResults = append(allResults, results...)
+			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
 		}
 	case "vivthomas":
 		for _, term := range searchTerms {
@@ -2658,7 +2714,7 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 				logger.Warnf("VivThomas search failed for term %s: %v", term, err)
 				continue
 			}
-			allResults = append(allResults, results...)
+			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
 		}
 	case "wowgirls":
 		for _, term := range searchTerms {
@@ -2667,7 +2723,7 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 				logger.Warnf("WowGirls search failed for term %s: %v", term, err)
 				continue
 			}
-			allResults = append(allResults, results...)
+			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
 		}
 	case "rylskyart":
 		for _, term := range searchTerms {
@@ -2676,7 +2732,7 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 				logger.Warnf("RylskyArt search failed for term %s: %v", term, err)
 				continue
 			}
-			allResults = append(allResults, results...)
+			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
 		}
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", provider)
@@ -2856,6 +2912,76 @@ func normalizeGalleryName(name string) string {
 	return strings.TrimSpace(name)
 }
 
+// extractNameWords splits a name string into lowercase alphanumeric words.
+// E.g., "Aria-Noor (A)" -> ["aria", "noor", "a"]
+func extractNameWords(s string) []string {
+	var sb strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			sb.WriteRune(r)
+		} else {
+			sb.WriteRune(' ')
+		}
+	}
+	return strings.Fields(sb.String())
+}
+
+// modelMatchesSearchTerm checks whether at least one model name from a gallery result
+// matches the search term used for the person scan. Matching requires that ALL words in
+// the search term appear as discrete words in the model name (case-insensitive).
+// This prevents partial first-name-only or last-name-only matches (e.g. searching "Aria Sky"
+// won't match "Aria Sloane" or "Sky Moon"), as well as substring false positives (e.g. "Eva" in "Geneva").
+// If the result has no model information, it is let through (benefit of the doubt).
+func modelMatchesSearchTerm(result GallerySearchResult, searchTerm string) bool {
+	if len(result.Models) == 0 {
+		return true // no model info available, let it through
+	}
+	searchWords := extractNameWords(searchTerm)
+	if len(searchWords) == 0 {
+		return true
+	}
+
+	for _, modelName := range result.Models {
+		modelWords := extractNameWords(modelName)
+		if len(modelWords) == 0 {
+			continue
+		}
+
+		if len(searchWords) == 1 {
+			// Single word search (e.g. "Libby", "Era")
+			// Must match as the main name (1st word), and the model must either be a mononym
+			// or have only a short disambiguating suffix (e.g. "Libby A", "Era II").
+			// It should NOT match a full two-word name like "Libby Jones".
+			if modelWords[0] == searchWords[0] {
+				if len(modelWords) == 1 || (len(modelWords) == 2 && len(modelWords[1]) <= 2) {
+					return true
+				}
+			}
+			continue
+		}
+
+		// Multi-word search (e.g. "Aria Sky"):
+		// Every word in searchWords must match a word in modelWords.
+		allMatch := true
+		for _, sw := range searchWords {
+			matched := false
+			for _, mw := range modelWords {
+				if mw == sw {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				allMatch = false
+				break
+			}
+		}
+		if allMatch {
+			return true
+		}
+	}
+	return false
+}
 // scrapePlayboyPlusGallery attempts to scrape metadata for a PlayboyPlus gallery
 func scrapePlayboyPlusGallery(urlStr string) (*GalleryMetadata, error) {
 	// Since direct scraping often redirects to join page for non-logged users,

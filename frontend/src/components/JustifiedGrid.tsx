@@ -96,6 +96,7 @@ export function JustifiedGrid({
             {row.cells.map((cell) => (
               <div
                 key={`${cell.item.id}-${cell.globalIndex}`}
+                data-image-id={cell.item.id}
                 className="relative overflow-hidden rounded-sm bg-zinc-800 group cursor-pointer"
                 style={{
                   width: cell.width,

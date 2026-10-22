@@ -505,6 +505,7 @@ func CrawlSource(sourceID uint) error {
 					DownloadURL:    imageURL,
 					DominantColors: result.DominantColors,
 					Galleries:      []*models.Gallery{&gallery},
+					FileExists:     true,
 				}
 				imagesMutex.Lock()
 				imagesToInsert = append(imagesToInsert, image)
@@ -537,12 +538,12 @@ func CrawlSource(sourceID uint) error {
 		var args []interface{}
 
 		for _, img := range imagesWithoutAssoc {
-			placeholders = append(placeholders, "(?, ?, ?, ?, ?)")
-			args = append(args, img.GalleryID, img.Filename, img.OriginalURL, img.DownloadURL, img.DominantColors)
+			placeholders = append(placeholders, "(?, ?, ?, ?, ?, ?)")
+			args = append(args, img.GalleryID, img.Filename, img.OriginalURL, img.DownloadURL, img.DominantColors, true)
 		}
 
 		stmt := fmt.Sprintf(
-			"INSERT INTO images (gallery_id, filename, original_url, download_url, dominant_colors) VALUES %s",
+			"INSERT INTO images (gallery_id, filename, original_url, download_url, dominant_colors, file_exists) VALUES %s",
 			strings.Join(placeholders, ","),
 		)
 
@@ -698,6 +699,13 @@ func ProcessVideoSource(source models.Source) error {
 			localPath = localPath
 			videoURL = ""
 		}
+	} else if strings.Contains(source.Location, "xhamster.com") {
+		logger.Infof("Detected xHamster URL, using yt-dlp...")
+		localPath, videoTitle, err = RipYouTube(source.Location)
+		if err != nil {
+			return fmt.Errorf("failed to download xHamster video (try providing an xhamster_cookies.txt file): %w", err)
+		}
+		isLocalFile = true
 	} else if strings.Contains(source.Location, "drive.google.com") {
 		logger.Infof("Detected Google Drive URL, using yt-dlp...")
 		localPath, videoTitle, err = RipYouTube(source.Location)
@@ -780,6 +788,7 @@ func ProcessVideoSource(source models.Source) error {
 		SizeMB:         result.SizeMB,
 		DominantColors: result.DominantColors,
 		Type:           "video",
+		FileExists:     true,
 	}
 
 	if err := database.DB.Create(&image).Error; err != nil {

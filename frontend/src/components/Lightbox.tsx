@@ -2,13 +2,20 @@ import { useCallback, useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, X, Info, Heart, Link as LinkIcon, Play, Pause, Maximize, Minimize, Timer, UserPlus, Tag, Plus, Star, Sparkles } from 'lucide-react';
 import type { Image, Person, SimilarImage } from '@/types';
-import { formatDate, parseColors, cn, imageUrl } from '@/lib/utils';
+import { formatDate, parseColors, cn, imageUrl, thumbnailUrl } from '@/lib/utils';
 import { Link, useNavigate } from 'react-router-dom';
 import { tagsApi, people, ratings as ratingsApi, similar as similarApi } from '@/lib/api';
 import { Input } from '@/components/UI';
 
+// Full-resolution source, used when the similar image replaces the main view.
 function resolveSimilarSrc(s: SimilarImage): string {
   return s.web_path || s.thumbnail_path || (s.filename ? imageUrl(s.filename) : '');
+}
+
+// Small preview for the "You might like" strip — prefer the generated thumbnail
+// so the row doesn't pull full-size originals.
+function resolveSimilarThumbSrc(s: SimilarImage): string {
+  return s.thumbnail_path || (s.filename ? thumbnailUrl(s.filename) : '') || s.web_path || '';
 }
 
 interface LightboxProps {
@@ -556,7 +563,7 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
                 <span className="truncate">{similarView.alt}</span>
               </div>
               <button
-                onClick={() => setSimilarView(null)}
+                onClick={() => setSimilarViewState(null)}
                 className="shrink-0 text-[10px] px-2.5 py-1 rounded bg-white/10 hover:bg-white/20 text-white/70 transition-colors"
                 title="Back to the source image"
               >
@@ -601,7 +608,7 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
           ) : similarData && similarData.data.length > 0 ? (
             <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none">
               {similarData.data.map((s) => {
-                const src = resolveSimilarSrc(s);
+                const src = resolveSimilarThumbSrc(s);
                 return (
                   <button
                     key={s.id}
@@ -618,7 +625,7 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
                           className="h-24 w-20 object-cover rounded-md border border-zinc-800 opacity-80 group-hover:opacity-100 group-hover:border-zinc-500 transition-all"
                         />
                       ) : (
-                        <div className="h-24 w-40 flex items-center justify-center rounded-md border border-zinc-800 bg-zinc-900 text-zinc-700 text-[9px] overflow-hidden">
+                        <div className="h-24 w-20 flex items-center justify-center rounded-md border border-zinc-800 bg-zinc-900 text-zinc-700 text-[9px] overflow-hidden">
                           {s.filename}
                         </div>
                       )}

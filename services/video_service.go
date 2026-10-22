@@ -147,5 +147,8 @@ func IsVideoURL(url string) bool {
 	if strings.Contains(url, "drive.google.com") {
 		return true
 	}
+	if strings.Contains(url, "xhamster.com") {
+		return true
+	}
 	return false
 }

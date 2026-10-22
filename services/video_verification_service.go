@@ -91,6 +91,7 @@ func VerifyDownloadedVideos() error {
 							"width":    res.Width,
 							"height":   res.Height,
 							"size_mb":  res.SizeMB,
+							"file_exists": true,
 						}).Error; err != nil {
 						logger.Errorf("Failed to update video %d: %v", res.ID, err)
 					} else {
@@ -129,11 +130,12 @@ func VerifyDownloadedVideos() error {
 				DownloadURL string
 				OriginalURL string
 				Title       string
+				FileExists  bool
 				SizeMB      float64
 			}
 
 			q := database.DB.Model(&models.Image{}).
-				Select("id, filename, download_url, original_url, title, size_mb").
+				Select("id, filename, download_url, original_url, title, size_mb, file_exists").
 				Where("type = ? AND id > ?", "video", lastID).
 				Order("id ASC").
 				Limit(chunkSize)
@@ -162,6 +164,9 @@ func VerifyDownloadedVideos() error {
 				if _, err := os.Stat(expectedFullPath); os.IsNotExist(err) {
 					missingCount++
 					IncVideoVerificationMissing()
+					if v.FileExists {
+						database.DB.Model(&models.Image{}).Where("id = ?", v.ID).Update("file_exists", false)
+					}
 					fmt.Printf("Missing video: %s (ID: %d)\n", v.Filename, v.ID)
 
 					// Local file handling

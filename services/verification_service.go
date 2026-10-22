@@ -193,6 +193,7 @@ func VerifyDownloadedImages() error {
 						Updates(map[string]interface{}{
 							"filename":        res.RelPath,
 							"dominant_colors": res.DominantColors,
+							"file_exists":     true,
 						}).Error; err != nil {
 						logger.Errorf("Failed to update image %d: %v", res.ID, err)
 					} else {
@@ -232,12 +233,13 @@ func VerifyDownloadedImages() error {
 				Filename    string
 				DownloadURL string
 				IsFavorite  bool
+				FileExists  bool
 				CreatedAt   time.Time
 			}
 
 			if err := database.DB.
 				Model(&models.Image{}).
-				Select("id, filename, download_url, is_favorite, created_at").
+				Select("id, filename, download_url, is_favorite, file_exists, created_at").
 				Where("id > ?", lastID).
 				Order("id ASC").
 				Limit(chunkSize).
@@ -256,6 +258,9 @@ func VerifyDownloadedImages() error {
 				if _, err := os.Stat(expectedFullPath); os.IsNotExist(err) {
 					missingCount++
 					IncVerificationMissing()
+					if img.FileExists {
+						database.DB.Model(&models.Image{}).Where("id = ?", img.ID).Update("file_exists", false)
+					}
 
 					thumbPath := filepath.Join(UploadsDir, "thumbnails", filepath.Base(img.Filename))
 					if _, err := os.Stat(thumbPath); os.IsNotExist(err) {
