@@ -467,13 +467,16 @@ func CrawlSource(sourceID uint) error {
 						break
 					}
 					logger.Debugf("Download attempt %d failed for %s: %v", attempt, imageURL, err)
+					if isRequestRetryExhausted(err) {
+						break
+					}
 					if attempt < maxRetries {
 						time.Sleep(time.Duration(attempt*2) * time.Second)
 					}
 				}
 
 				if err != nil {
-					logger.Warnf("Failed to download %s after %d attempts: %v", imageURL, maxRetries, err)
+					logger.Warnf("Failed to download %s: %v", imageURL, err)
 					return
 				}
 

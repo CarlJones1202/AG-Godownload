@@ -30,6 +30,7 @@ type candidate struct {
 	prefSim   float64
 	score     float64
 	galleries []uint
+	sources   []uint
 	tagIDs    []uint
 	tagNames  []string
 	// seedMatches is how many seeds this candidate visibly resembles
@@ -248,6 +249,7 @@ func RecommendFromSeeds(seedIDs []uint, limit int) ([]Recommendation, *Consensus
 		ids = append(ids, sc.ImageID)
 	}
 	galMap := bulkImageGalleryIDs(ids)
+	sourceMap := bulkImageSourceIDs(ids)
 	tagDataMap := bulkImageTagData(ids)
 	colorMap := bulkImageColors(ids)
 	vecMap := make(map[uint][]float32, len(ids))
@@ -266,6 +268,7 @@ func RecommendFromSeeds(seedIDs []uint, limit int) ([]Recommendation, *Consensus
 			vec:       vecMap[sc.ImageID],
 			vecSim:    sc.Score,
 			galleries: galMap[sc.ImageID],
+			sources:   sourceMap[sc.ImageID],
 			tagIDs:    tagDataMap[sc.ImageID].ids,
 			tagNames:  tagDataMap[sc.ImageID].names,
 		}
@@ -344,7 +347,10 @@ func firstGalleryID(ids []uint) uint {
 // similarity to already-chosen ones and clustering from the same gallery.
 func selectMMR(cands []candidate, limit int, seedGalleries []uint) []candidate {
 	lambda := config.Global.Embedding.RecDiversityLambda
-	const maxPerGallery = 2
+	const (
+		maxPerGallery = 2
+		maxPerSource  = 3
+	)
 
 	seedGalSet := make(map[uint]bool, len(seedGalleries))
 	for _, g := range seedGalleries {
@@ -369,12 +375,18 @@ func selectMMR(cands []candidate, limit int, seedGalleries []uint) []candidate {
 
 	var chosen []*candidate
 	galleryCounts := make(map[uint]int)
+	sourceCounts := make(map[uint]int)
 	var chosenVecs [][]float32
+	var chosenTags [][]uint
 
 	for len(chosen) < limit && len(remaining) > 0 {
 		bestIdx := -1
 		bestVal := math.Inf(-1)
 		for i, c := range remaining {
+			if exceedsGroupLimit(c.galleries, galleryCounts, maxPerGallery) ||
+				exceedsGroupLimit(c.sources, sourceCounts, maxPerSource) {
+				continue
+			}
 			div := 0.0
 			if len(chosenVecs) > 0 && c.vec != nil {
 				for _, v := range chosenVecs {
@@ -384,13 +396,12 @@ func selectMMR(cands []candidate, limit int, seedGalleries []uint) []candidate {
 					}
 				}
 			}
-			galleryPenalty := 0.0
-			for _, g := range c.galleries {
-				if n := galleryCounts[g]; n >= maxPerGallery {
-					galleryPenalty += 0.25 * float64(n-maxPerGallery+1)
+			for _, tags := range chosenTags {
+				if overlap := tagJaccard(c.tagIDs, tags); overlap > div {
+					div = overlap
 				}
 			}
-			val := (1-lambda)*c.score - lambda*div - galleryPenalty
+			val := (1-lambda)*c.score - lambda*div
 			if val > bestVal {
 				bestVal = val
 				bestIdx = i
@@ -405,8 +416,12 @@ func selectMMR(cands []candidate, limit int, seedGalleries []uint) []candidate {
 		if best.vec != nil {
 			chosenVecs = append(chosenVecs, best.vec)
 		}
+		chosenTags = append(chosenTags, best.tagIDs)
 		for _, g := range best.galleries {
 			galleryCounts[g]++
+		}
+		for _, source := range best.sources {
+			sourceCounts[source]++
 		}
 	}
 	out := make([]candidate, 0, len(chosen))
@@ -414,6 +429,43 @@ func selectMMR(cands []candidate, limit int, seedGalleries []uint) []candidate {
 		out = append(out, *c)
 	}
 	return out
+}
+
+func exceedsGroupLimit(groups []uint, counts map[uint]int, limit int) bool {
+	for _, id := range groups {
+		if counts[id] >= limit {
+			return true
+		}
+	}
+	return false
+}
+
+func tagJaccard(a, b []uint) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	aSet := make(map[uint]struct{}, len(a))
+	for _, id := range a {
+		aSet[id] = struct{}{}
+	}
+	intersection := 0
+	union := len(aSet)
+	bSeen := make(map[uint]struct{}, len(b))
+	for _, id := range b {
+		if _, ok := bSeen[id]; ok {
+			continue
+		}
+		bSeen[id] = struct{}{}
+		if _, ok := aSet[id]; ok {
+			intersection++
+		} else {
+			union++
+		}
+	}
+	if union == 0 {
+		return 0
+	}
+	return float64(intersection) / float64(union)
 }
 
 // computeTagSimWeighted scores tag overlap between the consensus tag set and a
@@ -556,6 +608,28 @@ func bulkImageTagData(ids []uint) map[uint]struct {
 type imageGalleryRow struct {
 	ImageID   uint
 	GalleryID uint
+}
+
+type imageSourceRow struct {
+	ImageID  uint
+	SourceID uint
+}
+
+func bulkImageSourceIDs(ids []uint) map[uint][]uint {
+	out := make(map[uint][]uint)
+	if len(ids) == 0 {
+		return out
+	}
+	var rows []imageSourceRow
+	database.DB.Table("image_galleries").
+		Select("image_galleries.image_id, galleries.source_id").
+		Joins("JOIN galleries ON galleries.id = image_galleries.gallery_id").
+		Where("image_galleries.image_id IN ? AND galleries.source_id IS NOT NULL", ids).
+		Scan(&rows)
+	for _, r := range rows {
+		out[r.ImageID] = append(out[r.ImageID], r.SourceID)
+	}
+	return out
 }
 
 func bulkImageGalleryIDs(ids []uint) map[uint][]uint {

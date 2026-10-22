@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams, Link } from 'react-router-dom';
 import { similar, ratings, profile as profileApi, images } from '@/lib/api';
 import { PageHeader, Spinner, EmptyState, Button, Badge } from '@/components/UI';
-import { Star, Heart, Link as LinkIcon, Trash2, Sparkles, RefreshCw } from 'lucide-react';
+import { Star, Heart, Link as LinkIcon, Trash2, Sparkles, RefreshCw, ThumbsDown } from 'lucide-react';
 import { cn, imageUrl, thumbnailUrl } from '@/lib/utils';
 import type { SimilarImage } from '@/types';
 
@@ -87,6 +87,7 @@ function SimilarTile({ item }: { item: SimilarImage }) {
       setRatingMut.mutate(n);
     }
   };
+  const isNotInterested = (rating?.rating ?? 0) <= 2 && (rating?.rating ?? 0) > 0;
 
   const body = (
     <div className="relative overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/50 group hover:border-zinc-600 transition-colors">
@@ -148,6 +149,23 @@ function SimilarTile({ item }: { item: SimilarImage }) {
             </button>
           ))}
           <div className="w-px h-4 bg-white/20 mx-1.5" />
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (isNotInterested) {
+                clearRatingMut.mutate();
+              } else {
+                setRatingMut.mutate(1);
+              }
+            }}
+            disabled={setRatingMut.isPending || clearRatingMut.isPending}
+            className="p-0.5 transition-transform hover:scale-110 disabled:opacity-50"
+            title={isNotInterested ? 'Show this image again' : 'Not interested — remove from suggestions'}
+            aria-label={isNotInterested ? 'Show this image again' : 'Not interested'}
+          >
+            <ThumbsDown size={14} className={isNotInterested ? 'fill-rose-500 text-rose-500' : 'text-white/40'} />
+          </button>
           <button
             onClick={(e) => {
               e.preventDefault();
