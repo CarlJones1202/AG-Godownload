@@ -248,9 +248,11 @@ weights (start): w1=0.5, w2=0.25, w3=0.15, w4=0.10
 
 Notes:
 - `w4` (personalized pull) only kicks in once a profile has ≥ ~3 positive + ≥1 negative example; before that it's 0.
-- **Diversity (MMR-style):** after scoring, greedily select top-N while subtracting `λ·max(sim(c, already_chosen))` (λ≈0.6) and **hard-exclude** candidates sharing the same gallery/source as the seed and the same gallery as each other beyond 1–2 per gallery. Prevents "20 images from the same photoshoot".
+- Candidate retrieval unions nearest neighbors of the combined favorites vector, up to eight representative individual favorites, the ready taste-profile vector, and images sharing consensus tags. Candidates are deduplicated and rescored against the full seed set before ranking.
+- **Diversity (MMR-style):** after scoring, greedily select top-N while penalizing the maximum vector cosine or tag Jaccard overlap with already-selected results (`λ` defaults to 0.6). Seed galleries are excluded; repeated results from a gallery (after 2) or source (after 3) receive additional penalties rather than hard caps.
 - Normalize each term to [0,1] so weights are comparable.
 - Filter: only images with `type='image'`, `file_exists=true`, valid embedding, and `deleted_at IS NULL`.
+- Images rated 1–2 stars are excluded from the candidate pool; the standalone Similar Images page also exposes a “Not interested” action that records a 1-star rating.
 
 ## 9. API Design
 

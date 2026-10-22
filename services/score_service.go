@@ -8,6 +8,7 @@ import (
 	"gallery_api/database"
 	"gallery_api/models"
 	"math"
+	"sort"
 )
 
 // ErrSeedNotEmbedded is returned when the seed image has no vector yet.
@@ -38,9 +39,15 @@ type candidate struct {
 	seedMatches int
 }
 
+type seedVector struct {
+	id  uint
+	vec []float32
+}
+
 // seedMatchThreshold is the cosine similarity at which a candidate counts as
 // resembling one of the consensus seeds.
 const seedMatchThreshold = 0.55
+const maxIndividualSeedSearches = 8
 
 // Consensus describes the common ground derived from a set of seed images:
 // which seeds had embeddings, their centrality weights, and the tags shared
@@ -122,11 +129,7 @@ func RecommendFromSeeds(seedIDs []uint, limit int) ([]Recommendation, *Consensus
 		Weights:    map[uint]float64{},
 		CommonTags: map[uint]float64{},
 	}
-	type seedVec struct {
-		id  uint
-		vec []float32
-	}
-	var embedded []seedVec
+	var embedded []seedVector
 	for _, id := range seedIDs {
 		exclude[id] = true
 		raw, err := LoadVector(id)
@@ -139,7 +142,7 @@ func RecommendFromSeeds(seedIDs []uint, limit int) ([]Recommendation, *Consensus
 			consensus.SkippedIDs = append(consensus.SkippedIDs, id)
 			continue
 		}
-		embedded = append(embedded, seedVec{id: id, vec: nv})
+		embedded = append(embedded, seedVector{id: id, vec: nv})
 		consensus.EmbeddedIDs = append(consensus.EmbeddedIDs, id)
 	}
 	if len(embedded) == 0 {
@@ -226,58 +229,89 @@ func RecommendFromSeeds(seedIDs []uint, limit int) ([]Recommendation, *Consensus
 	affinities := DefaultProfile.TagAffinity()
 
 	poolSize := limit*6 + 48
-	pool := VectorIndex.SearchByVector(centroid, poolSize, exclude)
-	if len(pool) == 0 {
+	candidateIDs := make(map[uint]struct{}, poolSize*(maxIndividualSeedSearches+2))
+	addSearchResults := func(query []float32) {
+		for _, result := range VectorIndex.SearchByVector(query, poolSize, exclude) {
+			candidateIDs[result.ImageID] = struct{}{}
+		}
+	}
+	addSearchResults(centroid)
+
+	// Individual seed searches recover matches to a favorite that may be far
+	// from the overall centroid. Sample evenly across centrality-ranked seeds
+	// so both representative favorites and outliers can contribute candidates.
+	for _, s := range representativeSeedVectors(embedded, weights, maxIndividualSeedSearches) {
+		addSearchResults(s)
+	}
+	if profileReady && prefVec != nil {
+		addSearchResults(prefVec)
+	}
+
+	commonTagIDs := make([]uint, 0, len(consensus.CommonTags))
+	for id := range consensus.CommonTags {
+		commonTagIDs = append(commonTagIDs, id)
+	}
+	sort.Slice(commonTagIDs, func(i, j int) bool { return commonTagIDs[i] < commonTagIDs[j] })
+	tagCandidateIDs, err := findTaggedCandidates(commonTagIDs, exclude, poolSize)
+	if err != nil {
+		return nil, consensus, fmt.Errorf("find tag-based candidates: %w", err)
+	}
+	for _, id := range tagCandidateIDs {
+		candidateIDs[id] = struct{}{}
+	}
+	if len(candidateIDs) == 0 {
 		return nil, consensus, errors.New("no candidates found")
 	}
 
-	// Guard against duplicate candidates (e.g. a vector store that can hold
-	// the same image id more than once) so the result set has unique ids.
-	seen := make(map[uint]bool, len(pool))
-	uniquePool := pool[:0]
-	for _, sc := range pool {
-		if seen[sc.ImageID] {
-			continue
-		}
-		seen[sc.ImageID] = true
-		uniquePool = append(uniquePool, sc)
+	ids := make([]uint, 0, len(candidateIDs))
+	for id := range candidateIDs {
+		ids = append(ids, id)
 	}
-	pool = uniquePool
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 
-	ids := make([]uint, 0, len(pool))
-	for _, sc := range pool {
-		ids = append(ids, sc.ImageID)
-	}
 	galMap := bulkImageGalleryIDs(ids)
 	sourceMap := bulkImageSourceIDs(ids)
 	tagDataMap := bulkImageTagData(ids)
 	colorMap := bulkImageColors(ids)
 	vecMap := make(map[uint][]float32, len(ids))
-	for _, sc := range pool {
-		if v, ok := VectorIndex.Get(sc.ImageID); ok {
-			vecMap[sc.ImageID] = v
+	validIDs := ids[:0]
+	for _, id := range ids {
+		if v, ok := VectorIndex.Get(id); ok {
+			vecMap[id] = v
+			validIDs = append(validIDs, id)
 		}
 	}
 
 	weight := config.Global.Embedding.RecWeights
 
-	cands := make([]candidate, 0, len(pool))
-	for _, sc := range pool {
+	cands := make([]candidate, 0, len(validIDs))
+	maxSeedWeight := 0.0
+	for _, w := range weights {
+		if w > maxSeedWeight {
+			maxSeedWeight = w
+		}
+	}
+	for _, id := range validIDs {
+		vec := vecMap[id]
+		vecSim := candidateSeedSimilarity(centroid, vec, embedded, weights, maxSeedWeight)
 		c := candidate{
-			imageID:   sc.ImageID,
-			vec:       vecMap[sc.ImageID],
-			vecSim:    sc.Score,
-			galleries: galMap[sc.ImageID],
-			sources:   sourceMap[sc.ImageID],
-			tagIDs:    tagDataMap[sc.ImageID].ids,
-			tagNames:  tagDataMap[sc.ImageID].names,
+			imageID:   id,
+			vec:       vec,
+			vecSim:    vecSim,
+			galleries: galMap[id],
+			sources:   sourceMap[id],
+			tagIDs:    tagDataMap[id].ids,
+			tagNames:  tagDataMap[id].names,
 		}
 		c.tagSim = computeTagSimWeighted(consensus.CommonTags, c.tagIDs, affinities)
-		c.colorSim = paletteSimilarity(mergedPalette, colorMap[sc.ImageID])
-		if profileReady && prefVec != nil && c.vec != nil {
+		c.colorSim = paletteSimilarity(mergedPalette, colorMap[id])
+		if profileReady && prefVec != nil {
 			sim := dotProduct(prefVec, c.vec)
 			if sim < 0 {
 				sim = 0
+			}
+			if sim > 1 {
+				sim = 1
 			}
 			c.prefSim = sim
 		}
@@ -336,11 +370,88 @@ func RecommendFromSeeds(seedIDs []uint, limit int) ([]Recommendation, *Consensus
 	return recs, consensus, nil
 }
 
+func candidateSeedSimilarity(centroid, vec []float32, seeds []seedVector, weights []float64, maxWeight float64) float64 {
+	similarity := cosineVec(centroid, vec)
+	if maxWeight <= 0 {
+		return similarity
+	}
+	for i, seed := range seeds {
+		seedSimilarity := cosineVec(seed.vec, vec) * weights[i] / maxWeight
+		if seedSimilarity > similarity {
+			similarity = seedSimilarity
+		}
+	}
+	return similarity
+}
+
 func firstGalleryID(ids []uint) uint {
 	if len(ids) == 0 {
 		return 0
 	}
 	return ids[0]
+}
+
+func representativeSeedVectors(seeds []seedVector, weights []float64, limit int) [][]float32 {
+	if limit <= 0 || len(seeds) == 0 {
+		return nil
+	}
+	if len(seeds) <= limit {
+		out := make([][]float32, len(seeds))
+		for i, seed := range seeds {
+			out[i] = seed.vec
+		}
+		return out
+	}
+
+	indices := make([]int, len(seeds))
+	for i := range indices {
+		indices[i] = i
+	}
+	sort.Slice(indices, func(i, j int) bool {
+		left, right := indices[i], indices[j]
+		if weights[left] == weights[right] {
+			return left < right
+		}
+		return weights[left] < weights[right]
+	})
+
+	out := make([][]float32, 0, limit)
+	if limit == 1 {
+		return append(out, seeds[indices[len(indices)-1]].vec)
+	}
+	for i := 0; i < limit; i++ {
+		index := i * (len(indices) - 1) / (limit - 1)
+		out = append(out, seeds[indices[index]].vec)
+	}
+	return out
+}
+
+func findTaggedCandidates(tagIDs []uint, exclude map[uint]bool, limit int) ([]uint, error) {
+	if len(tagIDs) == 0 || limit <= 0 {
+		return nil, nil
+	}
+	var rows []struct {
+		ImageID uint
+	}
+	err := database.DB.Table("image_tags").
+		Select("image_tags.image_id").
+		Joins("JOIN images ON images.id = image_tags.image_id").
+		Where("image_tags.tag_id IN ? AND images.type = ? AND images.file_exists = ?", tagIDs, "image", true).
+		Where("images.deleted_at IS NULL").
+		Group("image_tags.image_id").
+		Order("COUNT(DISTINCT image_tags.tag_id) DESC, image_tags.image_id ASC").
+		Limit(limit).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]uint, 0, len(rows))
+	for _, row := range rows {
+		if !exclude[row.ImageID] {
+			ids = append(ids, row.ImageID)
+		}
+	}
+	return ids, nil
 }
 
 // selectMMR greedily picks the most relevant candidates while penalizing
@@ -383,10 +494,6 @@ func selectMMR(cands []candidate, limit int, seedGalleries []uint) []candidate {
 		bestIdx := -1
 		bestVal := math.Inf(-1)
 		for i, c := range remaining {
-			if exceedsGroupLimit(c.galleries, galleryCounts, maxPerGallery) ||
-				exceedsGroupLimit(c.sources, sourceCounts, maxPerSource) {
-				continue
-			}
 			div := 0.0
 			if len(chosenVecs) > 0 && c.vec != nil {
 				for _, v := range chosenVecs {
@@ -401,7 +508,19 @@ func selectMMR(cands []candidate, limit int, seedGalleries []uint) []candidate {
 					div = overlap
 				}
 			}
-			val := (1-lambda)*c.score - lambda*div
+			galleryPenalty := 0.0
+			for _, g := range c.galleries {
+				if n := galleryCounts[g]; n >= maxPerGallery {
+					galleryPenalty += 0.25 * float64(n-maxPerGallery+1)
+				}
+			}
+			sourcePenalty := 0.0
+			for _, source := range c.sources {
+				if n := sourceCounts[source]; n >= maxPerSource {
+					sourcePenalty += 0.12 * float64(n-maxPerSource+1)
+				}
+			}
+			val := (1-lambda)*c.score - lambda*div - galleryPenalty - sourcePenalty
 			if val > bestVal {
 				bestVal = val
 				bestIdx = i
@@ -429,15 +548,6 @@ func selectMMR(cands []candidate, limit int, seedGalleries []uint) []candidate {
 		out = append(out, *c)
 	}
 	return out
-}
-
-func exceedsGroupLimit(groups []uint, counts map[uint]int, limit int) bool {
-	for _, id := range groups {
-		if counts[id] >= limit {
-			return true
-		}
-	}
-	return false
 }
 
 func tagJaccard(a, b []uint) float64 {
@@ -626,7 +736,15 @@ func bulkImageSourceIDs(ids []uint) map[uint][]uint {
 		Joins("JOIN galleries ON galleries.id = image_galleries.gallery_id").
 		Where("image_galleries.image_id IN ? AND galleries.source_id IS NOT NULL", ids).
 		Scan(&rows)
+	seen := make(map[uint]map[uint]bool)
 	for _, r := range rows {
+		if seen[r.ImageID] == nil {
+			seen[r.ImageID] = make(map[uint]bool)
+		}
+		if seen[r.ImageID][r.SourceID] {
+			continue
+		}
+		seen[r.ImageID][r.SourceID] = true
 		out[r.ImageID] = append(out[r.ImageID], r.SourceID)
 	}
 	return out

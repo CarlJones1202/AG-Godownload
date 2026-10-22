@@ -1,6 +1,7 @@
 package services
 
 import (
+	"gallery_api/config"
 	"math"
 	"testing"
 )
@@ -95,5 +96,61 @@ func TestPaletteSimilarityUsesEverySeedColor(t *testing.T) {
 	sim := paletteSimilarity([]string{"#FF0000", "#00FF00"}, []string{"#FF0000"})
 	if sim >= 1 || sim <= 0 {
 		t.Fatalf("expected both seed colors to contribute, got %f", sim)
+	}
+}
+
+func TestTagJaccard(t *testing.T) {
+	if got := tagJaccard([]uint{1, 2, 2}, []uint{2, 3}); math.Abs(got-1.0/3.0) > 1e-9 {
+		t.Fatalf("expected unique-tag Jaccard overlap 1/3, got %f", got)
+	}
+	if got := tagJaccard(nil, []uint{1}); got != 0 {
+		t.Fatalf("empty tags should have no overlap, got %f", got)
+	}
+}
+
+func TestRepresentativeSeedVectorsCoverCentralityRange(t *testing.T) {
+	seeds := make([]seedVector, 12)
+	weights := make([]float64, len(seeds))
+	for i := range seeds {
+		seeds[i] = seedVector{id: uint(i + 1), vec: unitVec(float64(i+1), 1)}
+		weights[i] = float64(i + 1)
+	}
+
+	selected := representativeSeedVectors(seeds, weights, 4)
+	if len(selected) != 4 || cosineVec(selected[0], seeds[0].vec) < 0.999 || cosineVec(selected[len(selected)-1], seeds[len(seeds)-1].vec) < 0.999 {
+		t.Fatalf("expected representative searches to span least-to-most central seeds")
+	}
+}
+
+func TestCandidateSeedSimilarityIncludesIndividualFavorites(t *testing.T) {
+	centroid := unitVec(1, 1, 0)
+	candidateVec := unitVec(0, 1, 0)
+	seeds := []seedVector{
+		{id: 1, vec: unitVec(1, 0, 0)},
+		{id: 2, vec: unitVec(0, 1, 0)},
+	}
+	got := candidateSeedSimilarity(centroid, candidateVec, seeds, []float64{1, 1}, 1)
+	if got < 0.99 {
+		t.Fatalf("candidate matching an individual seed should retain that relevance, got %f", got)
+	}
+}
+
+func TestSelectMMRPenalizesRepeatedSources(t *testing.T) {
+	previous := config.Global.Embedding.RecDiversityLambda
+	config.Global.Embedding.RecDiversityLambda = 0.6
+	defer func() { config.Global.Embedding.RecDiversityLambda = previous }()
+
+	selected := selectMMR([]candidate{
+		{imageID: 1, score: 1, sources: []uint{10}},
+		{imageID: 2, score: 0.9, sources: []uint{10}},
+		{imageID: 3, score: 0.8, sources: []uint{10}},
+		{imageID: 4, score: 0.2, sources: []uint{10}},
+		{imageID: 5, score: 0.3, sources: []uint{20}},
+	}, 4, nil)
+	if len(selected) != 4 {
+		t.Fatalf("expected all requested results despite source repetition, got %d", len(selected))
+	}
+	if selected[3].imageID != 5 {
+		t.Fatalf("expected a new source to outrank a fourth result from the same source, got ids %d last", selected[3].imageID)
 	}
 }
