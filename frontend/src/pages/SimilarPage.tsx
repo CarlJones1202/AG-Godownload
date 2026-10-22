@@ -150,10 +150,12 @@ export function SimilarPage() {
   const ids = useMemo(() => decodeIds(idsRaw), [idsRaw]);
   const idsValid = ids !== null && ids.length > 0;
 
-  const { data, isLoading, isError, refetch, isFetching } = useQuery({
-    queryKey: ['similar', 'ids', idsRaw],
-    queryFn: () => similar.byIds(ids!),
-    enabled: idsValid && ids!.length > 0,
+  // With an explicit set, recommend for that set; otherwise fall back to the
+  // favorites-consensus mode (common ground across all favorited images).
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
+    queryKey: ['similar', idsValid ? 'ids' : 'favorites', idsRaw],
+    queryFn: () => (idsValid ? similar.byIds(ids!) : similar.byFavorites()),
+    enabled: true,
   });
 
   const resetProfileMut = useMutation({
@@ -177,6 +179,9 @@ export function SimilarPage() {
 
   const profile = data?.profile;
   const seed = data?.seed;
+  const mode = data?.mode ?? (idsValid ? 'multi' : 'favorites');
+  const isFavoritesMode = mode === 'favorites';
+  const noFavorites = isError && (error as { status?: number })?.status === 404;
 
   return (
     <>
@@ -185,9 +190,13 @@ export function SimilarPage() {
         description={
           profile
             ? profile.ready
-              ? `Tuned to your taste — ${profile.n_likes} liked, ${profile.n_dislikes} disliked.`
+              ? isFavoritesMode
+                ? `Common ground across your favorites — tuned to your taste (${profile.n_likes} liked, ${profile.n_dislikes} disliked).`
+                : `Tuned to your taste — ${profile.n_likes} liked, ${profile.n_dislikes} disliked.`
               : 'Your profile is still learning. Rate a few images to personalize suggestions.'
-            : 'Recommended set shared via a link.'
+            : isFavoritesMode
+              ? 'Suggestions based on what your favorites have in common.'
+              : 'Recommended set shared via a link.'
         }
       >
         {data?.ids_b64 && (
@@ -214,13 +223,13 @@ export function SimilarPage() {
         )}
       </PageHeader>
 
-      {!idsValid ? (
-        <EmptyState message="No image set provided. Open the “You might like” strip on any image and choose “Open all” to see it here." />
-      ) : isLoading ? (
+      {isLoading ? (
         <Spinner />
+      ) : noFavorites ? (
+        <EmptyState message="You haven't favorited any images yet. Favorite a few images and this page will find their common ground for you." />
       ) : isError ? (
         <div className="space-y-4">
-          <EmptyState message="Couldn't load this similar-image set. The seed image may not be embedded yet." />
+          <EmptyState message="Couldn't load recommendations. The seed images may not be embedded yet." />
           <div className="flex justify-center">
             <Button variant="ghost" size="sm" onClick={() => refetch()}>
               <RefreshCw size={14} /> Try again
@@ -228,38 +237,77 @@ export function SimilarPage() {
           </div>
         </div>
       ) : !data || data.data.length === 0 ? (
-        <EmptyState message="No similar images found — embeddings are still being built in the background." />
+        <EmptyState message={isFavoritesMode ? 'No suggestions found — embed more images, or favorite a wider variety.' : 'No similar images found — embeddings are still being built in the background.'} />
       ) : (
         <div className="space-y-8">
-          {seed && seed.web_path && (
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4 flex items-center gap-4">
-              <img
-                src={seed.thumbnail_path || (seed.filename ? thumbnailUrl(seed.filename) : undefined) || seed.web_path || undefined}
-                alt={seed.filename}
-                className="h-20 w-16 object-cover rounded-md border border-zinc-700"
-              />
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 text-xs text-zinc-500 mb-1">
-                  <Sparkles size={12} className="text-blue-400" />
-                  <span className="uppercase tracking-widest text-[10px]">Seed — because you liked this</span>
-                  {seed.embedded ? (
-                    <Badge variant="success">Embedded</Badge>
-                  ) : (
-                    <Badge variant="warning">Not embedded yet</Badge>
-                  )}
-                </div>
-                <p className="text-sm text-zinc-300 truncate">{seed.filename}</p>
-                {seed.tags && seed.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {seed.tags.slice(0, 8).map((t) => (
-                      <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
-                        {t}
-                      </span>
-                    ))}
-                  </div>
+          {isFavoritesMode && data.seeds && data.seeds.length > 0 ? (
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4">
+              <div className="flex items-center gap-2 text-xs text-zinc-500 mb-3">
+                <Sparkles size={12} className="text-blue-400" />
+                <span className="uppercase tracking-widest text-[10px]">
+                  Based on {data.seeds.filter((s) => s.embedded).length} of your favorites
+                </span>
+                {data.seeds.some((s) => !s.embedded) && (
+                  <Badge variant="warning">{data.seeds.filter((s) => !s.embedded).length} not embedded yet</Badge>
                 )}
               </div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {data.seeds.map((s) => (
+                  <img
+                    key={s.id}
+                    src={s.thumbnail_path || s.web_path || undefined}
+                    alt={`Favorite seed ${s.id}`}
+                    title={s.embedded ? undefined : 'Not embedded yet'}
+                    className={cn(
+                      'h-16 w-12 flex-none object-cover rounded-md border border-zinc-700',
+                      !s.embedded && 'opacity-40'
+                    )}
+                  />
+                ))}
+              </div>
+              {data.common_tags && data.common_tags.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-3">
+                  <span className="text-[10px] text-zinc-500 mr-1 self-center">In common:</span>
+                  {data.common_tags.slice(0, 12).map((t) => (
+                    <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                      {t}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
+          ) : (
+            seed &&
+            seed.web_path && (
+              <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4 flex items-center gap-4">
+                <img
+                  src={seed.thumbnail_path || (seed.filename ? thumbnailUrl(seed.filename) : undefined) || seed.web_path || undefined}
+                  alt={seed.filename}
+                  className="h-20 w-16 object-cover rounded-md border border-zinc-700"
+                />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-xs text-zinc-500 mb-1">
+                    <Sparkles size={12} className="text-blue-400" />
+                    <span className="uppercase tracking-widest text-[10px]">Seed — because you liked this</span>
+                    {seed.embedded ? (
+                      <Badge variant="success">Embedded</Badge>
+                    ) : (
+                      <Badge variant="warning">Not embedded yet</Badge>
+                    )}
+                  </div>
+                  <p className="text-sm text-zinc-300 truncate">{seed.filename}</p>
+                  {seed.tags && seed.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {seed.tags.slice(0, 8).map((t) => (
+                        <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
           )}
 
           <div className={cn('grid gap-3 grid-cols-[repeat(auto-fill,minmax(180px,1fr))]', isFetching && 'opacity-60 transition-opacity')}>
@@ -269,9 +317,11 @@ export function SimilarPage() {
           </div>
 
           <div className="flex justify-end">
-            <Button variant="ghost" size="sm" onClick={clearIds}>
-              Clear set
-            </Button>
+            {idsValid && (
+              <Button variant="ghost" size="sm" onClick={clearIds}>
+                Clear set
+              </Button>
+            )}
           </div>
         </div>
       )}

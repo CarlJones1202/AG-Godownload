@@ -2,6 +2,7 @@ package services
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -24,9 +25,30 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
+// resolveDataFile looks up a data file (cookie export, etc.) in the current
+// working directory first, then next to the running executable. This lets the
+// app be launched from any directory (service, scheduler, ...) and still find
+// the cookie files users drop beside the binary. Returns "" when not found.
+func resolveDataFile(name string) string {
+	if _, err := os.Stat(name); err == nil {
+		return name
+	}
+	if exe, err := os.Executable(); err == nil {
+		candidate := filepath.Join(filepath.Dir(exe), name)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
+}
+
 // RipYouTube downloads a YouTube video using yt-dlp and returns the file path and title
 func RipYouTube(pageURL string) (string, string, error) {
 	logger.Infof("Starting RipYouTube with yt-dlp for %s", pageURL)
+
+	// xHamster internal links use a bare "/videos/<id>" form that yt-dlp's
+	// extractor does not match; rewrite it into the "videos/<slug>-<id>" form.
+	pageURL = normalizeXHamsterURL(pageURL)
 
 	// Final output file - we'll let yt-dlp write directly to a temp file
 	tempDir := os.TempDir()
@@ -54,9 +76,11 @@ func RipYouTube(pageURL string) (string, string, error) {
 	} else if strings.Contains(pageURL, "pornhub.com") {
 		cookieFile = "pornhub_cookies.txt"
 	}
-	if _, err := os.Stat(cookieFile); err == nil {
-		args = append(args, "--cookies", cookieFile)
-		logger.Infof("Using cookies from %s", cookieFile)
+	if resolved := resolveDataFile(cookieFile); resolved != "" {
+		args = append(args, "--cookies", resolved)
+		logger.Infof("Using cookies from %s", resolved)
+	} else {
+		logger.Debugf("No %s found, running yt-dlp without cookies", cookieFile)
 	}
 
 	// First, let's get the title and the expected filename
@@ -108,6 +132,173 @@ func RipYouTube(pageURL string) (string, string, error) {
 	}
 
 	return actualPath, title, nil
+}
+
+// xhamsterCookieFileName is the Netscape-format cookie export honored for
+// xHamster downloads (login-only / age-verified videos need it).
+const xhamsterCookieFileName = "xhamster_cookies.txt"
+
+// xhamsterInitialsRe extracts xHamster's window.initials payload from the page.
+var xhamsterInitialsRe = regexp.MustCompile(`window\.initials\s*=\s*({.+?})\s*;`)
+
+// xhamsterHTMLTagRe strips HTML tags (xHamster uses <br> in its placeholder text).
+var xhamsterHTMLTagRe = regexp.MustCompile(`<[^>]*>`)
+
+// normalizeXHamsterURL rewrites xHamster URLs into the "videos/<slug>-<id>" form
+// that yt-dlp's XHamster extractor matches. xHamster's own internal links use the
+// bare "/videos/<id>" form, which yt-dlp falls back to the generic extractor for.
+func normalizeXHamsterURL(pageURL string) string {
+	u, err := url.Parse(pageURL)
+	if err != nil {
+		return pageURL
+	}
+	if !strings.Contains(u.Host, "xhamster") {
+		return pageURL
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) == 2 && parts[0] == "videos" && !strings.Contains(parts[1], "-") {
+		u.Path = "/videos/video-" + parts[1]
+		return u.String()
+	}
+	return pageURL
+}
+
+// xhamsterPageInfo is the subset of xHamster's window.initials payload that tells
+// us whether a video can actually be downloaded anonymously.
+type xhamsterPageInfo struct {
+	VideoModel struct {
+		Title   string          `json:"title"`
+		Sources json.RawMessage `json:"sources"`
+	} `json:"videoModel"`
+	XPlayerSettings *struct {
+		Sources json.RawMessage `json:"sources"`
+	} `json:"xplayerSettings"`
+	AVPlaceholder *struct {
+		Title string `json:"title"`
+	} `json:"avPlaceholderComponent"`
+}
+
+// jsonMessageHasContent reports whether a raw JSON field holds a non-null value.
+func jsonMessageHasContent(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null"))
+}
+
+// xhamsterHasFormats reports whether the page payload contains video sources.
+func (info *xhamsterPageInfo) hasFormats() bool {
+	if info == nil {
+		return false
+	}
+	if jsonMessageHasContent(info.VideoModel.Sources) {
+		return true
+	}
+	return info.XPlayerSettings != nil && jsonMessageHasContent(info.XPlayerSettings.Sources)
+}
+
+// fetchXhamsterPageInfo downloads the xHamster watch page and parses the
+// window.initials payload. A non-nil error means the page could not be read
+// (network problem, layout change, ...), not that the video is unavailable.
+func fetchXhamsterPageInfo(pageURL string) (*xhamsterPageInfo, error) {
+	req, err := http.NewRequest("GET", pageURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetching page: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("page returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading page body: %w", err)
+	}
+
+	match := xhamsterInitialsRe.FindSubmatch(body)
+	if match == nil {
+		return nil, fmt.Errorf("window.initials not found in page (xHamster layout may have changed)")
+	}
+
+	info := &xhamsterPageInfo{}
+	if err := json.Unmarshal(match[1], info); err != nil {
+		return nil, fmt.Errorf("parsing window.initials: %w", err)
+	}
+	return info, nil
+}
+
+// noFormatsReason returns a human-readable explanation when an xHamster page
+// carries no video sources, or "" when the page looks downloadable. xHamster
+// strips sources from the page for videos that require a logged-in session
+// (age verification), and yt-dlp reports those as the unhelpful
+// "No video formats found!".
+func (info *xhamsterPageInfo) noFormatsReason() string {
+	if info == nil {
+		return "could not read the xHamster page"
+	}
+	if info.AVPlaceholder != nil && info.AVPlaceholder.Title != "" {
+		msg := xhamsterHTMLTagRe.ReplaceAllString(info.AVPlaceholder.Title, " ")
+		msg = strings.Join(strings.Fields(msg), " ")
+		return fmt.Sprintf("xHamster requires age verification and a logged-in session for this video (%s); export your session cookies to %s (Netscape format, e.g. with the 'Get cookies.txt' extension) and place the file in the application directory", msg, xhamsterCookieFileName)
+	}
+	if !info.hasFormats() {
+		return fmt.Sprintf("xHamster returned no video sources for this video; it may have been removed, geo-blocked or require a logged-in session (try providing %s)", xhamsterCookieFileName)
+	}
+	return ""
+}
+
+// RipXHamster downloads an xHamster video via yt-dlp.
+//
+// xHamster only includes video sources in its page payload for videos that can be
+// watched anonymously. Login-only, removed or geo-limited videos are served without
+// sources, which yt-dlp reports as "No video formats found!". This wrapper inspects
+// the page first so callers get a message saying what is actually wrong, and so the
+// URL can be normalized into the form yt-dlp's extractor expects.
+func RipXHamster(pageURL string) (string, string, error) {
+	cookieFile := resolveDataFile(xhamsterCookieFileName)
+	if cookieFile == "" {
+		logger.Warnf("No %s found; xHamster videos that require a logged-in session will fail", xhamsterCookieFileName)
+	}
+
+	// Try yt-dlp first — it can use session cookies to access age-gated videos.
+	localPath, title, err := RipYouTube(pageURL)
+	if err == nil {
+		return localPath, title, nil
+	}
+
+	// yt-dlp failed. Inspect the page to give a helpful, specific error message
+	// rather than yt-dlp's generic "No video formats found!".
+	info, infoErr := fetchXhamsterPageInfo(pageURL)
+	if infoErr != nil {
+		// Could not inspect the page; report yt-dlp's error with a cookie hint.
+		if cookieFile == "" {
+			return "", "", fmt.Errorf("%w (xHamster may require a logged-in session; export your cookies to %s)", err, xhamsterCookieFileName)
+		}
+		return "", "", err
+	}
+	if reason := info.noFormatsReason(); reason != "" {
+		if cookieFile != "" {
+			// Cookies are present but still no sources — yt-dlp already tried with
+			// them, so the video is likely removed, geo-blocked, or the cookies
+			// are expired/invalid.
+			return "", "", fmt.Errorf("%w (cookies file %s is present but did not unlock this video — it may be expired or invalid)", err, cookieFile)
+		}
+		return "", "", fmt.Errorf("%s", reason)
+	}
+
+	// Page looks downloadable but yt-dlp still failed; report yt-dlp's error.
+	if cookieFile == "" {
+		return "", "", fmt.Errorf("%w (xHamster may require a logged-in session; export your cookies to %s)", err, xhamsterCookieFileName)
+	}
+	return "", "", err
 }
 
 // RipTnaFlix extracts the direct video URL and title from a TnaFlix page

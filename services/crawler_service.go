@@ -701,9 +701,9 @@ func ProcessVideoSource(source models.Source) error {
 		}
 	} else if strings.Contains(source.Location, "xhamster.com") {
 		logger.Infof("Detected xHamster URL, using yt-dlp...")
-		localPath, videoTitle, err = RipYouTube(source.Location)
+		localPath, videoTitle, err = RipXHamster(source.Location)
 		if err != nil {
-			return fmt.Errorf("failed to download xHamster video (try providing an xhamster_cookies.txt file): %w", err)
+			return fmt.Errorf("failed to download xHamster video: %w", err)
 		}
 		isLocalFile = true
 	} else if strings.Contains(source.Location, "drive.google.com") {

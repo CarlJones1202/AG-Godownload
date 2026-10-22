@@ -32,37 +32,186 @@ type candidate struct {
 	galleries []uint
 	tagIDs    []uint
 	tagNames  []string
+	// seedMatches is how many seeds this candidate visibly resembles
+	// (cosine >= seedMatchThreshold); used for multi-seed "reasons".
+	seedMatches int
 }
 
-// RecommendSimilar returns ranked recommendations for a seed image, blending
-// embedding similarity, tag affinity, color similarity and (once the profile
-// has enough signal) the personalized pull, then applying MMR-style diversity.
+// seedMatchThreshold is the cosine similarity at which a candidate counts as
+// resembling one of the consensus seeds.
+const seedMatchThreshold = 0.55
+
+// Consensus describes the common ground derived from a set of seed images:
+// which seeds had embeddings, their centrality weights, and the tags shared
+// enough to count as "consensus".
+type Consensus struct {
+	Weights        map[uint]float64 // seed id -> centrality weight (not normalized)
+	EmbeddedIDs    []uint           // seeds that had vectors (in input order)
+	SkippedIDs     []uint           // seeds without vectors
+	CommonTags     map[uint]float64 // tag id -> aggregate weight across seeds
+	CommonTagNames []string
+}
+
+// RecommendSimilar returns ranked recommendations for a seed image.
 func RecommendSimilar(seedID uint, limit int) ([]Recommendation, error) {
-	if VectorIndex.Len() == 0 {
-		return nil, errors.New("no embeddings indexed yet")
+	recs, _, err := RecommendFromSeeds([]uint{seedID}, limit)
+	return recs, err
+}
+
+// centralityWeights assigns each seed a weight based on its mean cosine
+// similarity to the other seeds, soft-floored so outliers keep a small voice
+// instead of being dropped (or dominating). A single seed gets weight 1.
+func centralityWeights(vecs [][]float32) []float64 {
+	n := len(vecs)
+	weights := make([]float64, n)
+	if n == 0 {
+		return weights
 	}
-	seedVec, err := LoadVector(seedID)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrSeedNotEmbedded, err)
+	if n == 1 {
+		weights[0] = 1
+		return weights
+	}
+	const floor = 0.15
+	for i, v := range vecs {
+		sum := 0.0
+		for j, o := range vecs {
+			if i == j {
+				continue
+			}
+			sum += cosineVec(v, o)
+		}
+		c := sum / float64(n-1) // mean cosine to the other seeds
+		if c < floor {
+			c = floor
+		}
+		weights[i] = c
+	}
+	return weights
+}
+
+// RecommendFromSeeds returns ranked recommendations for a *set* of seeds,
+// blended against the consensus of the set rather than each seed individually:
+// a centrality-weighted centroid of the seed embeddings, tags shared across
+// seeds, and a merged color palette. Seeds without embeddings are skipped and
+// reported in the Consensus. With a single seed this degenerates to the
+// original single-seed behavior.
+func RecommendFromSeeds(seedIDs []uint, limit int) ([]Recommendation, *Consensus, error) {
+	if VectorIndex.Len() == 0 {
+		return nil, nil, errors.New("no embeddings indexed yet")
 	}
 	if limit <= 0 || limit > 200 {
 		limit = 24
 	}
 
-	exclude := map[uint]bool{seedID: true}
+	// Load + normalize seed vectors; track which seeds are usable.
+	exclude := make(map[uint]bool, len(seedIDs))
+	consensus := &Consensus{
+		Weights:    map[uint]float64{},
+		CommonTags: map[uint]float64{},
+	}
+	type seedVec struct {
+		id  uint
+		vec []float32
+	}
+	var embedded []seedVec
+	for _, id := range seedIDs {
+		exclude[id] = true
+		raw, err := LoadVector(id)
+		if err != nil || raw == nil {
+			consensus.SkippedIDs = append(consensus.SkippedIDs, id)
+			continue
+		}
+		nv := normalizeVec(raw)
+		if nv == nil {
+			consensus.SkippedIDs = append(consensus.SkippedIDs, id)
+			continue
+		}
+		embedded = append(embedded, seedVec{id: id, vec: nv})
+		consensus.EmbeddedIDs = append(consensus.EmbeddedIDs, id)
+	}
+	if len(embedded) == 0 {
+		return nil, consensus, fmt.Errorf("%w: none of the %d seed images have vectors", ErrSeedNotEmbedded, len(seedIDs))
+	}
 
-	seedGalleries := imageGalleryIDs(seedID)
-	seedTagIDs, seedTagNames := imageTagData(seedID)
-	seedColors := parseColorPalette(seedColorJSON(seedID))
+	// Centrality weighting: a seed that resembles the rest of the set gets a
+	// big vote; an outlier favorite is soft-floored rather than dropped, so it
+	// tugs the consensus without hijacking it.
+	vecs := make([][]float32, 0, len(embedded))
+	for _, s := range embedded {
+		vecs = append(vecs, s.vec)
+	}
+	weights := centralityWeights(vecs)
+	for i, s := range embedded {
+		consensus.Weights[s.id] = weights[i]
+	}
+	wSum := 0.0
+	for _, w := range consensus.Weights {
+		wSum += w
+	}
+
+	// Consensus vector: the weighted centroid of normalized seed vectors.
+	// SearchByVector renormalizes, so no need here.
+	var centroid []float32
+	for _, s := range embedded {
+		w := float32(consensus.Weights[s.id] / wSum)
+		if centroid == nil {
+			centroid = make([]float32, len(s.vec))
+		}
+		for i, v := range s.vec {
+			centroid[i] += w * v
+		}
+	}
+
+	// Consensus tags: aggregate seed weights per tag; keep tags carried by a
+	// meaningful share of the set (a lone seed's tags still pass at weight 1).
+	tagMap := bulkImageTagData(consensus.EmbeddedIDs)
+	for _, s := range embedded {
+		w := consensus.Weights[s.id] / wSum
+		for _, tid := range tagMap[s.id].ids {
+			consensus.CommonTags[tid] += w
+		}
+	}
+	const tagThreshold = 0.25
+	nameByTagID := map[uint]string{}
+	for _, s := range embedded {
+		d := tagMap[s.id]
+		for i, tid := range d.ids {
+			nameByTagID[tid] = d.names[i]
+		}
+	}
+	for tid, w := range consensus.CommonTags {
+		if w < tagThreshold {
+			delete(consensus.CommonTags, tid)
+			continue
+		}
+		consensus.CommonTagNames = append(consensus.CommonTagNames, nameByTagID[tid])
+	}
+
+	// Merged color palette: union of seed palettes, exact-hex deduped.
+	seedColorMap := bulkImageColors(consensus.EmbeddedIDs)
+	seenColors := map[string]bool{}
+	var mergedPalette []string
+	for _, id := range consensus.EmbeddedIDs {
+		for _, hex := range seedColorMap[id] {
+			if seenColors[hex] {
+				continue
+			}
+			seenColors[hex] = true
+			mergedPalette = append(mergedPalette, hex)
+		}
+		if len(mergedPalette) >= 10 {
+			break
+		}
+	}
 
 	profileReady := DefaultProfile.Ready()
 	prefVec := DefaultProfile.Vector()
 	affinities := DefaultProfile.TagAffinity()
 
 	poolSize := limit*6 + 48
-	pool := VectorIndex.SearchByVector(seedVec, poolSize, exclude)
+	pool := VectorIndex.SearchByVector(centroid, poolSize, exclude)
 	if len(pool) == 0 {
-		return nil, errors.New("no candidates found")
+		return nil, consensus, errors.New("no candidates found")
 	}
 
 	// Guard against duplicate candidates (e.g. a vector store that can hold
@@ -83,7 +232,7 @@ func RecommendSimilar(seedID uint, limit int) ([]Recommendation, error) {
 		ids = append(ids, sc.ImageID)
 	}
 	galMap := bulkImageGalleryIDs(ids)
-	tagMap := bulkImageTagData(ids)
+	tagDataMap := bulkImageTagData(ids)
 	colorMap := bulkImageColors(ids)
 	vecMap := make(map[uint][]float32, len(ids))
 	for _, sc := range pool {
@@ -97,15 +246,15 @@ func RecommendSimilar(seedID uint, limit int) ([]Recommendation, error) {
 	cands := make([]candidate, 0, len(pool))
 	for _, sc := range pool {
 		c := candidate{
-			imageID:   sc.ImageID,
-			vec:       vecMap[sc.ImageID],
-			vecSim:    sc.Score,
+			imageID:  sc.ImageID,
+			vec:      vecMap[sc.ImageID],
+			vecSim:   sc.Score,
 			galleries: galMap[sc.ImageID],
-			tagIDs:    tagMap[sc.ImageID].ids,
-			tagNames:  tagMap[sc.ImageID].names,
+			tagIDs:   tagDataMap[sc.ImageID].ids,
+			tagNames: tagDataMap[sc.ImageID].names,
 		}
-		c.tagSim = computeTagSim(seedTagIDs, c.tagIDs, affinities)
-		c.colorSim = paletteSimilarity(seedColors, colorMap[sc.ImageID])
+		c.tagSim = computeTagSimWeighted(consensus.CommonTags, c.tagIDs, affinities)
+		c.colorSim = paletteSimilarity(mergedPalette, colorMap[sc.ImageID])
 		if profileReady && prefVec != nil && c.vec != nil {
 			sim := dotProduct(prefVec, c.vec)
 			if sim < 0 {
@@ -113,8 +262,28 @@ func RecommendSimilar(seedID uint, limit int) ([]Recommendation, error) {
 			}
 			c.prefSim = sim
 		}
+		if len(embedded) > 1 && c.vec != nil {
+			for _, s := range embedded {
+				if cosineVec(s.vec, c.vec) >= seedMatchThreshold {
+					c.seedMatches++
+				}
+			}
+		}
 		c.score = weight[0]*c.vecSim + weight[1]*c.tagSim + weight[2]*c.colorSim + weight[3]*c.prefSim
 		cands = append(cands, c)
+	}
+
+	// Never recommend from any seed's own gallery (union across the set).
+	var seedGalleries []uint
+	seedGalRows := bulkImageGalleryIDs(consensus.EmbeddedIDs)
+	galSeen := map[uint]bool{}
+	for _, gs := range seedGalRows {
+		for _, g := range gs {
+			if !galSeen[g] {
+				galSeen[g] = true
+				seedGalleries = append(seedGalleries, g)
+			}
+		}
 	}
 
 	chosen := selectMMR(cands, limit, seedGalleries)
@@ -127,7 +296,7 @@ func RecommendSimilar(seedID uint, limit int) ([]Recommendation, error) {
 	var images []models.Image
 	if err := database.DB.Select("id, filename, dominant_colors, type, file_exists, created_at").
 		Where("id IN ?", chosenIDs).Find(&images).Error; err != nil {
-		return nil, err
+		return nil, consensus, err
 	}
 	imgMap := make(map[uint]models.Image, len(images))
 	for _, im := range images {
@@ -141,11 +310,11 @@ func RecommendSimilar(seedID uint, limit int) ([]Recommendation, error) {
 		recs = append(recs, Recommendation{
 			Image:     img,
 			Score:     c.score,
-			Reasons:   buildReasons(&c, seedTagNames),
+			Reasons:   buildReasons(&c, consensus.CommonTagNames),
 			GalleryID: firstGalleryID(c.galleries),
 		})
 	}
-	return recs, nil
+	return recs, consensus, nil
 }
 
 func firstGalleryID(ids []uint) uint {
@@ -231,15 +400,17 @@ func selectMMR(cands []candidate, limit int, seedGalleries []uint) []candidate {
 	return out
 }
 
-// computeTagSim scores tag overlap between seed and candidate, weighted by the
-// user's per-tag affinity (default +0.5 when the profile has no opinion).
-func computeTagSim(seedIDs []uint, candIDs []uint, affinities map[uint]float64) float64 {
-	if len(seedIDs) == 0 || len(candIDs) == 0 {
+// computeTagSimWeighted scores tag overlap between the consensus tag set and a
+// candidate, weighted by the user's per-tag affinity (default +0.5 when the
+// profile has no opinion). Consensus weights are aggregate seed shares, so a
+// tag carried by most favorites counts more than one carried by an outlier.
+func computeTagSimWeighted(consensusTags map[uint]float64, candIDs []uint, affinities map[uint]float64) float64 {
+	if len(consensusTags) == 0 || len(candIDs) == 0 {
 		return 0
 	}
 	total := 0.0
 	for _, id := range candIDs {
-		if containsUint(seedIDs, id) {
+		if w, ok := consensusTags[id]; ok {
 			a := affinities[id]
 			if a == 0 {
 				a = 0.5
@@ -247,13 +418,13 @@ func computeTagSim(seedIDs []uint, candIDs []uint, affinities map[uint]float64) 
 			if a > 1 {
 				a = 1
 			}
-			total += a
+			total += a * w
 		}
 	}
 	if total < 0 {
 		total = 0
 	}
-	norm := math.Sqrt(float64(len(seedIDs)))
+	norm := math.Sqrt(float64(len(consensusTags)))
 	if norm == 0 {
 		return 0
 	}
@@ -286,9 +457,12 @@ func paletteSimilarity(seed, cand []string) float64 {
 	return sum / float64(count)
 }
 
-func buildReasons(c *candidate, seedTags []string) []string {
+func buildReasons(c *candidate, consensusTags []string) []string {
 	var reasons []string
-	if c.vecSim >= 0.55 {
+	if c.seedMatches > 1 {
+		reasons = append(reasons, fmt.Sprintf("matches %d favorites", c.seedMatches))
+	}
+	if c.vecSim >= seedMatchThreshold {
 		reasons = append(reasons, "similar look")
 	}
 	if c.colorSim >= 0.6 {
@@ -298,7 +472,7 @@ func buildReasons(c *candidate, seedTags []string) []string {
 		if len(reasons) >= 4 {
 			break
 		}
-		if containsString(seedTags, t) {
+		if containsString(consensusTags, t) {
 			reasons = append(reasons, "tag: "+t)
 		}
 	}
@@ -309,25 +483,6 @@ func buildReasons(c *candidate, seedTags []string) []string {
 }
 
 // --- bulk data loaders ---
-
-func imageGalleryIDs(imageID uint) []uint {
-	rows := bulkImageGalleryIDs([]uint{imageID})
-	return rows[imageID]
-}
-
-func imageTagData(imageID uint) ([]uint, []string) {
-	m := bulkImageTagData([]uint{imageID})
-	d := m[imageID]
-	return d.ids, d.names
-}
-
-func seedColorJSON(imageID uint) string {
-	var im models.Image
-	if err := database.DB.Select("dominant_colors").First(&im, imageID).Error; err != nil {
-		return ""
-	}
-	return im.DominantColors
-}
 
 func parseColorPalette(jsonStr string) []string {
 	if jsonStr == "" {
@@ -405,15 +560,6 @@ func bulkImageColors(ids []uint) map[uint][]string {
 		out[r.ID] = parseColorPalette(r.DominantColors)
 	}
 	return out
-}
-
-func containsUint(list []uint, v uint) bool {
-	for _, x := range list {
-		if x == v {
-			return true
-		}
-	}
-	return false
 }
 
 func containsString(list []string, v string) bool {

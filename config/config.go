@@ -60,6 +60,9 @@ type Config struct {
 		// Recommendation blending weights: embed,tags,color,pref (must sum to 1)
 		RecWeights        [4]float64
 		RecDiversityLambda float64
+		// FavoriteSeedCap bounds how many recent favorites feed the
+		// consensus "similar to my favorites" mode.
+		FavoriteSeedCap int
 	}
 }
 
@@ -136,6 +139,10 @@ func Load() {
 		}
 	}
 	Global.Embedding.RecDiversityLambda = getEnvAsFloat("REC_DIVERSITY_LAMBDA", 0.6)
+	Global.Embedding.FavoriteSeedCap = getEnvAsInt("FAVORITE_SEED_CAP", 50)
+	if Global.Embedding.FavoriteSeedCap < 1 {
+		Global.Embedding.FavoriteSeedCap = 1
+	}
 }
 
 func getEnv(key, fallback string) string {

@@ -89,6 +89,7 @@ export interface SimilarImage {
 }
 
 export interface SimilarImagesResponse {
+  mode?: 'single' | 'multi' | 'favorites';
   seed: {
     id: number;
     filename: string;
@@ -97,6 +98,15 @@ export interface SimilarImagesResponse {
     thumbnail_path: string;
     embedded: boolean;
   };
+  /** All seeds with embedding status; present in multi/favorites modes. */
+  seeds?: {
+    id: number;
+    web_path: string;
+    thumbnail_path: string;
+    embedded: boolean;
+  }[];
+  /** Tags shared across the seed set (multi/favorites modes). */
+  common_tags?: string[];
   profile: RatingProfile;
   ids_b64?: string;
   data: SimilarImage[];

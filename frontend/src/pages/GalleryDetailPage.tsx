@@ -454,7 +454,7 @@ export function GalleryDetailPage() {
                       </div>
                       <span className="text-xs text-zinc-300">{person.name}</span>
                       <button onClick={(e) => { e.stopPropagation(); unlinkPersonMut.mutate(person.id); }}
-                        className="p-0.5 rounded-full text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all" title="Unlink">
+                        className="p-0.5 rounded-full text-zinc-500 hover:text-red-400 transition-colors" title="Unlink">
                         <X size={10} />
                       </button>
                     </div>

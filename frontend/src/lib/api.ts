@@ -165,6 +165,9 @@ export const similar = {
     request<SimilarImagesResponse>(`/similar/${imageId}${qs({ limit })}`),
   byIds: (ids: number[]) =>
     request<SimilarImagesResponse>(`/similar${qs({ ids: encodeIds(ids) })}`),
+  // Consensus over the user's favorited images (no seed provided).
+  byFavorites: (limit?: number) =>
+    request<SimilarImagesResponse>(`/similar${qs({ limit })}`),
 };
 
 // encodeIds base64-encodes a JSON array of image ids for the deep-linkable

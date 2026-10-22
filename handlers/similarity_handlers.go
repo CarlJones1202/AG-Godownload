@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"gallery_api/config"
 	"gallery_api/database"
 	"gallery_api/models"
 	"gallery_api/services"
 	"math"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -17,15 +19,17 @@ import (
 	"gorm.io/gorm"
 )
 
-// GetSimilarImages returns ranked recommendations for a seed image, or for a
-// group of seed ids (?ids=<base64 JSON array>). Blend = embedding + tags +
-// colors + taste profile.
+// GetSimilarImages returns ranked recommendations for a seed image, for a
+// group of seed ids (?ids=<base64 JSON array>), or — when neither is given —
+// for the user's favorited images, finding the common ground between them.
+// Blend = embedding + tags + colors + taste profile.
 func GetSimilarImages(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "24"))
 	if limit < 1 || limit > 200 {
 		limit = 24
 	}
 
+	mode := "single"
 	var seeds []uint
 	if idStr := c.Param("id"); idStr != "" {
 		id, err := strconv.Atoi(idStr)
@@ -41,14 +45,26 @@ func GetSimilarImages(c *gin.Context) {
 			return
 		}
 		seeds = ids
-	}
-	if len(seeds) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id or ids parameter is required"})
-		return
+		if len(seeds) > 1 {
+			mode = "multi"
+		}
+	} else {
+		// No seed provided: recommend from the favorited images by
+		// consensus.
+		mode = "favorites"
+		var err error
+		seeds, err = favoriteSeedIDs()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if len(seeds) == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no favorites yet — favorite some images first"})
+			return
+		}
 	}
 
-	seed := seeds[0]
-	recs, err := services.RecommendSimilar(seed, limit)
+	recs, consensus, err := services.RecommendFromSeeds(seeds, limit)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, services.ErrSeedNotEmbedded) {
@@ -79,26 +95,49 @@ func GetSimilarImages(c *gin.Context) {
 		})
 	}
 
-	var seedImage models.Image
-	if err := database.DB.Select("id, filename, is_favorite").First(&seedImage, seed).Error; err != nil {
-		seedImage = models.Image{ID: seed}
+	// Seed metadata: the primary seed (for single mode back-compat) plus the
+	// full embedded/skipped breakdown for the consensus display.
+	_, vectorErr := services.LoadVector(seeds[0])
+	seed := loadSeedImage(seeds[0])
+
+	seedsOut := make([]gin.H, 0, len(seeds))
+	seedImages := make([]models.Image, 0, len(seeds))
+	for _, id := range seeds {
+		seedImages = append(seedImages, models.Image{ID: id})
 	}
-	_, seedErr := services.LoadVector(seed)
-	seedSlice := []models.Image{seedImage}
+	populateImagePaths(seedImages)
+	skipped := map[uint]bool{}
+	for _, id := range consensus.SkippedIDs {
+		skipped[id] = true
+	}
+	for _, im := range seedImages {
+		seedsOut = append(seedsOut, gin.H{
+			"id":             im.ID,
+			"web_path":       im.WebPath,
+			"thumbnail_path": im.ThumbnailPath,
+			"embedded":       !skipped[im.ID],
+		})
+	}
+	seedSlice := []models.Image{seed}
 	populateImagePaths(seedSlice)
-	seedImage = seedSlice[0]
+	seed = seedSlice[0]
 
 	nLikes, nDislikes := services.DefaultProfile.Counts()
 
 	c.JSON(http.StatusOK, gin.H{
+		"mode": mode,
 		"seed": gin.H{
-			"id":             seedImage.ID,
-			"filename":       seedImage.Filename,
-			"tags":           services.ImageTagNames(seed),
-			"web_path":       seedImage.WebPath,
-			"thumbnail_path": seedImage.ThumbnailPath,
-			"embedded":       seedErr == nil,
+			"id":             seed.ID,
+			"filename":       seed.Filename,
+			"tags":           services.ImageTagNames(seeds[0]),
+			"web_path":       seed.WebPath,
+			"thumbnail_path": seed.ThumbnailPath,
+			"embedded":       vectorErr == nil,
 		},
+		// All seeds with embedding status, so the UI can show the
+		// favorites the consensus was built from.
+		"seeds":        seedsOut,
+		"common_tags":  consensus.CommonTagNames,
 		"profile": gin.H{
 			"n_likes":    nLikes,
 			"n_dislikes": nDislikes,
@@ -109,6 +148,28 @@ func GetSimilarImages(c *gin.Context) {
 		"ids_b64": encodeSeedIDs(recs),
 		"data":    items,
 	})
+}
+
+// favoriteSeedIDs returns the most recent favorited, existing image ids, most
+// recent first, capped by config — these seed the favorites-consensus mode.
+func favoriteSeedIDs() ([]uint, error) {
+	var ids []uint
+	err := database.DB.Model(&models.Image{}).
+		Where("is_favorite = ? AND type = ? AND file_exists = ?", true, "image", true).
+		Order("id DESC").
+		Limit(config.Global.Embedding.FavoriteSeedCap).
+		Pluck("id", &ids).Error
+	return ids, err
+}
+
+// loadSeedImage fetches the light fields for a seed image, tolerating a
+// missing row (returns a stub with just the id).
+func loadSeedImage(id uint) models.Image {
+	var im models.Image
+	if err := database.DB.Select("id, filename, is_favorite").First(&im, id).Error; err != nil {
+		return models.Image{ID: id}
+	}
+	return im
 }
 
 // encodeSeedIDs returns base64(json([...image ids])) for the recommendations,
@@ -307,8 +368,12 @@ func populateImagePaths(images []models.Image) {
 			sourceName = "uncategorized"
 		}
 		sanitized := services.SanitizeDirectoryName(sourceName)
-		images[i].WebPath = fmt.Sprintf("/images/%s/%s", sanitized, images[i].Filename)
-		images[i].ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitized, images[i].Filename)
+		// Filename may already be a relative path like "SourceName/hash.jpg"
+		// (see crawler_service relPath). Use just the basename so the source
+		// dir isn't doubled in the URL, which would 404.
+		leaf := filepath.Base(images[i].Filename)
+		images[i].WebPath = fmt.Sprintf("/images/%s/%s", sanitized, leaf)
+		images[i].ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitized, leaf)
 	}
 }
 
