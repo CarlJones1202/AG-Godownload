@@ -15,6 +15,7 @@ import { JustifiedGrid } from '@/components/JustifiedGrid';
 import type { GallerySearchResult, Image, PaginatedResult } from '@/types';
 import type { JustifiedItem } from '@/components/JustifiedGrid';
 import { Lightbox } from '@/components/Lightbox';
+import { notifyFavoriteStateChanged } from '@/lib/favoriteFeedback';
 
 import {
   Heart,
@@ -190,7 +191,10 @@ export function GalleryDetailPage() {
 
   const favMut = useMutation({
     mutationFn: (imgId: number) => imagesApi.toggleFavorite(imgId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['images', { gallery_id: galleryId }] }),
+    onSuccess: (result, imgId) => {
+      notifyFavoriteStateChanged(imgId, result.is_favorite);
+      queryClient.invalidateQueries({ queryKey: ['images', { gallery_id: galleryId }] });
+    },
   });
 
   const deleteGalleryMut = useMutation({
@@ -257,7 +261,7 @@ export function GalleryDetailPage() {
         width: img.width, height: img.height,
         persistentOverlay: img.is_favorite ? (
           <div className="absolute bottom-0 left-0 p-2 pointer-events-auto">
-            <button onClick={(e) => { e.stopPropagation(); favMut.mutate(img.id); }} className="p-1">
+            <button type="button" onClick={(e) => { e.stopPropagation(); favMut.mutate(img.id); }} className="p-0.5" title="Remove from favorites" aria-label="Remove from favorites">
               <Heart size={16} className="fill-red-500 text-red-500" />
             </button>
           </div>
@@ -265,8 +269,8 @@ export function GalleryDetailPage() {
         overlay: (
           <div className="flex flex-col justify-end h-full bg-gradient-to-t from-black/60 to-transparent p-2">
             <div className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-1">
-                <button onClick={(e) => { e.stopPropagation(); favMut.mutate(img.id); }} className="p-1">
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={(e) => { e.stopPropagation(); favMut.mutate(img.id); }} className="p-0.5" title={img.is_favorite ? 'Remove from favorites' : 'Add to favorites'} aria-label={img.is_favorite ? 'Remove from favorites' : 'Add to favorites'}>
                   <Heart size={16} className={cn(img.is_favorite ? 'fill-red-500 text-red-500' : 'text-white')} />
                 </button>
                 <button onClick={(e) => { e.stopPropagation(); setConfirmDeleteImageId(img.id); }} className="p-1" title="Delete image">

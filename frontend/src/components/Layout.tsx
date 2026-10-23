@@ -18,6 +18,7 @@ import { useWebSocket } from '@/hooks/useWebSocket';
 import { useQuery } from '@tanstack/react-query';
 import { stats } from '@/lib/api';
 import { CommandPalette } from '@/components/CommandPalette';
+import { FavoriteUndoToast } from '@/components/FavoriteUndoToast';
 
 interface NavItem {
   to: string;
@@ -205,6 +206,7 @@ export function Layout() {
         <Outlet />
       </main>
 
+      <FavoriteUndoToast />
       {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
     </div>
   );

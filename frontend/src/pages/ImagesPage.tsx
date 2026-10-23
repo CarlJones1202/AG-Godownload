@@ -19,6 +19,7 @@ import { Lightbox } from '@/components/Lightbox';
 import { Heart, Search, Palette, Trash2, Shuffle, UserPlus, X, Filter } from 'lucide-react';
 import { usePagination } from '@/hooks/usePagination';
 import type { Person } from '@/types';
+import { notifyFavoriteStateChanged } from '@/lib/favoriteFeedback';
 
 export function ImagesPage() {
   const queryClient = useQueryClient();
@@ -95,7 +96,8 @@ export function ImagesPage() {
 
   const favMut = useMutation({
     mutationFn: (id: number) => images.toggleFavorite(id),
-    onSuccess: () => {
+    onSuccess: (result, id) => {
+      notifyFavoriteStateChanged(id, result.is_favorite);
       queryClient.invalidateQueries({ queryKey: ['images'] });
     },
   });
@@ -136,8 +138,8 @@ export function ImagesPage() {
         overlay: (
           <div className="flex flex-col justify-end h-full bg-gradient-to-t from-black/60 to-transparent p-2">
             <div className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-1">
-                <button onClick={(e) => { e.stopPropagation(); favMut.mutate(img.id); }} className="p-1">
+              <div className="flex items-center gap-2">
+                <button type="button" title={img.is_favorite ? 'Remove from favorites' : 'Add to favorites'} aria-label={img.is_favorite ? 'Remove from favorites' : 'Add to favorites'} onClick={(e) => { e.stopPropagation(); favMut.mutate(img.id); }} className="p-0.5">
                   <Heart size={16} className={cn(img.is_favorite ? 'fill-red-500 text-red-500' : 'text-white')} />
                 </button>
                 <button onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(img.id); }} className="p-1" title="Delete image">

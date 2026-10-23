@@ -17,6 +17,7 @@ import { VideoPlayer } from '@/components/VideoPlayer';
 import { Heart, Play, Trash2, UserPlus, X, Pencil } from 'lucide-react';
 import { usePagination } from '@/hooks/usePagination';
 import type { Image, Person } from '@/types';
+import { notifyFavoriteStateChanged } from '@/lib/favoriteFeedback';
 
 export function VideosPage() {
   const queryClient = useQueryClient();
@@ -43,7 +44,8 @@ export function VideosPage() {
 
   const favMut = useMutation({
     mutationFn: (id: number) => imagesApi.toggleFavorite(id),
-    onSuccess: () => {
+    onSuccess: (result, id) => {
+      notifyFavoriteStateChanged(id, result.is_favorite);
       queryClient.invalidateQueries({ queryKey: ['videos'] });
     },
   });
@@ -123,9 +125,9 @@ export function VideosPage() {
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="sm" title={vid.is_favorite ? 'Remove from favorites' : 'Add to favorites'} onClick={() => favMut.mutate(vid.id)}>
+                      <button type="button" title={vid.is_favorite ? 'Remove from favorites' : 'Add to favorites'} aria-label={vid.is_favorite ? 'Remove from favorites' : 'Add to favorites'} className="inline-flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-red-400" onClick={() => favMut.mutate(vid.id)}>
                         <Heart size={14} className={vid.is_favorite ? 'text-red-400 fill-red-400' : 'text-zinc-500 hover:text-red-400'} />
-                      </Button>
+                      </button>
                       <Button variant="ghost" size="sm" title="Link to person" onClick={() => { setLinkPersonImageId(vid.id); setPersonSearch(''); }}>
                         <UserPlus size={14} className="text-zinc-500 hover:text-blue-400" />
                       </Button>

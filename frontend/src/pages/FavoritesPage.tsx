@@ -21,6 +21,7 @@ import { VideoPlayer } from '@/components/VideoPlayer';
 import { Heart, Play, Trash2 } from 'lucide-react';
 import { usePagination } from '@/hooks/usePagination';
 import type { Image } from '@/types';
+import { notifyFavoriteStateChanged } from '@/lib/favoriteFeedback';
 
 type Section = 'images' | 'videos';
 
@@ -43,7 +44,8 @@ export function FavoritesPage() {
 
   const favMut = useMutation({
     mutationFn: (id: number) => imagesApi.toggleFavorite(id),
-    onSuccess: () => {
+    onSuccess: (result, id) => {
+      notifyFavoriteStateChanged(id, result.is_favorite);
       queryClient.invalidateQueries({ queryKey: ['favorites'] });
       queryClient.invalidateQueries({ queryKey: ['images'] });
       queryClient.invalidateQueries({ queryKey: ['videos'] });
@@ -72,8 +74,9 @@ export function FavoritesPage() {
         <div className="flex justify-end h-full bg-gradient-to-t from-black/60 to-transparent p-2">
           <button
             onClick={(e) => { e.stopPropagation(); favMut.mutate(img.id); }}
-            className="p-1"
+            className="p-0.5"
             title="Remove from favorites"
+            aria-label="Remove from favorites"
           >
             <Heart size={16} className="fill-red-500 text-red-500" />
           </button>
@@ -154,9 +157,9 @@ export function FavoritesPage() {
                       onClick={(e) => e.stopPropagation()}
                     >
                       <div className="flex items-center gap-1">
-                        <Button variant="ghost" size="sm" title="Remove from favorites" onClick={() => favMut.mutate(vid.id)}>
+                        <button type="button" title="Remove from favorites" aria-label="Remove from favorites" className="inline-flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-red-400" onClick={() => favMut.mutate(vid.id)}>
                           <Heart size={14} className="text-red-400 fill-red-400" />
-                        </Button>
+                        </button>
                         <Button variant="ghost" size="sm" title="Delete video" onClick={() => setConfirmDeleteId(vid.id)}>
                           <Trash2 size={14} className="text-zinc-500 hover:text-red-400" />
                         </Button>

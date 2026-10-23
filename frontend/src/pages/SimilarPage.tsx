@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams, Link } from 'react-router-dom';
-import { similar, ratings, profile as profileApi, images } from '@/lib/api';
+import { similar, ratings, profile as profileApi, images, recordRecommendationEvent } from '@/lib/api';
 import { PageHeader, Spinner, EmptyState, Button, Badge } from '@/components/UI';
 import { Star, Heart, Link as LinkIcon, Trash2, Sparkles, RefreshCw, ThumbsDown } from 'lucide-react';
 import { cn, imageUrl, thumbnailUrl } from '@/lib/utils';
 import type { SimilarImage } from '@/types';
+import { notifyFavoriteStateChanged } from '@/lib/favoriteFeedback';
 
 function decodeIds(raw: string): number[] | null {
   try {
@@ -50,9 +51,22 @@ function PreviewImage({
   );
 }
 
-function SimilarTile({ item }: { item: SimilarImage }) {
+function SimilarTile({ item, setId }: { item: SimilarImage; setId?: string }) {
   const queryClient = useQueryClient();
   const [favorite, setFavorite] = useState(item.favorite);
+
+  const eventMut = useMutation({
+    mutationFn: (event: { event: 'open' | 'favorite' | 'not_interested' | 'rating'; rating?: number }) => {
+      if (!setId) throw new Error('Recommendation set id is missing');
+      return recordRecommendationEvent({
+        set_id: setId,
+        image_id: item.id,
+        event: event.event,
+        rating: event.rating,
+      });
+    },
+    onError: (err) => console.error('Failed to record recommendation feedback:', err),
+  });
 
   const { data: rating } = useQuery({
     queryKey: ['ratings', item.id],
@@ -61,9 +75,13 @@ function SimilarTile({ item }: { item: SimilarImage }) {
 
   const setRatingMut = useMutation({
     mutationFn: (r: number) => ratings.set(item.id, r),
-    onSuccess: () => {
+    onSuccess: (_, r) => {
       queryClient.invalidateQueries({ queryKey: ['ratings', item.id] });
       queryClient.invalidateQueries({ queryKey: ['similar'] });
+      if (setId) {
+        eventMut.mutate({ event: 'rating', rating: r });
+        if (r <= 2) eventMut.mutate({ event: 'not_interested' });
+      }
     },
   });
 
@@ -77,7 +95,11 @@ function SimilarTile({ item }: { item: SimilarImage }) {
 
   const favMut = useMutation({
     mutationFn: () => images.toggleFavorite(item.id),
-    onSuccess: (res) => setFavorite(res.is_favorite),
+    onSuccess: (res) => {
+      setFavorite(res.is_favorite);
+      notifyFavoriteStateChanged(item.id, res.is_favorite);
+      if (res.is_favorite && setId) eventMut.mutate({ event: 'favorite' });
+    },
   });
 
   const handleRate = (n: number) => {
@@ -187,13 +209,25 @@ function SimilarTile({ item }: { item: SimilarImage }) {
 
   if (item.gallery_id) {
     return (
-      <Link to={`/galleries/${item.gallery_id}?focus=${item.id}`} className="block" title={item.reasons.join(' · ')}>
+      <Link
+        to={`/galleries/${item.gallery_id}?focus=${item.id}`}
+        className="block"
+        title={item.reasons.join(' · ')}
+        onClick={() => setId && eventMut.mutate({ event: 'open' })}
+      >
         {body}
       </Link>
     );
   }
   return (
-    <a href={item.web_path} target="_blank" rel="noreferrer" className="block" title={item.reasons.join(' · ')}>
+    <a
+      href={item.web_path}
+      target="_blank"
+      rel="noreferrer"
+      className="block"
+      title={item.reasons.join(' · ')}
+      onClick={() => setId && eventMut.mutate({ event: 'open' })}
+    >
       {body}
     </a>
   );
@@ -375,7 +409,7 @@ export function SimilarPage() {
 
           <div className={cn('grid gap-3 grid-cols-[repeat(auto-fill,minmax(180px,1fr))]', isFetching && 'opacity-60 transition-opacity')}>
             {data.data.map((item) => (
-              <SimilarTile key={item.id} item={item} />
+              <SimilarTile key={item.id} item={item} setId={data.recommendation_set_id} />
             ))}
           </div>
 

@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, X, Info, Heart, Link as LinkIcon, Play, Paus
 import type { Image, Person, SimilarImage } from '@/types';
 import { formatDate, parseColors, cn, imageUrl, thumbnailUrl } from '@/lib/utils';
 import { Link, useNavigate } from 'react-router-dom';
-import { tagsApi, people, ratings as ratingsApi, similar as similarApi } from '@/lib/api';
+import { tagsApi, people, ratings as ratingsApi, similar as similarApi, encodeIds, recordRecommendationEvent } from '@/lib/api';
 import { Input } from '@/components/UI';
 
 // Full-resolution source, used when the similar image replaces the main view.
@@ -150,8 +150,15 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
 
   const openSimilarImage = useCallback((sim: SimilarImage) => {
     const src = resolveSimilarSrc(sim);
-    if (src) setSimilarViewState({ src, alt: sim.filename, key: `${imageData?.[index]?.id ?? index}` });
-  }, [imageData, index]);
+    if (src) {
+      setSimilarViewState({ src, alt: sim.filename, key: `${imageData?.[index]?.id ?? index}` });
+      const setId = similarData?.recommendation_set_id;
+      if (setId) {
+        recordRecommendationEvent({ set_id: setId, image_id: sim.id, event: 'open' })
+          .catch((err: unknown) => console.error('Failed to record recommendation open:', err));
+      }
+    }
+  }, [imageData, index, similarData?.recommendation_set_id]);
 
   useEffect(() => {
     let timer: number | undefined;
@@ -383,24 +390,28 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
                   </div>
                 )}
                 <div className="h-8 w-px bg-white/10" />
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleToggleFavorite();
-                  }}
-                  className="flex flex-col items-center gap-1 transition-colors group"
-                  title="Toggle favorite (F)"
-                >
-                  <Heart 
-                    size={20} 
-                    className={currentImage.is_favorite 
-                      ? 'text-red-500 fill-red-500 scale-110' 
-                      : 'text-white/30 group-hover:text-white/60 transition-transform group-hover:scale-110'} 
-                  />
-                  <span className="text-[10px] uppercase tracking-widest text-white/30 group-hover:text-white/60">
+                <div className="flex flex-col items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleFavorite();
+                    }}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors group"
+                    title="Toggle favorite (F)"
+                    aria-label={currentImage.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
+                  >
+                    <Heart
+                      size={20}
+                      className={currentImage.is_favorite
+                        ? 'text-red-500 fill-red-500 scale-110'
+                        : 'text-white/30 group-hover:text-white/60 transition-transform group-hover:scale-110'}
+                    />
+                  </button>
+                  <span className="pointer-events-none text-[10px] uppercase tracking-widest text-white/30">
                     {currentImage.is_favorite ? 'Favorited' : 'Favorite'}
                   </span>
-                </button>
+                </div>
                 <div className="h-8 w-px bg-white/10" />
                 <div className="flex flex-col items-center gap-1 group">
                   <div className="flex items-center gap-0.5">
@@ -590,11 +601,11 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
                   : 'based on visual similarity'}
               </div>
             </div>
-            {similarData?.ids_b64 && (
+            {currentImage && isCurrentImage && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  navigate(`/similar?ids=${similarData.ids_b64}`);
+                  navigate(`/similar?ids=${encodeURIComponent(encodeIds([currentImage.id]))}`);
                 }}
                 className="flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
                 title="Open the full set on the Similar page"
