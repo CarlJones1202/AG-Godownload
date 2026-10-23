@@ -9,6 +9,7 @@ import (
 	"gallery_api/models"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -25,6 +26,7 @@ var ErrImageFileMissing = errors.New("image file not found on disk")
 // of truth for pending work across restarts; dropped channel sends are picked
 // up again by the startup and periodic sweeps.
 var EmbedWorkQueue = make(chan uint, 1024)
+var embeddingWorkerWG sync.WaitGroup
 
 // EnqueueEmbed schedules an image for embedding + tagging. It doubles as the
 // "this file is available now" signal: terminal (failed) and deferred rows are
@@ -56,23 +58,35 @@ func StartEmbeddingWorker() {
 		numWorkers = 1
 	}
 	for i := 0; i < numWorkers; i++ {
+		embeddingWorkerWG.Add(1)
 		go func(workerID int) {
+			defer embeddingWorkerWG.Done()
 			logger.Debugf("Embedding worker %d started", workerID)
-			for imageID := range EmbedWorkQueue {
-				func() {
-					defer func() {
-						if r := recover(); r != nil {
-							logger.Errorf("Embedding worker %d recovered from panic on image %d: %v", workerID, imageID, r)
-							// Mark permanently-failed so it isn't auto-retried every sweep.
-							database.DB.Model(&models.EmbedQueue{}).
-								Where("image_id = ?", imageID).
-								Updates(map[string]interface{}{"status": "failed", "attempts": maxEmbedRetries + 1})
+			for {
+				select {
+				case <-ShutdownChan():
+					return
+				default:
+				}
+				select {
+				case <-ShutdownChan():
+					return
+				case imageID := <-EmbedWorkQueue:
+					func() {
+						defer func() {
+							if r := recover(); r != nil {
+								logger.Errorf("Embedding worker %d recovered from panic on image %d: %v", workerID, imageID, r)
+								// Mark permanently-failed so it isn't auto-retried every sweep.
+								database.DB.Model(&models.EmbedQueue{}).
+									Where("image_id = ?", imageID).
+									Updates(map[string]interface{}{"status": "failed", "attempts": maxEmbedRetries + 1})
+							}
+						}()
+						if err := ProcessEmbed(imageID); err != nil {
+							logger.Warnf("Embedding worker %d failed image %d: %v", workerID, imageID, err)
 						}
 					}()
-					if err := ProcessEmbed(imageID); err != nil {
-						logger.Warnf("Embedding worker %d failed image %d: %v", workerID, imageID, err)
-					}
-				}()
+				}
 			}
 		}(i)
 	}
@@ -94,15 +108,26 @@ func StartEmbeddingWorker() {
 	go func() {
 		ticker := time.NewTicker(15 * time.Minute)
 		defer ticker.Stop()
-		for range ticker.C {
-			FeedPendingEmbedQueue()
-			FeedRetryableFailed()
-			FeedDeferredEmbedQueue()
-			if n := EnqueueMissingEmbeddings(); n > 0 {
-				logger.Infof("Embedding sweep enqueued %d new images", n)
+		for {
+			select {
+			case <-ShutdownChan():
+				return
+			case <-ticker.C:
+				FeedPendingEmbedQueue()
+				FeedRetryableFailed()
+				FeedDeferredEmbedQueue()
+				if n := EnqueueMissingEmbeddings(); n > 0 {
+					logger.Infof("Embedding sweep enqueued %d new images", n)
+				}
 			}
 		}
 	}()
+}
+
+// StopEmbeddingWorkers waits for active image embedding requests to finish.
+func StopEmbeddingWorkers() {
+	embeddingWorkerWG.Wait()
+	StopEmbeddingEngine()
 }
 
 // FeedPendingEmbedQueue re-pushes persisted pending rows into the worker
@@ -175,17 +200,19 @@ func FeedDeferredEmbedQueue() {
 	}
 }
 
-// EnqueueMissingEmbeddings queues every eligible image that has no embedding.
+// EnqueueMissingEmbeddings queues eligible images without an embedding from
+// the currently configured provider, including images embedded by an older model.
 func EnqueueMissingEmbeddings() int {
 	count := 0
 	const chunkSize = 500
 	var lastID uint
+	embedderName := CurrentEmbedder().Name()
 	for {
 		var images []models.Image
 		err := database.DB.Select("id").
 			Where("type = ? AND file_exists = ? AND deleted_at IS NULL AND id > ?", "image", true, lastID).
-			Where("NOT EXISTS (SELECT 1 FROM image_embeddings WHERE image_embeddings.image_id = images.id)").
-			Where("NOT EXISTS (SELECT 1 FROM embed_queues WHERE embed_queues.image_id = images.id)").
+			Where("NOT EXISTS (SELECT 1 FROM image_embeddings WHERE image_embeddings.image_id = images.id AND image_embeddings.embedder = ?)", embedderName).
+			Where("(NOT EXISTS (SELECT 1 FROM embed_queues WHERE embed_queues.image_id = images.id) OR EXISTS (SELECT 1 FROM embed_queues WHERE embed_queues.image_id = images.id AND embed_queues.status = ?))", "done").
 			Order("id ASC").Limit(chunkSize).
 			Find(&images).Error
 		if err != nil {
@@ -231,6 +258,17 @@ func ProcessEmbed(imageID uint) error {
 
 	if err := UpsertDerivedTags(imageID, DeriveLowLevelTags(res.Features)); err != nil {
 		logger.Warnf("Tag upsert failed for image %d: %v", imageID, err)
+	}
+
+	var ratingCount int64
+	if err := database.DB.Model(&models.ImageRating{}).
+		Where("user_id = ? AND image_id = ?", defaultUserID, imageID).
+		Count(&ratingCount).Error; err != nil {
+		logger.Warnf("Failed to check ratings after embedding image %d: %v", imageID, err)
+	} else if ratingCount > 0 {
+		if err := DefaultProfile.Rebuild(); err != nil {
+			logger.Warnf("Failed to rebuild taste profile after embedding image %d: %v", imageID, err)
+		}
 	}
 
 	return markEmbedDone(imageID)
@@ -330,7 +368,7 @@ func ResolveImageFilePath(imageID uint) (string, error) {
 	candidates := []string{
 		filepath.Join(UploadsDir, SanitizeDirectoryName(sourceName), filepath.Base(image.Filename)),
 		filepath.Join(UploadsDir, image.Filename), // legacy flat layout
-		image.Filename,                            // absolute/relative path stored directly
+		image.Filename, // absolute/relative path stored directly
 	}
 	for _, path := range candidates {
 		if _, err := os.Stat(path); err == nil {

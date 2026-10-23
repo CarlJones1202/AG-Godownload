@@ -55,6 +55,7 @@ type Config struct {
 		ModelPath    string // ONNX model path; empty = built-in low-level provider
 		ModelName    string // embedder version tag stored in image_embeddings
 		Dim          int    // expected vector dimension
+		PythonPath   string // Python executable used by the optional local ONNX worker
 		TagThreshold float64
 		Concurrency  int
 		// Recommendation blending weights: embed,tags,color,pref (must sum to 1)
@@ -96,11 +97,18 @@ func Load() {
 	// Providers default - only imx
 	Global.GalleryDL.Providers = []string{"imx"}
 
-	// Embedding defaults — feature is always on via the built-in low-level
-	// provider; setting EMBED_MODEL_PATH opts into a semantic embedder later.
+	// Embedding defaults — use semantic embeddings when a local ONNX model path
+	// is configured; otherwise retain the built-in low-level provider.
 	Global.Embedding.ModelPath = getEnv("EMBED_MODEL_PATH", "")
-	Global.Embedding.ModelName = getEnv("EMBED_MODEL_NAME", "lowlevel-v1")
-	Global.Embedding.Dim = getEnvAsInt("EMBED_DIM", 51)
+	defaultModelName := "lowlevel-v1"
+	defaultEmbeddingDim := 51
+	if Global.Embedding.ModelPath != "" {
+		defaultModelName = "siglip2-base-patch16-224-int8-v1"
+		defaultEmbeddingDim = 768
+	}
+	Global.Embedding.ModelName = getEnv("EMBED_MODEL_NAME", defaultModelName)
+	Global.Embedding.Dim = getEnvAsInt("EMBED_DIM", defaultEmbeddingDim)
+	Global.Embedding.PythonPath = getEnv("EMBED_PYTHON", "python")
 	Global.Embedding.TagThreshold = 0.3
 	if v, err := strconv.ParseFloat(getEnv("EMBED_TAG_THRESHOLD", "0.3"), 64); err == nil {
 		Global.Embedding.TagThreshold = v

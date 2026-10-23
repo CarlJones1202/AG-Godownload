@@ -279,6 +279,113 @@ go mod download
 go mod tidy
 Write-Success "Backend initialized."
 
+# 6.1 Install local semantic embedding runtime and model
+Write-Step "Setting up local SigLIP 2 semantic embeddings..."
+$pythonLauncher = Get-Command "py" -ErrorAction SilentlyContinue
+if (-not $pythonLauncher) {
+    Write-Host "Installing Python 3.13 via winget..."
+    winget install --id Python.Python.3.13 --silent --accept-package-agreements --accept-source-agreements
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+        [System.Environment]::GetEnvironmentVariable("Path", "User")
+    $pythonLauncher = Get-Command "py" -ErrorAction SilentlyContinue
+}
+if (-not $pythonLauncher) {
+    throw "Python launcher is unavailable after installation."
+}
+
+& $pythonLauncher.Source -3.13 --version
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Installing Python 3.13 via winget..."
+    winget install --id Python.Python.3.13 --silent --accept-package-agreements --accept-source-agreements
+    if ($LASTEXITCODE -ne 0) { throw "Failed to install Python 3.13." }
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+        [System.Environment]::GetEnvironmentVariable("Path", "User")
+    $pythonLauncher = Get-Command "py" -ErrorAction SilentlyContinue
+    if (-not $pythonLauncher) { throw "Python launcher is unavailable after installing Python 3.13." }
+    & $pythonLauncher.Source -3.13 --version
+    if ($LASTEXITCODE -ne 0) { throw "Python 3.13 is required for the local semantic embedding runtime." }
+}
+
+$embeddingVenv = Join-Path $PWD "bin\embedding-venv"
+$embeddingPython = Join-Path $embeddingVenv "Scripts\python.exe"
+if (-not (Test-Path $embeddingPython)) {
+    & $pythonLauncher.Source -3.13 -m venv $embeddingVenv
+    if ($LASTEXITCODE -ne 0) { throw "Failed to create the semantic embedding virtual environment." }
+}
+& $embeddingPython -m pip install --upgrade pip
+if ($LASTEXITCODE -ne 0) { throw "Failed to update pip in the semantic embedding environment." }
+& $embeddingPython -m pip install -r (Join-Path $PWD "requirements-embedding.txt")
+if ($LASTEXITCODE -ne 0) { throw "Failed to install semantic embedding dependencies." }
+
+$modelDirectory = Join-Path $PWD "models"
+if (-not (Test-Path $modelDirectory)) {
+    New-Item -ItemType Directory -Path $modelDirectory -Force | Out-Null
+}
+$semanticModel = Join-Path $modelDirectory "siglip2-base-patch16-224-int8.onnx"
+$semanticModelSha256 = "0dd31785a2713f1113ef2272472165c69d580473dae38d7b47568ac587795e70"
+if (Test-Path $semanticModel) {
+    $actualHash = (Get-FileHash -Path $semanticModel -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne $semanticModelSha256) {
+        throw "Existing semantic model has an unexpected SHA-256 hash: $semanticModel"
+    }
+} else {
+    $modelDownload = "$semanticModel.download"
+    $modelUrl = "https://huggingface.co/onnx-community/siglip2-base-patch16-224-ONNX/resolve/ba1f3b0843f24bc5417d38e19c37b287d719b2f4/onnx/vision_model_int8.onnx"
+    Write-Host "Downloading the pinned 95 MB SigLIP 2 vision model..."
+    Invoke-WebRequest -UseBasicParsing -Uri $modelUrl -OutFile $modelDownload
+    $actualHash = (Get-FileHash -Path $modelDownload -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne $semanticModelSha256) {
+        Remove-Item -LiteralPath $modelDownload -Force
+        throw "Downloaded semantic model failed SHA-256 verification."
+    }
+    Move-Item -LiteralPath $modelDownload -Destination $semanticModel
+}
+
+$envPath = Join-Path $PWD ".env"
+$envLines = @()
+if (Test-Path $envPath) {
+    $envLines = Get-Content -Path $envPath
+}
+$semanticDefaults = @{
+    EMBED_MODEL_PATH = "models\siglip2-base-patch16-224-int8.onnx"
+    EMBED_MODEL_NAME = "siglip2-base-patch16-224-int8-v1"
+    EMBED_DIM = "768"
+    EMBED_PYTHON = "bin\embedding-venv\Scripts\python.exe"
+}
+$configuredModelPath = ""
+foreach ($line in $envLines) {
+    if ($line -match "^EMBED_MODEL_PATH=(.*)$") {
+        $configuredModelPath = $Matches[1].Trim().Trim('"')
+        break
+    }
+}
+$useSiglipDefaults = [string]::IsNullOrWhiteSpace($configuredModelPath) -or
+    $configuredModelPath -eq $semanticDefaults.EMBED_MODEL_PATH
+foreach ($key in $semanticDefaults.Keys) {
+    $pattern = "^" + [regex]::Escape($key) + "="
+    $matched = $false
+    $updated = @()
+    foreach ($line in $envLines) {
+        if ($line -match $pattern) {
+            $matched = $true
+            $forceUpdate = $useSiglipDefaults -and $key -ne "EMBED_MODEL_PATH"
+            if (-not $forceUpdate -and $line.Substring($key.Length + 1).Trim().Length -gt 0) {
+                $updated += $line
+            } else {
+                $updated += "$key=$($semanticDefaults[$key])"
+            }
+        } else {
+            $updated += $line
+        }
+    }
+    if (-not $matched) {
+        $updated += "$key=$($semanticDefaults[$key])"
+    }
+    $envLines = $updated
+}
+Set-Content -Path $envPath -Value $envLines -Encoding Ascii
+Write-Success "Local semantic embeddings are configured. Images are processed on this machine."
+
 # 7. Initialize Frontend
 if (Test-Path "frontend") {
     Write-Step "Initializing frontend (Node.js)..."

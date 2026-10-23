@@ -9,6 +9,7 @@ import (
 	"gallery_api/logger"
 	"gallery_api/models"
 	"math"
+	"os"
 
 	"gorm.io/gorm"
 )
@@ -38,7 +39,7 @@ type LowLevelEmbedder struct {
 }
 
 func (e *LowLevelEmbedder) Name() string { return e.name }
-func (e *LowLevelEmbedder) Dim() int      { return e.dim }
+func (e *LowLevelEmbedder) Dim() int     { return e.dim }
 
 func (e *LowLevelEmbedder) Embed(path string) (*EmbeddingResult, error) {
 	feats, err := ExtractLowLevelFeatures(path)
@@ -52,19 +53,30 @@ func (e *LowLevelEmbedder) Embed(path string) (*EmbeddingResult, error) {
 	return &EmbeddingResult{Vector: vec, Features: feats}, nil
 }
 
-// OnnxEmbedder is the semantic embedding path. It is intentionally a stub
-// until the Phase 0 spike validates a CLIP-style ONNX export on this machine.
+// OnnxEmbedder generates semantic vectors with a local ONNX Runtime worker.
 type OnnxEmbedder struct {
-	name      string
-	dim       int
-	modelPath string
+	name   string
+	dim    int
+	worker *semanticInferenceWorker
 }
 
 func (e *OnnxEmbedder) Name() string { return e.name }
-func (e *OnnxEmbedder) Dim() int      { return e.dim }
+func (e *OnnxEmbedder) Dim() int     { return e.dim }
 
 func (e *OnnxEmbedder) Embed(path string) (*EmbeddingResult, error) {
-	return nil, fmt.Errorf("onnx embedder %q not implemented yet (Phase 0 spike required)", e.modelPath)
+	features, err := ExtractLowLevelFeatures(path)
+	if err != nil {
+		return nil, fmt.Errorf("extract low-level features: %w", err)
+	}
+	vector, err := e.worker.Embed(path)
+	if err != nil {
+		return nil, err
+	}
+	vector = normalizeVec(vector)
+	if len(vector) != e.dim {
+		return nil, fmt.Errorf("semantic model returned %d dimensions; expected %d", len(vector), e.dim)
+	}
+	return &EmbeddingResult{Vector: vector, Features: features}, nil
 }
 
 // InitEmbedding selects the active embedder based on config, then rebuilds the
@@ -72,19 +84,40 @@ func (e *OnnxEmbedder) Embed(path string) (*EmbeddingResult, error) {
 func InitEmbedding() error {
 	cfg := config.Global.Embedding
 	low := &LowLevelEmbedder{name: cfg.ModelName, dim: lowLevelVectorDim}
-	if cfg.ModelPath != "" && cfg.Dim > 0 {
-		logger.Warnf("EMBED_MODEL_PATH set (%s) but the ONNX embedder is not implemented; "+
-			"falling back to low-level provider until Phase 0", cfg.ModelPath)
+	if cfg.ModelPath == "" {
 		activeEmbedder = low
 	} else {
-		activeEmbedder = low
+		if cfg.Dim <= 0 {
+			return fmt.Errorf("EMBED_DIM must be positive when EMBED_MODEL_PATH is configured")
+		}
+		if _, err := os.Stat(cfg.ModelPath); err != nil {
+			return fmt.Errorf("semantic model %q is unavailable: %w", cfg.ModelPath, err)
+		}
+		worker, err := startSemanticInferenceWorker(cfg.PythonPath, cfg.ModelPath, cfg.Dim)
+		if err != nil {
+			return fmt.Errorf("initialize semantic embedder: %w", err)
+		}
+		activeEmbedder = &OnnxEmbedder{
+			name:   cfg.ModelName,
+			dim:    cfg.Dim,
+			worker: worker,
+		}
 	}
 	logger.Infof("Embedding provider active: %s (dim %d)", activeEmbedder.Name(), activeEmbedder.Dim())
 
 	if err := VectorIndex.Rebuild(); err != nil {
+		StopEmbeddingEngine()
 		return fmt.Errorf("failed to build vector index: %w", err)
 	}
 	return nil
+}
+
+// StopEmbeddingEngine shuts down the optional local inference process.
+func StopEmbeddingEngine() {
+	embedder, ok := activeEmbedder.(*OnnxEmbedder)
+	if ok && embedder.worker != nil {
+		embedder.worker.Close()
+	}
 }
 
 func CurrentEmbedder() Embedder {
@@ -181,7 +214,7 @@ func LoadVector(imageID uint) ([]float32, error) {
 		return v, nil
 	}
 	var row models.ImageEmbedding
-	if err := database.DB.Where("image_id = ?", imageID).Order("id DESC").First(&row).Error; err != nil {
+	if err := database.DB.Where("image_id = ? AND embedder = ?", imageID, CurrentEmbedder().Name()).First(&row).Error; err != nil {
 		return nil, err
 	}
 	return vecFromBytes(row.Vector)

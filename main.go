@@ -105,7 +105,7 @@ func main() {
 
 	// Content similarity: build vector index, load taste profile, start embedder
 	if err := services.InitEmbedding(); err != nil {
-		logger.Error("Embedding initialization failed:", err)
+		logger.Fatal("Embedding initialization failed:", err)
 	}
 	if err := services.DefaultProfile.Rebuild(); err != nil {
 		logger.Error("Taste profile rebuild failed:", err)

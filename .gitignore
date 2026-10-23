@@ -1,5 +1,6 @@
 uploads/*
 bin/*
+models/*.onnx
 frontend/node_modules
 **/*.exe
 

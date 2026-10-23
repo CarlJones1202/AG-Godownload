@@ -28,6 +28,7 @@ func StopWorkers() {
 		StopScanQueue()
 		StopWebSocketHub()
 		close(shutdown)
+		StopEmbeddingWorkers()
 		logger.Info("Workers signaled to stop")
 	})
 }

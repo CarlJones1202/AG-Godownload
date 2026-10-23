@@ -254,6 +254,28 @@ Notes:
 - Filter: only images with `type='image'`, `file_exists=true`, valid embedding, and `deleted_at IS NULL`.
 - Images rated 1–2 stars are excluded from the candidate pool as explicit negatives, and images rated 4–5 stars are excluded because they are already known likes (whether or not they are favorites). The standalone Similar Images page also exposes a “Not interested” action that records a 1-star rating.
 
+### 8.1 Optional local semantic embeddings
+
+The default provider uses low-level image descriptors. Running `init.ps1`
+installs a Python 3.13 virtual environment, CPU ONNX Runtime dependencies,
+and the pinned [SigLIP 2 base vision encoder](https://huggingface.co/google/siglip2-base-patch16-224)
+(`vision_model_int8.onnx`, about 95 MB). The encoder is Apache-2.0 licensed and
+downloaded from the
+[ONNX export](https://huggingface.co/onnx-community/siglip2-base-patch16-224-ONNX)
+of Google's model. The setup script verifies the model's SHA-256 before
+activating these `.env` settings:
+
+```
+EMBED_MODEL_PATH=models\siglip2-base-patch16-224-int8.onnx
+EMBED_MODEL_NAME=siglip2-base-patch16-224-int8-v1
+EMBED_DIM=768
+EMBED_PYTHON=bin\embedding-venv\Scripts\python.exe
+```
+
+Inference runs locally through one persistent Python worker; image files are
+not sent to a hosted service. Changing the embedding model causes the queue to
+re-embed images under the new model version before they enter its vector index.
+
 ## 9. API Design
 
 All under the existing `/api` (proxy strips `/api` — note the current routes are registered without it; keep consistent with `main.go`).
@@ -355,22 +377,22 @@ Recommended order: Lightbox ratings + "You might like" strip (the visible payoff
 Add to `config/config.go` + `.env`:
 
 ```
-EMBED_MODEL_PATH=./models/vit-b32.onnx     # ONNX model file
-EMBED_MODEL_NAME=clip-vit-b32-v1            # version tag for DB
-EMBED_DIM=512
-EMBED_TAGGER_PATH=./models/wd-tagger.onnx   # tagger ONNX (optional tier A)
+EMBED_MODEL_PATH=models\siglip2-base-patch16-224-int8.onnx
+EMBED_MODEL_NAME=siglip2-base-patch16-224-int8-v1
+EMBED_DIM=768
+EMBED_PYTHON=bin\embedding-venv\Scripts\python.exe
 EMBED_TAG_THRESHOLD=0.3
 EMBED_CONCURRENCY=2
-EMBED_INDEX_MODE=bruteforce                 # | ann
 REC_WEIGHTS=0.5,0.25,0.15,0.10              # sim, tags, color, pref
 REC_DIVERSITY_LAMBDA=0.6
 ```
 
-Disable the whole feature by leaving `EMBED_MODEL_PATH` empty (endpoints return 503 "embedding disabled").
+Leaving `EMBED_MODEL_PATH` empty retains the built-in low-level descriptor
+provider; it does not disable similarity recommendations.
 
 ## 13. Open Questions (decide in the spike)
 
-1. **Embedding model + export**: settle on `ViT-B/32` vs `RN50` vs eval'd booru-tagger-as-features; confirm ONNX runtime works on this Windows box; measure ms/image on our hardware (CPU).
+1. **Semantic embedding evaluation**: SigLIP 2 base vision encoder is the initial local model; measure CPU latency and relevance on a fixed, representative set before treating it as better than the low-level baseline.
 2. **Tagger choice**: pure booru tagger (fast, domain-fit) vs full VLM (structured, slower). Decide after embedding spike.
 3. **Low-level features on `images` column vs table**: recommend column (matches `dominant_colors`), confirm no migration pain.
 4. **Rating scale handling for 3** = ignore vs weak-positive (default: ignore).
