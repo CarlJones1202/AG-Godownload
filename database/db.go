@@ -5,9 +5,9 @@ import (
 	"gallery_api/models"
 	"time"
 
-	gormlogger "gorm.io/gorm/logger"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 var DB *gorm.DB
@@ -28,10 +28,10 @@ func NewLogger() gormlogger.Interface {
 	return gormlogger.New(
 		gormLogWriter{},
 		gormlogger.Config{
-			SlowThreshold:              time.Hour,
-			LogLevel:                   gormlogger.Warn,
+			SlowThreshold:             time.Hour,
+			LogLevel:                  gormlogger.Warn,
 			IgnoreRecordNotFoundError: true,
-			ParameterizedQueries:       true,
+			ParameterizedQueries:      true,
 		},
 	)
 }
@@ -44,7 +44,7 @@ func Connect(dsn string) {
 	// Enabling FK constraints would reject both those rows and new inserts.
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
 		DisableForeignKeyConstraintWhenMigrating: true,
-		Logger: NewLogger(),
+		Logger:                                   NewLogger(),
 	})
 	if err != nil {
 		logger.Fatal("Failed to connect to database:", err)
@@ -83,6 +83,7 @@ func Migrate() {
 		&models.Tag{},
 		&models.ImageEmbedding{},
 		&models.ImageRating{},
+		&models.RecommendationEvent{},
 		&models.EmbedQueue{},
 	)
 	if err != nil {

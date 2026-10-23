@@ -29,6 +29,17 @@ type ImageRating struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// RecommendationEvent records a recommendation exposure or user response.
+type RecommendationEvent struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	SetID     string    `gorm:"index:idx_recommendation_events_set_image,priority:1" json:"set_id"`
+	ImageID   uint      `gorm:"index:idx_recommendation_events_set_image,priority:2;index" json:"image_id"`
+	Mode      string    `gorm:"index" json:"mode"`
+	Event     string    `gorm:"index" json:"event"`
+	Rating    int       `json:"rating"`
+	CreatedAt time.Time `gorm:"index" json:"created_at"`
+}
+
 // EmbedQueue is a persisted, idempotent work queue for computing embeddings,
 // tags and low-level features for images.
 type EmbedQueue struct {

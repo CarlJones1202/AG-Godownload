@@ -155,6 +155,13 @@ func RecommendFromSeeds(seedIDs []uint, limit int) ([]Recommendation, *Consensus
 	for _, id := range dislikedIDs {
 		exclude[id] = true
 	}
+	likedIDs, err := DefaultProfile.LikedImageIDs()
+	if err != nil {
+		return nil, nil, fmt.Errorf("load liked images: %w", err)
+	}
+	for _, id := range likedIDs {
+		exclude[id] = true
+	}
 
 	// Centrality weighting: a seed that resembles the rest of the set gets a
 	// big vote; an outlier favorite is soft-floored rather than dropped, so it

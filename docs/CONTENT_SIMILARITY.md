@@ -252,7 +252,7 @@ Notes:
 - **Diversity (MMR-style):** after scoring, greedily select top-N while penalizing the maximum vector cosine or tag Jaccard overlap with already-selected results (`λ` defaults to 0.6). Seed galleries are excluded; repeated results from a gallery (after 2) or source (after 3) receive additional penalties rather than hard caps.
 - Normalize each term to [0,1] so weights are comparable.
 - Filter: only images with `type='image'`, `file_exists=true`, valid embedding, and `deleted_at IS NULL`.
-- Images rated 1–2 stars are excluded from the candidate pool; the standalone Similar Images page also exposes a “Not interested” action that records a 1-star rating.
+- Images rated 1–2 stars are excluded from the candidate pool as explicit negatives, and images rated 4–5 stars are excluded because they are already known likes (whether or not they are favorites). The standalone Similar Images page also exposes a “Not interested” action that records a 1-star rating.
 
 ## 9. API Design
 
@@ -291,14 +291,32 @@ GET  /api/images/similar/for-me?seed=1              // pure personal pull, mostl
 
 Rating returns the newly computed profile influence (`delta` on affected tags) so the UI could optionally show "preferences updated".
 
-### 9.3 Maintenance / admin
+### 9.3 Recommendation quality metrics
+
+Recommendations receive a set ID when served. The Similar Images page records
+opens, favorites, ratings, and “not interested” actions against the set; opening
+a recommendation from the Lightbox strip is tracked as well. Event counts are
+validated against impressions in that set.
+
+```
+POST /api/recommendations/events
+GET  /api/admin/recommendations/metrics?days=30
+```
+
+The metrics endpoint accepts a trailing window of 1–365 days (default 30) and
+returns totals and per-mode counts. Impressions and engagement counts are
+unique image/set pairs, so the open, favorite, and not-interested rates are
+bounded by 1. Ratings are counted per rating action; the average reflects all
+rating actions, including repeat ratings.
+
+### 9.4 Maintenance / admin
 
 ```
 POST /api/admin/embed/backfill      // enqueue all images missing embed/features
 GET  /api/admin/embed/status        // counts: done/pending/failed, embedder version
 ```
 
-### 9.4 WebSocket
+### 9.5 WebSocket
 
 Existing hub can broadcast "embedding worker progress" alongside download progress (`services/websocket_service.go`) — optional polish.
 

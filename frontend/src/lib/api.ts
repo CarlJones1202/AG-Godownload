@@ -170,6 +170,20 @@ export const similar = {
     request<SimilarImagesResponse>(`/similar${qs({ limit })}`),
 };
 
+export type RecommendationEventType = 'open' | 'favorite' | 'not_interested' | 'rating';
+
+export function recordRecommendationEvent(event: {
+  set_id: string;
+  image_id: number;
+  event: RecommendationEventType;
+  rating?: number;
+}): Promise<{ message: string }> {
+  return request<{ message: string }>('/recommendations/events', {
+    method: 'POST',
+    body: JSON.stringify(event),
+  });
+}
+
 // encodeIds base64-encodes a JSON array of image ids for the deep-linkable
 // /similar?ids=<b64> form.
 export function encodeIds(ids: number[]): string {

@@ -232,6 +232,8 @@ func main() {
 	// Content similarity + ratings
 	r.GET("/similar/:id", handlers.GetSimilarImages)
 	r.GET("/similar", handlers.GetSimilarImages) // ?ids=<base64 JSON array>
+	r.POST("/recommendations/events", handlers.RecordRecommendationEvent)
+	r.GET("/admin/recommendations/metrics", handlers.GetRecommendationMetrics)
 	r.PUT("/ratings/:imageId", handlers.SetImageRating)
 	r.GET("/ratings/:imageId", handlers.GetImageRating)
 	r.DELETE("/ratings/:imageId", handlers.ClearImageRating)

@@ -90,6 +90,7 @@ export interface SimilarImage {
 
 export interface SimilarImagesResponse {
   mode?: 'single' | 'multi' | 'favorites';
+  recommendation_set_id?: string;
   seed: {
     id: number;
     filename: string;

@@ -260,6 +260,15 @@ func (p *TasteProfile) DislikedImageIDs() ([]uint, error) {
 	return ids, err
 }
 
+// LikedImageIDs returns images rated at or above the like threshold.
+func (p *TasteProfile) LikedImageIDs() ([]uint, error) {
+	var ids []uint
+	err := database.DB.Model(&models.ImageRating{}).
+		Where("user_id = ? AND rating >= ?", defaultUserID, likeThreshold).
+		Pluck("image_id", &ids).Error
+	return ids, err
+}
+
 // Vector returns the normalized preference vector (like centroid - dislike
 // centroid), or nil when there is nothing to go on.
 func (p *TasteProfile) Vector() []float32 {

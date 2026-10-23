@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -94,6 +96,12 @@ func GetSimilarImages(c *gin.Context) {
 		})
 	}
 
+	setID, err := newRecommendationSetID()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create recommendation set"})
+		return
+	}
+
 	// Seed metadata: the primary seed (for single mode back-compat) plus the
 	// full embedded/skipped breakdown for the consensus display.
 	_, vectorErr := services.LoadVector(seeds[0])
@@ -137,8 +145,25 @@ func GetSimilarImages(c *gin.Context) {
 
 	nLikes, nDislikes := services.DefaultProfile.Counts()
 
+	impressions := make([]models.RecommendationEvent, 0, len(items))
+	for _, recommendation := range recs {
+		impressions = append(impressions, models.RecommendationEvent{
+			SetID:   setID,
+			ImageID: recommendation.Image.ID,
+			Mode:    mode,
+			Event:   "impression",
+		})
+	}
+	if len(impressions) > 0 {
+		if err := database.DB.Create(&impressions).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to record recommendation impressions"})
+			return
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"mode": mode,
+		"mode":                  mode,
+		"recommendation_set_id": setID,
 		"seed": gin.H{
 			"id":             seed.ID,
 			"filename":       seed.Filename,
@@ -161,6 +186,68 @@ func GetSimilarImages(c *gin.Context) {
 		"ids_b64": encodeSeedIDs(recs),
 		"data":    items,
 	})
+}
+
+func newRecommendationSetID() (string, error) {
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(id[:]), nil
+}
+
+// RecordRecommendationEvent stores an interaction tied to a served result.
+func RecordRecommendationEvent(c *gin.Context) {
+	var req struct {
+		SetID   string `json:"set_id"`
+		ImageID uint   `json:"image_id"`
+		Event   string `json:"event"`
+		Rating  int    `json:"rating"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if len(req.SetID) != 32 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid recommendation set id"})
+		return
+	}
+	if _, err := hex.DecodeString(req.SetID); err != nil || req.ImageID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid recommendation event target"})
+		return
+	}
+	if req.Event != "open" && req.Event != "favorite" && req.Event != "not_interested" && req.Event != "rating" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported recommendation event"})
+		return
+	}
+	if req.Event == "rating" && (req.Rating < 1 || req.Rating > 5) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "rating must be between 1 and 5"})
+		return
+	}
+
+	var impression models.RecommendationEvent
+	if err := database.DB.
+		Where("set_id = ? AND image_id = ? AND event = ?", req.SetID, req.ImageID, "impression").
+		First(&impression).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "recommendation was not served in this set"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	event := models.RecommendationEvent{
+		SetID:   req.SetID,
+		ImageID: req.ImageID,
+		Mode:    impression.Mode,
+		Event:   req.Event,
+		Rating:  req.Rating,
+	}
+	if err := database.DB.Create(&event).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"message": "Recommendation feedback recorded"})
 }
 
 // favoriteSeedIDs returns every favorited image, most recent first. Images
