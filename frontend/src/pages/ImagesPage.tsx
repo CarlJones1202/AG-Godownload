@@ -24,7 +24,7 @@ import { notifyFavoriteStateChanged } from '@/lib/favoriteFeedback';
 export function ImagesPage() {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { offset, limit, prevPage, nextPage } = usePagination({ limit: 50 });
+  const { offset, limit, prevPage, nextPage, setPage } = usePagination({ limit: 50 });
 
   const sortBy = (searchParams.get('sort') as any) || 'newest';
   const randomSeed = Number(searchParams.get('seed')) || 0;
@@ -180,6 +180,12 @@ export function ImagesPage() {
     }));
   }, [displayImages]);
 
+  const advanceSlideshowPage = useCallback(() => {
+    if (!imageList || activeColorSearch) return;
+    setLightboxIndex(0);
+    setPage(imageList.meta.current_page >= imageList.meta.total_pages ? 1 : imageList.meta.current_page + 1);
+  }, [activeColorSearch, imageList, setPage]);
+
   return (
     <>
       <PageHeader title="Images" description="Browse and manage images">
@@ -295,6 +301,7 @@ export function ImagesPage() {
           index={lightboxIndex}
           onClose={() => setLightboxIndex(null)}
           onIndexChange={setLightboxIndex}
+          onSlideshowPageEnd={!activeColorSearch && imageList && imageList.meta.total_pages > 1 ? advanceSlideshowPage : undefined}
           imageData={displayImages}
           onToggleFavorite={(id) => favMut.mutate(id)}
         />

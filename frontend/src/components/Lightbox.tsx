@@ -23,13 +23,15 @@ interface LightboxProps {
   index: number;
   onClose: () => void;
   onIndexChange: (index: number) => void;
+  onSlideshowPageEnd?: () => void;
   imageData?: Image[];
   onToggleFavorite?: (id: number) => void;
 }
 
-export function Lightbox({ images, index, onClose, onIndexChange, imageData, onToggleFavorite }: LightboxProps) {
+export function Lightbox({ images, index, onClose, onIndexChange, onSlideshowPageEnd, imageData, onToggleFavorite }: LightboxProps) {
   const [showInfo, setShowInfo] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [continueAcrossPages, setContinueAcrossPages] = useState(false);
   const [speed, setSpeed] = useState(3000);
   const [isFullScreen, setIsFullScreen] = useState(false);
   const queryClient = useQueryClient();
@@ -162,15 +164,21 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
 
   useEffect(() => {
     let timer: number | undefined;
-    if (isPlaying && !similarView) {
+    if (isPlaying && !similarView && images.length > 0) {
       timer = window.setInterval(() => {
-        onIndexChange((index + 1) % images.length);
+        if (index < images.length - 1) {
+          onIndexChange(index + 1);
+        } else if (continueAcrossPages && onSlideshowPageEnd) {
+          onSlideshowPageEnd();
+        } else {
+          onIndexChange(0);
+        }
       }, speed);
     }
     return () => {
       if (timer) clearInterval(timer);
     };
-  }, [isPlaying, index, images.length, onIndexChange, speed, similarView]);
+  }, [isPlaying, index, images.length, onIndexChange, onSlideshowPageEnd, continueAcrossPages, speed, similarView]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -263,6 +271,18 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
                   <option value={10000} className="bg-zinc-900 text-white">10s</option>
                 </select>
               </div>
+              {onSlideshowPageEnd && (
+                <label className="flex items-center gap-1.5 text-xs text-white/60 cursor-pointer" title="Continue the slideshow through every page">
+                  <input
+                    type="checkbox"
+                    checked={continueAcrossPages}
+                    onChange={(e) => setContinueAcrossPages(e.target.checked)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-3.5 h-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-600"
+                  />
+                  All pages
+                </label>
+              )}
             </div>
 
             <button
@@ -350,18 +370,22 @@ export function Lightbox({ images, index, onClose, onIndexChange, imageData, onT
           </button>
         )}
 
-        <img
-          src={similarView ? similarView.src : images[index].src}
-          alt={similarView ? (similarView.alt ?? '') : (images[index].alt ?? '')}
-          className={cn(
-            "transition-all duration-500 ease-in-out select-none object-contain pointer-events-auto",
-            isFullScreen 
-              ? "max-w-full max-h-full w-auto h-auto" 
-              : "max-w-[90vw] max-h-full w-auto h-auto shadow-2xl rounded-sm"
-          )}
-          draggable={false}
-          onClick={(e) => e.stopPropagation()}
-        />
+        {images[index] ? (
+          <img
+            src={similarView ? similarView.src : images[index].src}
+            alt={similarView ? (similarView.alt ?? '') : (images[index].alt ?? '')}
+            className={cn(
+              "transition-all duration-500 ease-in-out select-none object-contain pointer-events-auto",
+              isFullScreen
+                ? "max-w-full max-h-full w-auto h-auto"
+                : "max-w-[90vw] max-h-full w-auto h-auto shadow-2xl rounded-sm"
+            )}
+            draggable={false}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <p className="text-sm text-white/50">Loading page...</p>
+        )}
 
         {!isFullScreen && hasNext && (
           <button

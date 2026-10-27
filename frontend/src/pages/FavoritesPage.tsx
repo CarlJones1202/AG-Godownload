@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { images as imagesApi } from '@/lib/api';
@@ -32,7 +32,7 @@ export function FavoritesPage() {
   const section: Section = rawSection === 'videos' ? 'videos' : 'images';
   const setSection = (s: Section) => setParams(s === 'images' ? {} : { section: s }, { replace: true });
 
-  const { page, offset, limit, prevPage, nextPage } = usePagination({ limit: 48 });
+  const { page, offset, limit, prevPage, nextPage, setPage } = usePagination({ limit: 48 });
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [activeVideo, setActiveVideo] = useState<Image | null>(null);
@@ -91,6 +91,12 @@ export function FavoritesPage() {
       alt: img.filename,
     }));
   }, [items]);
+
+  const advanceSlideshowPage = useCallback(() => {
+    const currentPage = favList?.meta.current_page ?? page;
+    setLightboxIndex(0);
+    setPage(currentPage >= totalPages ? 1 : currentPage + 1);
+  }, [favList, page, setPage, totalPages]);
 
   return (
     <>
@@ -186,6 +192,7 @@ export function FavoritesPage() {
           index={lightboxIndex}
           onClose={() => setLightboxIndex(null)}
           onIndexChange={setLightboxIndex}
+          onSlideshowPageEnd={section === 'images' && totalPages > 1 ? advanceSlideshowPage : undefined}
           imageData={items}
           onToggleFavorite={(id) => favMut.mutate(id)}
         />
