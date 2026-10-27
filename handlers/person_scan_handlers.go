@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 )
@@ -379,6 +380,40 @@ func GetAllMissingGalleries(c *gin.Context) {
 
 	var response []AllMissingGalleriesResponse
 
+	type linkedGallery struct {
+		PersonID  uint
+		Name      string
+		SourceURL string
+	}
+	linkedQuery := database.DB.Table("person_galleries").
+		Select("person_galleries.person_id, galleries.name, galleries.source_url").
+		Joins("JOIN galleries ON galleries.id = person_galleries.gallery_id")
+	if personIDFilter != 0 {
+		linkedQuery = linkedQuery.Where("person_galleries.person_id = ?", personIDFilter)
+	}
+	var linkedGalleries []linkedGallery
+	if err := linkedQuery.Find(&linkedGalleries).Error; err != nil {
+		logger.Errorf("Failed to load linked galleries for missing-gallery results: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch linked galleries"})
+		return
+	}
+	linkedNames := make(map[uint]map[string]bool)
+	linkedURLs := make(map[uint]map[string]bool)
+	for _, gallery := range linkedGalleries {
+		if gallery.Name != "" {
+			if linkedNames[gallery.PersonID] == nil {
+				linkedNames[gallery.PersonID] = make(map[string]bool)
+			}
+			linkedNames[gallery.PersonID][normalizeMissingGalleryName(gallery.Name)] = true
+		}
+		if gallery.SourceURL != "" {
+			if linkedURLs[gallery.PersonID] == nil {
+				linkedURLs[gallery.PersonID] = make(map[string]bool)
+			}
+			linkedURLs[gallery.PersonID][gallery.SourceURL] = true
+		}
+	}
+
 	// Load exclusions for this person (or all people) up front so hidden
 	// ("not wanted") galleries stay filtered out of the list.
 	var exclusions []models.ScanResultExclusion
@@ -439,6 +474,10 @@ func GetAllMissingGalleries(c *gin.Context) {
 				continue
 			}
 
+			if linkedURLs[scan.PersonID][url] {
+				continue
+			}
+
 			if excludedByKey[fmt.Sprintf("%d|%s|%s", scan.PersonID, strings.ToLower(scan.Provider), url)] {
 				continue
 			}
@@ -460,6 +499,10 @@ func GetAllMissingGalleries(c *gin.Context) {
 				}
 			} else if galleryName == "" {
 				galleryName = title
+			}
+
+			if linkedNames[scan.PersonID][normalizeMissingGalleryName(galleryName)] {
+				continue
 			}
 
 			if q != "" && !strings.Contains(strings.ToLower(galleryName), q) && !strings.Contains(strings.ToLower(personName), q) {
@@ -538,6 +581,15 @@ func GetAllMissingGalleries(c *gin.Context) {
 			"pending_scans": pendingScans,
 		},
 	})
+}
+
+func normalizeMissingGalleryName(name string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			return unicode.ToLower(r)
+		}
+		return -1
+	}, name)
 }
 
 func RecheckAllPeople(c *gin.Context) {

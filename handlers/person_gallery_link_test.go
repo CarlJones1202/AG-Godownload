@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"gallery_api/database"
 	"gallery_api/models"
 	"net/http/httptest"
@@ -109,5 +110,99 @@ func TestLinkPersonToGalleriesMatchesProviderAlias(t *testing.T) {
 	}
 	if matchedLinkCount != 1 {
 		t.Fatalf("provider-alias gallery link count = %d, want 1", matchedLinkCount)
+	}
+}
+
+func TestGetAllMissingGalleriesOmitsLinkedResults(t *testing.T) {
+	testDB, err := gorm.Open(sqlite.Open("file:missing-galleries-linked-filter?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("failed to open test database: %v", err)
+	}
+	sqlDB, err := testDB.DB()
+	if err != nil {
+		t.Fatalf("failed to get test database connection: %v", err)
+	}
+	defer sqlDB.Close()
+
+	originalDB := database.DB
+	database.DB = testDB
+	defer func() { database.DB = originalDB }()
+
+	if err := testDB.AutoMigrate(
+		&models.Person{},
+		&models.Gallery{},
+		&models.Source{},
+		&models.PersonScanQueue{},
+		&models.ScanResultExclusion{},
+	); err != nil {
+		t.Fatalf("failed to migrate test database: %v", err)
+	}
+
+	person := models.Person{Name: "Angel Constance"}
+	if err := testDB.Create(&person).Error; err != nil {
+		t.Fatalf("failed to create test person: %v", err)
+	}
+	linkedGallery := models.Gallery{Name: "Bright and Beautiful", SourceURL: "https://example.com/local-gallery"}
+	if err := testDB.Create(&linkedGallery).Error; err != nil {
+		t.Fatalf("failed to create linked gallery: %v", err)
+	}
+	if err := testDB.Model(&person).Association("Galleries").Append(&linkedGallery); err != nil {
+		t.Fatalf("failed to link gallery to person: %v", err)
+	}
+
+	results := map[string]interface{}{
+		"found_count":   2,
+		"missing_count": 2,
+		"missing_galleries": []map[string]string{
+			{
+				"title":        "Angel Constance in Bright and Beautiful",
+				"gallery_name": "Bright and Beautiful",
+				"url":          "https://example.com/playboy/bright",
+			},
+			{
+				"title":        "Angel Constance in Desert Ride",
+				"gallery_name": "Desert Ride",
+				"url":          "https://example.com/playboy/desert-ride",
+			},
+		},
+	}
+	encodedResults, err := json.Marshal(results)
+	if err != nil {
+		t.Fatalf("failed to encode scan results: %v", err)
+	}
+	scan := models.PersonScanQueue{
+		PersonID: person.ID,
+		Provider: "PlayboyPlus",
+		Alias:    person.Name,
+		Status:   models.ScanStatusCompleted,
+		Results:  string(encodedResults),
+	}
+	if err := testDB.Create(&scan).Error; err != nil {
+		t.Fatalf("failed to create scan result: %v", err)
+	}
+
+	previousGinMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	defer gin.SetMode(previousGinMode)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest("GET", fmt.Sprintf("/admin/missing-galleries?person_id=%d", person.ID), nil)
+
+	GetAllMissingGalleries(context)
+
+	if recorder.Code != 200 {
+		t.Fatalf("handler status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Data []AllMissingGalleriesResponse `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to decode handler response: %v", err)
+	}
+	if len(response.Data) != 1 {
+		t.Fatalf("missing gallery count = %d, want 1: %#v", len(response.Data), response.Data)
+	}
+	if response.Data[0].GalleryName != "Desert Ride" {
+		t.Fatalf("remaining gallery = %q, want %q", response.Data[0].GalleryName, "Desert Ride")
 	}
 }
