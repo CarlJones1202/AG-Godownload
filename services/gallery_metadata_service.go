@@ -25,14 +25,16 @@ import (
 
 // GallerySearchResult represents a search result candidate
 type GallerySearchResult struct {
-	Provider    string   `json:"provider"`
-	Title       string   `json:"title"`
-	URL         string   `json:"url"`
-	Thumbnail   string   `json:"thumbnail"`
-	ReleaseDate string   `json:"release_date"`
-	SourceID    string   `json:"source_id"`        // UUID for MetArt or similar ID
-	ID          uint     `json:"id"`               // Database gallery ID if matched
-	Models      []string `json:"models,omitempty"` // Model names from the API (for filtering)
+	Provider     string   `json:"provider"`
+	Title        string   `json:"title"`
+	GalleryName  string   `json:"gallery_name,omitempty"`
+	URL          string   `json:"url"`
+	Thumbnail    string   `json:"thumbnail"`
+	ThumbnailURL string   `json:"thumbnail_url,omitempty"`
+	ReleaseDate  string   `json:"release_date"`
+	SourceID     string   `json:"source_id"`        // UUID for MetArt or similar ID
+	ID           uint     `json:"id"`               // Database gallery ID if matched
+	Models       []string `json:"models,omitempty"` // Model names from the API (for filtering)
 }
 
 // GalleryMetadata represents scraped metadata from a gallery
@@ -1398,9 +1400,7 @@ func scrapeEternalDesireGallery(urlStr, uuid string) (*GalleryMetadata, error) {
 	return metadata, nil
 }
 
-// searchMPLStudios attempts to find galleries on mplstudios.com
-// Enhanced with debug logging and response dumping to help diagnose
-// missed results when the normal parsing doesn't pick them up.
+// searchMPLStudios attempts to find galleries on mplstudios.com.
 func searchMPLStudios(query string) ([]GallerySearchResult, error) {
 	// First, try the site search endpoint that returns nested arrays containing person results
 	// Example: https://www.mplstudios.com/searchFor/?value={{ALIAS}}
@@ -1432,20 +1432,6 @@ func searchMPLStudios(query string) ([]GallerySearchResult, error) {
 		}
 
 		logger.Infof("[MPLStudios] %s returned status %d, %d bytes", apiURL, resp.StatusCode, len(bodyBytes))
-
-		// Dump response for debugging (timestamped)
-		timestamp := time.Now().Unix()
-		// Choose extension based on content-type when available
-		ext := "html"
-		if ct := resp.Header.Get("Content-Type"); strings.Contains(ct, "application/json") {
-			ext = "json"
-		}
-		debugName := fmt.Sprintf("debug_mplstudios_candidate_%d_%d.%s", idx, timestamp, ext)
-		if err := os.WriteFile(debugName, bodyBytes, 0644); err != nil {
-			logger.Warnf("[MPLStudios] failed to write debug file %s: %v", debugName, err)
-		} else {
-			logger.Infof("[MPLStudios] dumped response to %s", debugName)
-		}
 
 		// Quick check for common blocking/age-verification phrases
 		bodyStrLower := strings.ToLower(string(bodyBytes))
@@ -1509,11 +1495,6 @@ func searchMPLStudios(query string) ([]GallerySearchResult, error) {
 					} else {
 						pbody, _ := io.ReadAll(presp.Body)
 						presp.Body.Close()
-						// Dump person page for debugging
-						pfname := fmt.Sprintf("debug_mplstudios_person_%d_%d.html", idx, time.Now().Unix())
-						_ = os.WriteFile(pfname, pbody, 0644)
-						logger.Infof("[MPLStudios] dumped person page to %s", pfname)
-
 						// Parse person page for gallery links
 						pageStr := string(pbody)
 
@@ -1653,9 +1634,6 @@ func searchMPLStudios(query string) ([]GallerySearchResult, error) {
 							} else {
 								pbody, _ := io.ReadAll(presp.Body)
 								presp.Body.Close()
-								pfname := fmt.Sprintf("debug_mplstudios_person_%d_%d.html", idx, time.Now().Unix())
-								_ = os.WriteFile(pfname, pbody, 0644)
-								logger.Infof("[MPLStudios] dumped person page to %s", pfname)
 
 								// Reuse existing person-page parsing logic
 								pageStr := string(pbody)
@@ -2712,6 +2690,24 @@ func filterResultsByModel(results []GallerySearchResult, term string, provider s
 	}
 	return filtered
 }
+
+// PlayboyPlusGalleryName extracts the gallery name when the title starts with the searched model.
+func PlayboyPlusGalleryName(title, modelName string) (string, bool) {
+	titleLower := strings.ToLower(title)
+	separator := strings.Index(titleLower, " in ")
+	if separator <= 0 {
+		return "", false
+	}
+
+	personName := strings.TrimSpace(title[:separator])
+	galleryName := strings.TrimSpace(title[separator+len(" in "):])
+	if galleryName == "" || normalizeGalleryName(personName) != normalizeGalleryName(modelName) {
+		return "", false
+	}
+
+	return galleryName, true
+}
+
 func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonScanResult, error) {
 	if strings.EqualFold(provider, "playboy") {
 		provider = "PlayboyPlus"
@@ -2741,7 +2737,21 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 			searchFailures = append(searchFailures, fmt.Errorf("%s (%q): %w", providerName, term, err))
 			return
 		}
-		allResults = append(allResults, filterResultsByModel(results, term, provider)...)
+		filteredResults := filterResultsByModel(results, term, provider)
+		if strings.EqualFold(providerName, "PlayboyPlus") {
+			playboyResults := make([]GallerySearchResult, 0, len(filteredResults))
+			for _, result := range filteredResults {
+				galleryName, ok := PlayboyPlusGalleryName(result.Title, term)
+				if !ok {
+					logger.Infof("[PlayboyPlus] Filtered out '%s' - title is not '%s in <gallery>'", result.Title, term)
+					continue
+				}
+				result.GalleryName = galleryName
+				playboyResults = append(playboyResults, result)
+			}
+			filteredResults = playboyResults
+		}
+		allResults = append(allResults, filteredResults...)
 	}
 
 	switch strings.ToLower(provider) {
@@ -2843,7 +2853,11 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 	unsureCount := 0
 
 	for _, result := range uniqueResults {
-		normalizedResultName := normalizeGalleryName(result.Title)
+		resultName := result.Title
+		if result.GalleryName != "" {
+			resultName = result.GalleryName
+		}
+		normalizedResultName := normalizeGalleryName(resultName)
 
 		if existingGallery, found := galleryNames[normalizedResultName]; found {
 			resultWithID := result

@@ -359,6 +359,12 @@ func ServeThumbnail(c *gin.Context) {
 		return
 	}
 
+	providerThumbnailPath, ok := resolveUploadPath(filepath.Join("gallery_thumbnails", filepath.Base(cleanPath)))
+	if ok && fileExists(providerThumbnailPath) {
+		c.File(providerThumbnailPath)
+		return
+	}
+
 	// Always normalise to .jpg extension since thumbnails are generated as JPEG
 	ext := filepath.Ext(cleanPath)
 	if ext != ".jpg" && ext != ".jpeg" {

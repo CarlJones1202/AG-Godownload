@@ -54,6 +54,23 @@ func TestIsGalleryResultExcludesMovieURLs(t *testing.T) {
 	}
 }
 
+func TestPlayboyPlusGalleryNameRequiresPersonInTitle(t *testing.T) {
+	galleryName, ok := PlayboyPlusGalleryName("Kate Jones in Exquisite Allure", "Kate Jones")
+	if !ok || galleryName != "Exquisite Allure" {
+		t.Fatalf("PlayboyPlusGalleryName = (%q, %t), want (%q, true)", galleryName, ok, "Exquisite Allure")
+	}
+
+	for _, title := range []string{
+		"Kate Jones and Jane Doe in Exquisite Allure",
+		"Exquisite Allure",
+		"Kate Jones in ",
+	} {
+		if _, ok := PlayboyPlusGalleryName(title, "Kate Jones"); ok {
+			t.Errorf("PlayboyPlusGalleryName(%q) unexpectedly accepted a mashup or invalid title", title)
+		}
+	}
+}
+
 func TestScanSourceForPersonRejectsVixenGalleryScan(t *testing.T) {
 	_, err := ScanSourceForPerson(0, "Vixen", "")
 	if err == nil {

@@ -7,6 +7,8 @@ import (
 	"gallery_api/logger"
 	"gallery_api/models"
 	"hash/fnv"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -224,6 +226,8 @@ func processScan(scanID uint) {
 		scan.Error = err.Error()
 		logger.Errorf("Scan %d failed: %v", scanID, err)
 	} else {
+		cacheScanThumbnails(result)
+
 		// Serialize results
 		resultsJSON, err := json.Marshal(result)
 		if err != nil {
@@ -241,6 +245,42 @@ func processScan(scanID uint) {
 	database.DB.Save(&scan)
 
 	providerLock.Unlock()
+}
+
+func cacheScanThumbnails(result *PersonScanResult) {
+	if result == nil {
+		return
+	}
+
+	cache := make(map[string]string)
+	cacheGalleryThumbnails := func(galleries []GallerySearchResult) {
+		for i := range galleries {
+			thumbnailURL := galleries[i].ThumbnailURL
+			if thumbnailURL == "" {
+				thumbnailURL = galleries[i].Thumbnail
+			}
+			if !strings.HasPrefix(strings.ToLower(thumbnailURL), "http://") &&
+				!strings.HasPrefix(strings.ToLower(thumbnailURL), "https://") {
+				continue
+			}
+
+			galleries[i].ThumbnailURL = thumbnailURL
+			localPath := cache[thumbnailURL]
+			if localPath == "" {
+				downloadedPath, err := DownloadProviderThumbnail(thumbnailURL)
+				if err != nil {
+					logger.Warnf("Failed to cache scan thumbnail for %q: %v", thumbnailURL, err)
+					continue
+				}
+				localPath = "/thumbnails/" + filepath.Base(downloadedPath)
+				cache[thumbnailURL] = localPath
+			}
+			galleries[i].Thumbnail = localPath
+		}
+	}
+
+	cacheGalleryThumbnails(result.MissingGalleries)
+	cacheGalleryThumbnails(result.UnsureGalleries)
 }
 
 // StartDailyScanScheduler starts a daily cron job that scans all people with provider aliases
@@ -614,6 +654,10 @@ func AutoResolveMissingGalleries(personID, galleryID uint) error {
 		missingURL, _ := matchedGallery["url"].(string)
 		missingTitle, _ := matchedGallery["title"].(string)
 		missingThumbnail, _ := matchedGallery["thumbnail"].(string)
+		missingThumbnailURL, _ := matchedGallery["thumbnail_url"].(string)
+		if missingThumbnailURL != "" {
+			missingThumbnail = missingThumbnailURL
+		}
 
 		// Check if already excluded for this person+provider+URL combo
 		var existingExclusion models.ScanResultExclusion

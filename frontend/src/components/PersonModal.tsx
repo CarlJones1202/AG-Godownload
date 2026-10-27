@@ -4,6 +4,7 @@ import { people } from '@/lib/api';
 import type { PersonScanResponse } from '@/types';
 import { Badge, Button, Input, Spinner } from '@/components/UI';
 import { X, Search, Info, User, Calendar, MapPin, Maximize2, Weight, Palette, Fingerprint, Check } from 'lucide-react';
+import { getScanGalleryName } from '@/lib/utils';
 
 const PROVIDER_LIST = [
   "MetArt", "MetartX", "PlayboyPlus", "Vixen",
@@ -245,12 +246,12 @@ export function PersonModal({ personId, onClose }: { personId: number; onClose: 
                                 size="sm"
                                 className="h-7 px-2 text-[10px]"
                                 disabled={linkFoundMut.isPending}
-                                onClick={() => linkFoundMut.mutate({ provider: scanResults.provider, source_url: mg.url, name: mg.title, thumbnail_url: mg.thumbnail })}
+                                onClick={() => linkFoundMut.mutate({ provider: scanResults.provider, source_url: mg.url, name: getScanGalleryName(mg.title, scanResults.provider, mg.gallery_name), thumbnail_url: mg.thumbnail_url || mg.thumbnail })}
                               >
                                 Scrape
                               </Button>
                               <a
-                                href={`https://www.vipergirls.to/search.php?query="${encodeURIComponent(mg.title)}"&titleonly=1&search_in=topics&forumchoice%5B%5D=235&childforums=1`}
+                                href={`https://www.vipergirls.to/search.php?query="${encodeURIComponent(getScanGalleryName(mg.title, scanResults.provider, mg.gallery_name))}"&titleonly=1&search_in=topics&forumchoice%5B%5D=235&childforums=1`}
                                 target="_blank" rel="noopener noreferrer"
                                 className="h-7 px-2 inline-flex items-center justify-center text-[10px] font-medium rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 border border-blue-500/30 transition-all"
                               >

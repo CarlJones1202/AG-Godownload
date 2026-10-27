@@ -403,7 +403,6 @@ func GetAllMissingGalleries(c *gin.Context) {
 		if err := json.Unmarshal([]byte(scan.Results), &results); err != nil {
 			continue
 		}
-
 		missingGalleries, ok := results["missing_galleries"].([]interface{})
 		if !ok || len(missingGalleries) == 0 {
 			continue
@@ -432,6 +431,7 @@ func GetAllMissingGalleries(c *gin.Context) {
 
 			url, _ := gMap["url"].(string)
 			title, _ := gMap["title"].(string)
+			galleryName, _ := gMap["gallery_name"].(string)
 			thumbnail, _ := gMap["thumbnail"].(string)
 			releaseDate, _ := gMap["release_date"].(string)
 
@@ -447,7 +447,22 @@ func GetAllMissingGalleries(c *gin.Context) {
 				title = "Untitled"
 			}
 
-			if q != "" && !strings.Contains(strings.ToLower(title), q) && !strings.Contains(strings.ToLower(personName), q) {
+			if strings.EqualFold(scan.Provider, "PlayboyPlus") || strings.EqualFold(scan.Provider, "Playboy") {
+				if galleryName == "" {
+					var ok bool
+					galleryName, ok = services.PlayboyPlusGalleryName(title, scan.Alias)
+					if !ok {
+						galleryName, ok = services.PlayboyPlusGalleryName(title, personName)
+					}
+					if !ok {
+						continue
+					}
+				}
+			} else if galleryName == "" {
+				galleryName = title
+			}
+
+			if q != "" && !strings.Contains(strings.ToLower(galleryName), q) && !strings.Contains(strings.ToLower(personName), q) {
 				continue
 			}
 
@@ -457,7 +472,7 @@ func GetAllMissingGalleries(c *gin.Context) {
 				Provider:     scan.Provider,
 				Alias:        scan.Alias,
 				GalleryURL:   url,
-				GalleryName:  title,
+				GalleryName:  galleryName,
 				Thumbnail:    thumbnail,
 				FoundCount:   int(foundCount),
 				MissingCount: int(missingCount),
@@ -616,4 +631,3 @@ func RemoveNotWantedGallery(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Gallery unmarked"})
 }
-

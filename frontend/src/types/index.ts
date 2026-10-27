@@ -161,6 +161,8 @@ export interface PersonIdentifier {
 export interface GallerySearchResult {
   provider: string;
   title: string;
+  gallery_name?: string;
+  thumbnail_url?: string;
   url: string;
   thumbnail: string;
   release_date?: string;

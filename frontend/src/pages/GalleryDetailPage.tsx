@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, useQueries } from '@tanstack/react-query';
 import { galleries, images as imagesApi, people } from '@/lib/api';
-import { formatDate, parseColors, thumbnailUrl, imageUrl } from '@/lib/utils';
+import { formatDate, getScanGalleryName, parseColors, thumbnailUrl, imageUrl } from '@/lib/utils';
 import {
   Spinner,
   EmptyState,
@@ -177,7 +177,14 @@ export function GalleryDetailPage() {
         const missingGals = scan.results?.missing_galleries || [];
         for (const mg of missingGals) {
           if (!mg.title) continue;
-          const mgNorm = mg.title.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+          const scanGalleryName = getScanGalleryName(
+            mg.title,
+            scan.provider || mg.provider || '',
+            mg.gallery_name,
+            [scan.alias || '', person.name],
+          );
+          if (!scanGalleryName) continue;
+          const mgNorm = scanGalleryName.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
           const match = galleryNameNorm === mgNorm || galleryNameNorm.includes(mgNorm) || mgNorm.includes(galleryNameNorm);
           if (match && mg.url !== gallery.source_url && !seenUrls.has(mg.url)) {
             seenUrls.add(mg.url);

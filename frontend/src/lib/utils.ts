@@ -2,6 +2,25 @@ export function cn(...classes: (string | false | null | undefined)[]): string {
   return classes.filter(Boolean).join(' ');
 }
 
+export function getScanGalleryName(
+  title: string,
+  provider: string,
+  galleryName?: string,
+  personNames: string[] = [],
+): string {
+  if (!/^(playboy|playboyplus)$/i.test(provider)) return galleryName?.trim() || title;
+  if (galleryName?.trim()) return galleryName.trim();
+
+  const match = title.match(/^(.+?)\s+in\s+(.+)$/i);
+  if (!match) return '';
+
+  const normalize = (name: string) => name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  const expectedNames = personNames.filter(Boolean).map(normalize);
+  if (expectedNames.length > 0 && !expectedNames.includes(normalize(match[1]))) return '';
+
+  return match[2].trim();
+}
+
 export function formatDate(dateStr: string | undefined): string {
   if (!dateStr) return '-';
   const d = new Date(dateStr);
