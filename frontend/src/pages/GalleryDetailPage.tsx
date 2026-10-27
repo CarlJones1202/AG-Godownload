@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, useQueries } from '@tanstack/react-query';
 import { galleries, images as imagesApi, people } from '@/lib/api';
@@ -310,6 +310,34 @@ export function GalleryDetailPage() {
     return imageList.data.map((img) => ({ src: imageUrl(img.filename), alt: img.filename }));
   }, [imageList]);
 
+  const advanceSlideshowPage = useCallback(async () => {
+    if (!imageList) return;
+    if (imageList.meta.current_page >= imageList.meta.total_pages) {
+      setLightboxIndex(0);
+      return;
+    }
+
+    const nextPage = await imagesApi.list({
+      gallery_id: galleryId,
+      limit: 200,
+      sort_by: sortBy,
+      page: imageList.meta.current_page + 1,
+    });
+    const nextIndex = imageList.data.length;
+    queryClient.setQueryData<PaginatedResult<Image>>(
+      ['images', { gallery_id: galleryId, sort_by: sortBy }],
+      (old) => {
+        if (!old) return nextPage;
+        const seen = new Set(old.data.map((image) => image.id));
+        return {
+          data: [...old.data, ...nextPage.data.filter((image) => !seen.has(image.id))],
+          meta: { ...nextPage.meta },
+        };
+      },
+    );
+    setLightboxIndex(nextIndex);
+  }, [galleryId, imageList, queryClient, sortBy]);
+
   if (loadingGallery) return <Spinner />;
   if (!gallery) return <EmptyState message="Gallery not found." />;
 
@@ -594,7 +622,9 @@ export function GalleryDetailPage() {
 
       {lightboxIndex !== null && (
         <Lightbox images={lightboxImages} index={lightboxIndex} onClose={() => setLightboxIndex(null)}
-          onIndexChange={setLightboxIndex} imageData={imageList!.data} onToggleFavorite={(id) => favMut.mutate(id)} />
+          onIndexChange={setLightboxIndex}
+          onSlideshowPageEnd={imageList && imageList.meta.total_pages > 1 ? advanceSlideshowPage : undefined}
+          imageData={imageList!.data} onToggleFavorite={(id) => favMut.mutate(id)} />
       )}
 
       <ConfirmDialog open={confirmDeleteGallery} title="Delete Gallery"

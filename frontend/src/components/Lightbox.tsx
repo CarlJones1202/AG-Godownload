@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, X, Info, Heart, Link as LinkIcon, Play, Pause, Maximize, Minimize, Timer, UserPlus, Tag, Plus, Star, Sparkles } from 'lucide-react';
 import type { Image, Person, SimilarImage } from '@/types';
@@ -23,7 +23,7 @@ interface LightboxProps {
   index: number;
   onClose: () => void;
   onIndexChange: (index: number) => void;
-  onSlideshowPageEnd?: () => void;
+  onSlideshowPageEnd?: () => void | Promise<void>;
   imageData?: Image[];
   onToggleFavorite?: (id: number) => void;
 }
@@ -42,6 +42,8 @@ export function Lightbox({ images, index, onClose, onIndexChange, onSlideshowPag
   const [similarOpen, setSimilarOpen] = useState(false);
   const [similarViewState, setSimilarViewState] = useState<{ src: string; alt: string; key: string } | null>(null);
   const navigate = useNavigate();
+  const isAdvancingPage = useRef(false);
+  const previousImages = useRef(images);
 
   const { data: tagResults } = useQuery({
     queryKey: ['tags', 'search', tagSearch],
@@ -163,13 +165,31 @@ export function Lightbox({ images, index, onClose, onIndexChange, onSlideshowPag
   }, [imageData, index, similarData?.recommendation_set_id]);
 
   useEffect(() => {
+    if (previousImages.current !== images) {
+      previousImages.current = images;
+      if (images.length > 0) isAdvancingPage.current = false;
+    }
+  }, [images]);
+
+  useEffect(() => {
     let timer: number | undefined;
-    if (isPlaying && !similarView && images.length > 0) {
+    if (isPlaying && !similarView && !isAdvancingPage.current && images.length > 0) {
       timer = window.setInterval(() => {
         if (index < images.length - 1) {
           onIndexChange(index + 1);
         } else if (continueAcrossPages && onSlideshowPageEnd) {
-          onSlideshowPageEnd();
+          if (isAdvancingPage.current) return;
+          isAdvancingPage.current = true;
+          const pageAdvance = onSlideshowPageEnd();
+          if (pageAdvance instanceof Promise) {
+            void pageAdvance
+              .then(() => { isAdvancingPage.current = false; })
+              .catch((error: unknown) => {
+                console.error('Failed to advance slideshow page:', error);
+                isAdvancingPage.current = false;
+                setIsPlaying(false);
+              });
+          }
         } else {
           onIndexChange(0);
         }
