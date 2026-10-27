@@ -17,6 +17,7 @@ import type {
   PersonScanResponse,
   PersonScanResult,
   ProviderAlias,
+  TPDBPerformerAliases,
   RatingResponse,
   SimilarImagesResponse,
   Source,
@@ -255,6 +256,8 @@ export const people = {
     request<{ message: string }>(`/people/${id}/exclude-scan-result`, { method: 'POST', body: JSON.stringify(data) }),
   getProviderAliases: (id: number) =>
     request<ProviderAlias[]>(`/people/${id}/provider-aliases`),
+  suggestProviderAliases: (id: number) =>
+    request<{ data: TPDBPerformerAliases[] }>(`/people/${id}/provider-alias-suggestions`),
   createProviderAlias: (id: number, data: { provider: string; alias: string }) =>
     request<ProviderAlias>(`/people/${id}/provider-aliases`, { method: 'POST', body: JSON.stringify(data) }),
   deleteProviderAlias: (personId: number, target: string) =>

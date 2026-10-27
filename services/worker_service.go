@@ -146,10 +146,19 @@ func StartCrawlerWorker() {
 				}
 				logger.Debugf("Worker %d processing source %d (priority %d)", workerID, task.SourceID, task.Priority)
 				AddActiveCrawlerSource(task.SourceID)
-				if err := CrawlSource(task.SourceID); err != nil {
-					logger.Errorf("Worker %d error crawling source %d: %v", workerID, task.SourceID, err)
-				}
-				RemoveActiveCrawlerSource(task.SourceID)
+				// Run the crawl in a recovered closure so a panic in a ripper
+				// cannot kill this worker goroutine (and silently shrink the pool).
+				func() {
+					defer func() {
+						RemoveActiveCrawlerSource(task.SourceID)
+						if r := recover(); r != nil {
+							logger.Errorf("Crawler worker %d panic crawling source %d: %v", workerID, task.SourceID, r)
+						}
+					}()
+					if err := CrawlSource(task.SourceID); err != nil {
+						logger.Errorf("Worker %d error crawling source %d: %v", workerID, task.SourceID, err)
+					}
+				}()
 			}
 		}(i)
 	}
@@ -188,10 +197,19 @@ func StartVideoWorker() {
 				}
 				logger.Debugf("Video worker %d processing source %d (priority %d)", workerID, task.SourceID, task.Priority)
 				AddActiveCrawlerSource(task.SourceID)
-				if err := CrawlSource(task.SourceID); err != nil {
-					logger.Errorf("Video worker %d error crawling source %d: %v", workerID, task.SourceID, err)
-				}
-				RemoveActiveCrawlerSource(task.SourceID)
+				// Run the crawl in a recovered closure so a panic in a ripper
+				// cannot kill this worker goroutine.
+				func() {
+					defer func() {
+						RemoveActiveCrawlerSource(task.SourceID)
+						if r := recover(); r != nil {
+							logger.Errorf("Video worker %d panic crawling source %d: %v", workerID, task.SourceID, r)
+						}
+					}()
+					if err := CrawlSource(task.SourceID); err != nil {
+						logger.Errorf("Video worker %d error crawling source %d: %v", workerID, task.SourceID, err)
+					}
+				}()
 			}
 		}(i)
 	}

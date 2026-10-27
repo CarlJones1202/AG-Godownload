@@ -302,7 +302,10 @@ func GetPerson(c *gin.Context) {
 		query = query.Order("galleries.id DESC")
 	}
 
-	query.Find(&galleries)
+	if err := query.Find(&galleries).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load galleries"})
+		return
+	}
 
 	// Enhance galleries with image counts and first image
 	type GalleryResponse struct {
@@ -310,45 +313,140 @@ func GetPerson(c *gin.Context) {
 		ImageCount int `json:"image_count"`
 	}
 
+	galleryIDs := make([]uint, len(galleries))
+	for i := range galleries {
+		galleryIDs[i] = galleries[i].ID
+	}
+
+	// Batch: image counts per gallery via the M2M junction table (one query
+	// instead of one per gallery).
+	type galleryCount struct {
+		GalleryID uint
+		Count     int64
+	}
+	var counts []galleryCount
+	if len(galleryIDs) > 0 {
+		if err := database.DB.Table("image_galleries ig").
+			Joins("JOIN images i ON i.id = ig.image_id AND i.deleted_at IS NULL").
+			Select("ig.gallery_id, COUNT(*) as count").
+			Where("ig.gallery_id IN ?", galleryIDs).
+			Group("ig.gallery_id").
+			Scan(&counts).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load gallery image counts"})
+			return
+		}
+	}
+	countMap := make(map[uint]int64, len(galleries))
+	for _, c := range counts {
+		countMap[c.GalleryID] = c.Count
+	}
+
+	// Batch: first (oldest) non-deleted image per gallery via the junction table.
+	type firstImageRow struct {
+		GalleryID uint
+		ImageID   uint
+	}
+	var firstRows []firstImageRow
+	if len(galleryIDs) > 0 {
+		if err := database.DB.Table("image_galleries ig").
+			Joins("JOIN images i ON i.id = ig.image_id AND i.deleted_at IS NULL").
+			Select("ig.gallery_id, MIN(i.id) as image_id").
+			Where("ig.gallery_id IN ?", galleryIDs).
+			Group("ig.gallery_id").
+			Scan(&firstRows).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load gallery thumbnails"})
+			return
+		}
+	}
+	firstImageMap := make(map[uint]uint, len(firstRows))
+	for _, f := range firstRows {
+		firstImageMap[f.GalleryID] = f.ImageID
+	}
+
+	// Batch: fetch first image details.
+	firstImageIDs := make([]uint, 0, len(firstImageMap))
+	for _, id := range firstImageMap {
+		firstImageIDs = append(firstImageIDs, id)
+	}
+	type firstImageDetail struct {
+		ID       uint
+		Filename string
+		Type     string
+	}
+	var firstImgs []firstImageDetail
+	if len(firstImageIDs) > 0 {
+		if err := database.DB.Model(&models.Image{}).
+			Select("id, filename, type").
+			Where("id IN ?", firstImageIDs).
+			Scan(&firstImgs).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load gallery thumbnails"})
+			return
+		}
+	}
+	firstImgMap := make(map[uint]firstImageDetail, len(firstImgs))
+	for _, img := range firstImgs {
+		firstImgMap[img.ID] = img
+	}
+
+	// Batch: load sources for all galleries.
+	sourceMap := make(map[uint]models.Source)
+	var sourceIDs []uint
+	for i := range galleries {
+		if galleries[i].SourceID != nil {
+			sourceIDs = append(sourceIDs, *galleries[i].SourceID)
+		}
+	}
+	if len(sourceIDs) > 0 {
+		var sources []models.Source
+		if err := database.DB.Where("id IN ?", sourceIDs).Find(&sources).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load gallery sources"})
+			return
+		}
+		for i := range sources {
+			sourceMap[sources[i].ID] = sources[i]
+		}
+	}
+
 	galleryResponses := make([]GalleryResponse, len(galleries))
 	for i := range galleries {
-		// Preload Source for path generation
-		database.DB.Preload("Source").First(&galleries[i], galleries[i].ID)
+		g := &galleries[i]
+		count := countMap[g.ID]
 
-		// Get image count
-		var count int64
-		database.DB.Model(&models.Image{}).Where("gallery_id = ?", galleries[i].ID).Count(&count)
+		// Determine source name.
+		sourceName := "uncategorized"
+		if g.Source != nil {
+			sourceName = g.Source.Name
+		} else if g.SourceID != nil {
+			if s, ok := sourceMap[*g.SourceID]; ok {
+				sourceName = s.Name
+			}
+		}
 
-		// Load first image for thumbnail
-		var firstImage models.Image
-		if err := database.DB.Where("gallery_id = ? AND deleted_at IS NULL", galleries[i].ID).Order("created_at ASC").First(&firstImage).Error; err == nil {
-			// Determine source name
-			sourceName := "uncategorized"
-			if galleries[i].Source != nil {
-				sourceName = galleries[i].Source.Name
-			} else if galleries[i].SourceID != nil {
-				var source models.Source
-				if err := database.DB.First(&source, *galleries[i].SourceID).Error; err == nil {
-					sourceName = source.Name
+		// Load first image for thumbnail.
+		if imgID, ok := firstImageMap[g.ID]; ok {
+			if fi, ok2 := firstImgMap[imgID]; ok2 {
+				sanitizedSource := services.SanitizeDirectoryName(sourceName)
+				firstImage := models.Image{
+					ID:       fi.ID,
+					Filename: fi.Filename,
+					Type:     fi.Type,
 				}
+				firstImage.WebPath = fmt.Sprintf("/images/%s/%s", sanitizedSource, filepath.Base(fi.Filename))
+
+				thumbName := filepath.Base(fi.Filename)
+				if fi.Type == "video" {
+					thumbName += ".jpg"
+					// Also mark the image type as video so the frontend knows to show the play overlay
+					firstImage.Type = "video"
+				}
+
+				firstImage.ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, thumbName)
+				g.Images = []models.Image{firstImage}
 			}
-
-			sanitizedSource := services.SanitizeDirectoryName(sourceName)
-			firstImage.WebPath = fmt.Sprintf("/images/%s/%s", sanitizedSource, filepath.Base(firstImage.Filename))
-
-			thumbName := filepath.Base(firstImage.Filename)
-			if firstImage.Type == "video" {
-				thumbName += ".jpg"
-				// Also mark the image type as video so the frontend knows to show the play overlay
-				firstImage.Type = "video"
-			}
-
-			firstImage.ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, thumbName)
-			galleries[i].Images = []models.Image{firstImage}
 		}
 
 		galleryResponses[i] = GalleryResponse{
-			Gallery:    galleries[i],
+			Gallery:    *g,
 			ImageCount: int(count),
 		}
 	}
@@ -505,14 +603,14 @@ func LinkPersonToGalleries(c *gin.Context) {
 		return
 	}
 
-	// Parse aliases from JSON
-	var aliases []string
-	if person.Aliases != "" {
-		json.Unmarshal([]byte(person.Aliases), &aliases)
+	var providerAliases []models.PersonProviderAlias
+	if err := database.DB.Where("person_id = ?", person.ID).Find(&providerAliases).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch provider aliases"})
+		return
 	}
 
-	// Build search terms (name + aliases)
-	baseTerms := append([]string{person.Name}, aliases...)
+	// Build search terms from the person's name and all aliases.
+	baseTerms := services.PersonSearchTerms(person, providerAliases)
 	var searchTerms []string
 
 	for _, term := range baseTerms {
@@ -553,7 +651,10 @@ func LinkPersonToGalleries(c *gin.Context) {
 
 	// Link matched galleries to person
 	if len(matchedGalleries) > 0 {
-		database.DB.Model(&person).Association("Galleries").Replace(matchedGalleries)
+		if err := database.DB.Model(&person).Association("Galleries").Append(matchedGalleries); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to link matching galleries"})
+			return
+		}
 
 		// Auto-resolve missing galleries for each linked gallery
 		for _, g := range matchedGalleries {
@@ -576,7 +677,7 @@ func ScanPersonFromSource(c *gin.Context) {
 	alias := c.Query("alias")
 
 	if provider == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "source query parameter is required (MetArt, MetartX, Playboy, PlayboyPlus, Vixen, SexArt, LifeErotic, EternalDesire, MPLStudios, VivThomas, WowGirls, or RylskyArt)"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source query parameter is required (MetArt, MetartX, PlayboyPlus, Vixen, SexArt, LifeErotic, EternalDesire, MPLStudios, VivThomas, WowGirls, or RylskyArt)"})
 		return
 	}
 

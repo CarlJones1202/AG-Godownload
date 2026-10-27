@@ -6,10 +6,12 @@ import (
 	"gallery_api/database"
 	"gallery_api/logger"
 	"gallery_api/models"
+	"hash/fnv"
 	"sync"
 	"time"
 
 	"github.com/robfig/cron/v3"
+	"gorm.io/gorm"
 )
 
 type ScanQueue struct {
@@ -34,38 +36,59 @@ func init() {
 
 // AddToScanQueue adds a person scan job to the queue
 func AddToScanQueue(personID uint, provider string, alias string) error {
-	// Check if a scan for this (person_id, provider) already exists
-	var existingScan models.PersonScanQueue
-	result := database.DB.Where("person_id = ? AND provider = ?", personID, provider).
-		Order("created_at DESC").
-		First(&existingScan)
-
-	if result.Error == nil {
-		// Scan exists - check its status
-		if existingScan.Status == models.ScanStatusProcessing {
-			// A scan is currently processing, skip to avoid duplicates
-			logger.Infof("Scan already processing for person=%d, provider=%s, skipping duplicate", personID, provider)
-			return nil
-		} else if existingScan.Status == models.ScanStatusCompleted || existingScan.Status == models.ScanStatusFailed {
-			// Delete the old scan and create a new one
-			if err := database.DB.Delete(&existingScan).Error; err != nil {
-				logger.Warnf("Failed to delete old scan %d: %v", existingScan.ID, err)
-			} else {
-				logger.Infof("Deleted old scan %d for person=%d, provider=%s", existingScan.ID, personID, provider)
-			}
+	var scan models.PersonScanQueue
+	created := false
+	lockHash := fnv.New64a()
+	_, _ = fmt.Fprintf(lockHash, "%d\x00%s", personID, provider)
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		// Serialize enqueue attempts for this person/provider across app instances.
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", int64(lockHash.Sum64())).Error; err != nil {
+			return fmt.Errorf("failed to lock scan queue key: %w", err)
 		}
-	}
 
-	// Create new scan
-	scan := models.PersonScanQueue{
-		PersonID: personID,
-		Provider: provider,
-		Alias:    alias,
-		Status:   models.ScanStatusPending,
-	}
+		var existingScan models.PersonScanQueue
+		result := tx.Where("person_id = ? AND provider = ? AND status IN ?", personID, provider,
+			[]models.ScanStatus{models.ScanStatusPending, models.ScanStatusProcessing}).
+			First(&existingScan)
+		if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
+			return fmt.Errorf("failed to check existing scan: %w", result.Error)
+		}
+		if result.Error == nil {
+			logger.Infof("Scan already active for person=%d, provider=%s, skipping duplicate", personID, provider)
+			return nil
+		}
 
-	if err := database.DB.Create(&scan).Error; err != nil {
-		return fmt.Errorf("failed to create scan queue entry: %w", err)
+		result = tx.Where("person_id = ? AND provider = ?", personID, provider).
+			Order("created_at DESC, id DESC").
+			First(&existingScan)
+		if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
+			return fmt.Errorf("failed to load previous scan: %w", result.Error)
+		}
+		if result.Error == nil &&
+			(existingScan.Status == models.ScanStatusCompleted || existingScan.Status == models.ScanStatusFailed) {
+			if err := tx.Delete(&existingScan).Error; err != nil {
+				return fmt.Errorf("failed to delete old scan %d: %w", existingScan.ID, err)
+			}
+			logger.Infof("Deleted old scan %d for person=%d, provider=%s", existingScan.ID, personID, provider)
+		}
+
+		scan = models.PersonScanQueue{
+			PersonID: personID,
+			Provider: provider,
+			Alias:    alias,
+			Status:   models.ScanStatusPending,
+		}
+		if err := tx.Create(&scan).Error; err != nil {
+			return fmt.Errorf("failed to create scan queue entry: %w", err)
+		}
+		created = true
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if !created {
+		return nil
 	}
 
 	scanQueue.mu.Lock()

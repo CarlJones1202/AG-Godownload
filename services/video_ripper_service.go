@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"gallery_api/config"
 	"gallery_api/logger"
 	"hash"
 	"io"
@@ -316,7 +317,7 @@ func RipTnaFlix(pageURL string) (string, string, error) {
 	logger.Debugf("Extracted video ID: %s", videoID)
 
 	// Fetch the page to look for additional video configuration
-	client := &http.Client{}
+	client := &http.Client{Timeout: config.Global.HTTPRequestTimeout}
 	req, err := http.NewRequest("GET", pageURL, nil)
 	if err != nil {
 		return "", "", fmt.Errorf("creating request: %w", err)

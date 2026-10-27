@@ -212,6 +212,17 @@ export interface ProviderAlias {
   alias: string;
 }
 
+export interface ProviderAliasSuggestion {
+  provider: string;
+  alias: string;
+}
+
+export interface TPDBPerformerAliases {
+  id: string;
+  name: string;
+  site_aliases: ProviderAliasSuggestion[];
+}
+
 export interface DownloadStatus {
   crawler: {
     active_sources: ActiveSource[];

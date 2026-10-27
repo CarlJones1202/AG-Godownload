@@ -299,26 +299,9 @@ func GetImages(c *gin.Context) {
 // ServeImage - serves image from path provided in URL or falls back to DB lookup
 func ServeImage(c *gin.Context) {
 	filepathParam := c.Param("filepath")
-
-	// Security: prevent path traversal (basic check, filepath.Clean handles more)
-	if strings.Contains(filepathParam, "..") {
-		c.String(http.StatusBadRequest, "Invalid filename")
-		return
-	}
-
-	// Clean the path
-	cleanPath := filepath.Clean(filepathParam)
-	// Remove leading slash if present (filepath.Clean might leave it on unix, but we want relative to uploads)
-	cleanPath = strings.TrimPrefix(cleanPath, "/")
-	cleanPath = strings.TrimPrefix(cleanPath, "\\")
-
-	// Construct full path
-	fullPath := filepath.Join(services.UploadsDir, cleanPath)
-
-	// Verify the path is still within UploadsDir (extra security)
-	absUploads, _ := filepath.Abs(services.UploadsDir)
-	absPath, _ := filepath.Abs(fullPath)
-	if !strings.HasPrefix(absPath, absUploads) {
+	cleanPath := strings.TrimLeft(filepathParam, `/\`)
+	fullPath, ok := resolveUploadPath(cleanPath)
+	if !ok {
 		c.String(http.StatusForbidden, "Access denied")
 		return
 	}
@@ -349,16 +332,16 @@ func ServeImage(c *gin.Context) {
 
 		if err == nil {
 			sourceDir := services.SanitizeDirectoryName(image.SourceName)
-			path := filepath.Join(services.UploadsDir, sourceDir, filename)
-			if fileExists(path) {
+			path, ok := resolveUploadPath(filepath.Join(sourceDir, filename))
+			if ok && fileExists(path) {
 				c.File(path)
 				return
 			}
 		}
 
 		// Try root
-		rootPath := filepath.Join(services.UploadsDir, filename)
-		if fileExists(rootPath) {
+		rootPath, ok := resolveUploadPath(filename)
+		if ok && fileExists(rootPath) {
 			c.File(rootPath)
 			return
 		}
@@ -370,17 +353,11 @@ func ServeImage(c *gin.Context) {
 // ServeThumbnail serves thumbnail images from the uploads/<source>/thumbnails/ directory
 func ServeThumbnail(c *gin.Context) {
 	filepathParam := c.Param("filepath")
-
-	// Security: prevent path traversal
-	if strings.Contains(filepathParam, "..") {
-		c.String(http.StatusBadRequest, "Invalid filename")
+	cleanPath := strings.TrimLeft(filepathParam, `/\`)
+	if _, ok := resolveUploadPath(cleanPath); !ok {
+		c.String(http.StatusForbidden, "Access denied")
 		return
 	}
-
-	// Clean the path
-	cleanPath := filepath.Clean(filepathParam)
-	cleanPath = strings.TrimPrefix(cleanPath, "/")
-	cleanPath = strings.TrimPrefix(cleanPath, "\\")
 
 	// Always normalise to .jpg extension since thumbnails are generated as JPEG
 	ext := filepath.Ext(cleanPath)
@@ -389,17 +366,14 @@ func ServeThumbnail(c *gin.Context) {
 	}
 
 	// Verify the resolved path stays within UploadsDir
-	absUploads, _ := filepath.Abs(services.UploadsDir)
-
 	// Case 1: Path already contains a source directory (e.g., "SourceName/hash.jpg")
 	// We inject "thumbnails" before the filename: uploads/SourceName/thumbnails/hash.jpg
 	parts := strings.Split(filepath.ToSlash(cleanPath), "/")
 	if len(parts) > 1 {
 		sourceDir := strings.Join(parts[:len(parts)-1], "/")
 		filename := parts[len(parts)-1]
-		thumbPath := filepath.Join(services.UploadsDir, sourceDir, "thumbnails", filename)
-		absPath, _ := filepath.Abs(thumbPath)
-		if strings.HasPrefix(absPath, absUploads) && fileExists(thumbPath) {
+		thumbPath, ok := resolveUploadPath(filepath.Join(sourceDir, "thumbnails", filename))
+		if ok && fileExists(thumbPath) {
 			c.File(thumbPath)
 			return
 		}
@@ -424,18 +398,16 @@ func ServeThumbnail(c *gin.Context) {
 
 	if err == nil {
 		sourceDir := services.SanitizeDirectoryName(image.SourceName)
-		thumbPath := filepath.Join(services.UploadsDir, sourceDir, "thumbnails", filename)
-		absPath, _ := filepath.Abs(thumbPath)
-		if strings.HasPrefix(absPath, absUploads) && fileExists(thumbPath) {
+		thumbPath, ok := resolveUploadPath(filepath.Join(sourceDir, "thumbnails", filename))
+		if ok && fileExists(thumbPath) {
 			c.File(thumbPath)
 			return
 		}
 	}
 
 	// Case 3: Check gallery_thumbnails directory (for provider thumbnails)
-	galleryThumbPath := filepath.Join(services.UploadsDir, "gallery_thumbnails", filename)
-	absGalleryPath, _ := filepath.Abs(galleryThumbPath)
-	if strings.HasPrefix(absGalleryPath, absUploads) && fileExists(galleryThumbPath) {
+	galleryThumbPath, ok := resolveUploadPath(filepath.Join("gallery_thumbnails", filename))
+	if ok && fileExists(galleryThumbPath) {
 		c.File(galleryThumbPath)
 		return
 	}
@@ -446,15 +418,42 @@ func ServeThumbnail(c *gin.Context) {
 		if !entry.IsDir() {
 			continue
 		}
-		candidate := filepath.Join(services.UploadsDir, entry.Name(), "thumbnails", filename)
-		absCandidate, _ := filepath.Abs(candidate)
-		if strings.HasPrefix(absCandidate, absUploads) && fileExists(candidate) {
+		candidate, ok := resolveUploadPath(filepath.Join(entry.Name(), "thumbnails", filename))
+		if ok && fileExists(candidate) {
 			c.File(candidate)
 			return
 		}
 	}
 
 	c.String(http.StatusNotFound, "Thumbnail not found")
+}
+
+func resolveUploadPath(path string) (string, bool) {
+	cleanPath := filepath.Clean(path)
+	if filepath.IsAbs(cleanPath) || filepath.VolumeName(cleanPath) != "" {
+		return "", false
+	}
+	for _, part := range strings.Split(filepath.ToSlash(cleanPath), "/") {
+		if strings.Contains(part, ":") || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") {
+			return "", false
+		}
+	}
+
+	fullPath := filepath.Join(services.UploadsDir, cleanPath)
+	absUploads, err := filepath.Abs(services.UploadsDir)
+	if err != nil {
+		return "", false
+	}
+	absPath, err := filepath.Abs(fullPath)
+	if err != nil {
+		return "", false
+	}
+	relative, err := filepath.Rel(absUploads, absPath)
+	if err != nil || relative == "." || relative == ".." ||
+		strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
+		return "", false
+	}
+	return fullPath, true
 }
 
 // Helper
@@ -520,14 +519,14 @@ func DeleteImage(c *gin.Context) {
 		}
 
 		if err := services.DeleteFile(videoPath); err != nil {
-			println("Warning: Failed to delete video file:", err.Error())
+			logger.Warnf("Failed to delete video file %s: %v", videoPath, err)
 		}
 
 		// Delete video thumbnail (video files have .jpg appended)
 		thumbnailFilename := baseFilename + ".jpg"
 		thumbnailPath := filepath.Join(services.UploadsDir, sourceDir, "thumbnails", thumbnailFilename)
 		if err := services.DeleteFile(thumbnailPath); err != nil {
-			println("Warning: Failed to delete video thumbnail:", err.Error())
+			logger.Warnf("Failed to delete video thumbnail %s: %v", thumbnailPath, err)
 		}
 
 		// Delete trickplay files
@@ -536,13 +535,13 @@ func DeleteImage(c *gin.Context) {
 		// Delete trickplay VTT
 		trickplayVTT := filepath.Join(services.UploadsDir, sourceDir, "trickplay", baseNameWithoutExt+".vtt")
 		if err := services.DeleteFile(trickplayVTT); err != nil {
-			println("Warning: Failed to delete trickplay VTT:", err.Error())
+			logger.Warnf("Failed to delete trickplay VTT %s: %v", trickplayVTT, err)
 		}
 
 		// Delete trickplay sprite
 		trickplaySprite := filepath.Join(services.UploadsDir, sourceDir, "trickplay", baseNameWithoutExt+"_sprite.jpg")
 		if err := services.DeleteFile(trickplaySprite); err != nil {
-			println("Warning: Failed to delete trickplay sprite:", err.Error())
+			logger.Warnf("Failed to delete trickplay sprite %s: %v", trickplaySprite, err)
 		}
 	} else {
 		// Handle image deletion (original logic)
@@ -557,13 +556,13 @@ func DeleteImage(c *gin.Context) {
 		}
 
 		if err := services.DeleteFile(imagePath); err != nil {
-			println("Warning: Failed to delete image file:", err.Error())
+			logger.Warnf("Failed to delete image file %s: %v", imagePath, err)
 		}
 
 		// Delete image thumbnail
 		thumbnailPath := filepath.Join(services.UploadsDir, sourceDir, "thumbnails", baseFilename)
 		if err := services.DeleteFile(thumbnailPath); err != nil {
-			println("Warning: Failed to delete thumbnail:", err.Error())
+			logger.Warnf("Failed to delete thumbnail %s: %v", thumbnailPath, err)
 		}
 	}
 
@@ -681,15 +680,15 @@ func ToggleFavorite(c *gin.Context) {
 		return
 	}
 
-    // Toggle favorite WITHOUT touching UpdatedAt so we don't affect list ordering.
-    // Use UpdateColumn which updates the given column directly and does not
-    // modify the model's timestamps or run hooks that would change UpdatedAt.
-    newFav := !image.IsFavorite
-    if err := database.DB.Model(&image).UpdateColumn("is_favorite", newFav).Error; err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update image"})
-        return
-    }
-    image.IsFavorite = newFav
+	// Toggle favorite WITHOUT touching UpdatedAt so we don't affect list ordering.
+	// Use UpdateColumn which updates the given column directly and does not
+	// modify the model's timestamps or run hooks that would change UpdatedAt.
+	newFav := !image.IsFavorite
+	if err := database.DB.Model(&image).UpdateColumn("is_favorite", newFav).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update image"})
+		return
+	}
+	image.IsFavorite = newFav
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":     "Favorite status updated",

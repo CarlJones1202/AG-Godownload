@@ -38,7 +38,7 @@ import {
 import { CoverGrid } from '@/components/CoverGrid';
 
 const PROVIDER_LIST = [
-  "MetArt", "MetartX", "Playboy", "PlayboyPlus", "Vixen",
+  "MetArt", "MetartX", "PlayboyPlus", "Vixen",
   "SexArt", "LifeErotic", "EternalDesire", "MPLStudios",
   "VivThomas", "WowGirls", "RylskyArt",
 ] as const;
@@ -75,6 +75,7 @@ export function PersonDetailPage() {
   const [showTools, setShowTools] = useState(false);
   const [editForm, setEditForm] = useState<any>({});
   const [photoIndex, setPhotoIndex] = useState(0);
+  const [failedPhoto, setFailedPhoto] = useState<string>();
   const [linkGalleryId, setLinkGalleryId] = useState('');
   const [autoTagOpen, setAutoTagOpen] = useState(false);
   const [autoTagResults, setAutoTagResults] = useState<TagSuggestion[]>([]);
@@ -157,6 +158,10 @@ export function PersonDetailPage() {
   const addAliasMut = useMutation({
     mutationFn: (data: { provider: string; alias: string }) => people.createProviderAlias(personId, data),
     onSuccess: () => { refetchAliases(); setAliasName(''); },
+  });
+
+  const tpdbAliasSuggestionsMut = useMutation({
+    mutationFn: () => people.suggestProviderAliases(personId),
   });
 
   const deleteAliasMut = useMutation({
@@ -246,7 +251,11 @@ export function PersonDetailPage() {
   const photos = parsePhotos(person.photos);
   const hasCustomProfile = !!person.profile_image_path;
   const coverPhoto = person.profile_image_path ?? (photos[photoIndex] ?? photos[0]);
+  const displayPhoto = [coverPhoto, person.thumbnail_path].find(
+    (candidate) => candidate && candidate !== failedPhoto,
+  );
   const galleryList = person.galleries ?? [];
+  const existingProviderAliases = aliases ?? [];
   const linkedSourceUrls = new Set(galleryList.map((g: any) => g.source_url).filter(Boolean));
   const statChips = [
     { label: 'Galleries', value: String(stats?.galleries ?? galleryList.length) },
@@ -266,8 +275,9 @@ export function PersonDetailPage() {
         <div className="grid grid-cols-[140px_1fr] md:grid-cols-[180px_1fr] gap-4">
           <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-2">
             <div className="relative aspect-[3/4] overflow-hidden rounded-md bg-zinc-800">
-              {coverPhoto ? (
-                <img src={coverPhoto} alt={person.name} className="h-full w-full object-cover" />
+              {displayPhoto ? (
+                <img src={displayPhoto} alt={person.name} onError={() => setFailedPhoto(displayPhoto)}
+                  className="h-full w-full object-cover" />
               ) : (
                 <div className="h-full w-full flex items-center justify-center"><User size={36} className="text-zinc-600" /></div>
               )}
@@ -358,7 +368,55 @@ export function PersonDetailPage() {
       <div className="bg-zinc-900/40 p-3 rounded-lg border border-zinc-800 mb-6">
         <div className="flex items-center justify-between mb-2">
           <h4 className="text-xs font-semibold text-zinc-400">Provider Aliases ({aliases?.length ?? 0})</h4>
+          <Button size="sm" variant="secondary" className="h-7"
+            onClick={() => tpdbAliasSuggestionsMut.mutate()}
+            disabled={tpdbAliasSuggestionsMut.isPending}>
+            {tpdbAliasSuggestionsMut.isPending ? 'Searching TPDB...' : 'Find with TPDB'}
+          </Button>
         </div>
+        {tpdbAliasSuggestionsMut.isError && (
+          <p role="alert" className="mb-2 text-xs text-red-400">{tpdbAliasSuggestionsMut.error.message}</p>
+        )}
+        {tpdbAliasSuggestionsMut.data && (
+          <div className="mb-3 rounded border border-zinc-800 bg-zinc-950/50 p-2">
+            <p className="text-[10px] text-zinc-400 mb-2">
+              TPDB matches — only studios with supported gallery scanners are shown. Review each name before adding it. {tpdbAliasSuggestionsMut.data.data.length} performer match(es).
+            </p>
+            {tpdbAliasSuggestionsMut.data.data.length === 0 ? (
+              <p className="text-xs text-zinc-500">No TPDB performers matched this person.</p>
+            ) : (
+              <div className="space-y-2 max-h-56 overflow-y-auto">
+                {tpdbAliasSuggestionsMut.data.data.map((match) => {
+                  const suggestions = match.site_aliases.filter((suggestion) =>
+                    !existingProviderAliases.some((existing) =>
+                      existing.provider.toLowerCase() === suggestion.provider.toLowerCase() &&
+                      existing.alias.trim().toLowerCase() === suggestion.alias.toLowerCase(),
+                    ),
+                  );
+                  return (
+                    <div key={match.id} className="border-t border-zinc-800 pt-2 first:border-0 first:pt-0">
+                      <p className="text-xs text-zinc-200 mb-1">{match.name}</p>
+                      {suggestions.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {suggestions.map((suggestion) => (
+                            <button key={`${suggestion.provider}:${suggestion.alias}`} type="button"
+                              onClick={() => addAliasMut.mutate(suggestion)}
+                              disabled={addAliasMut.isPending}
+                              className="rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300 hover:border-blue-500 hover:text-white disabled:opacity-50">
+                              + {suggestion.provider}: {suggestion.alias}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-zinc-500">No new studio aliases on this match.</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
         <div className="flex gap-2 items-end mb-2">
           <select value={aliasProvider} onChange={(e) => setAliasProvider(e.target.value)}
             className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none cursor-pointer h-7">

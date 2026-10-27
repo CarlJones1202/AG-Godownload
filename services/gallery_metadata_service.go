@@ -1,7 +1,9 @@
 package services
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"gallery_api/database"
 	"gallery_api/logger"
@@ -12,7 +14,9 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -21,13 +25,13 @@ import (
 
 // GallerySearchResult represents a search result candidate
 type GallerySearchResult struct {
-	Provider    string `json:"provider"`
-	Title       string `json:"title"`
-	URL         string `json:"url"`
-	Thumbnail   string `json:"thumbnail"`
-	ReleaseDate string `json:"release_date"`
-	SourceID    string `json:"source_id"` // UUID for MetArt or similar ID
-	ID          uint     `json:"id"`        // Database gallery ID if matched
+	Provider    string   `json:"provider"`
+	Title       string   `json:"title"`
+	URL         string   `json:"url"`
+	Thumbnail   string   `json:"thumbnail"`
+	ReleaseDate string   `json:"release_date"`
+	SourceID    string   `json:"source_id"`        // UUID for MetArt or similar ID
+	ID          uint     `json:"id"`               // Database gallery ID if matched
 	Models      []string `json:"models,omitempty"` // Model names from the API (for filtering)
 }
 
@@ -64,14 +68,6 @@ func SearchGalleryMatches(galleryName string, people []string) ([]GallerySearchR
 		logger.Warnf("MetartX search failed: %v", err)
 	} else {
 		results = append(results, metartxResults...)
-	}
-
-	// Search Playboy
-	playboyResults, err := searchPlayboy(searchQuery)
-	if err != nil {
-		logger.Warnf("Playboy search failed: %v", err)
-	} else {
-		results = append(results, playboyResults...)
 	}
 
 	// Search PlayboyPlus
@@ -574,62 +570,6 @@ func searchRylskyArt(query string) ([]GallerySearchResult, error) {
 	return results, nil
 }
 
-// searchPlayboy searches Playboy for matching galleries
-func searchPlayboy(query string) ([]GallerySearchResult, error) {
-	searchURL := fmt.Sprintf("https://www.playboy.com/search?q=%s", strings.ReplaceAll(query, " ", "+"))
-
-	client := GetHTTPClient(searchURL)
-	resp, err := client.Get(searchURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to search Playboy: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("Playboy search returned status %d", resp.StatusCode)
-	}
-
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse Playboy search results: %w", err)
-	}
-
-	var results []GallerySearchResult
-
-	// Parse search results - placeholder selectors
-	doc.Find(".gallery-item, .search-result, article").Each(func(i int, s *goquery.Selection) {
-		if i >= 10 {
-			return
-		}
-
-		title := strings.TrimSpace(s.Find("h2, h3, .title").First().Text())
-		url, _ := s.Find("a").First().Attr("href")
-		thumbnail, _ := s.Find("img").First().Attr("src")
-		releaseDate := strings.TrimSpace(s.Find(".date, time").First().Text())
-
-		if url != "" && !strings.HasPrefix(url, "http") {
-			url = "https://www.playboy.com" + url
-		}
-
-		if thumbnail != "" && !strings.HasPrefix(thumbnail, "http") {
-			thumbnail = "https://www.playboy.com" + thumbnail
-		}
-
-		if title != "" && url != "" {
-			results = append(results, GallerySearchResult{
-				Provider:    "Playboy",
-				Title:       title,
-				URL:         url,
-				Thumbnail:   thumbnail,
-				ReleaseDate: releaseDate,
-			})
-		}
-	})
-
-	logger.Debugf("Found %d Playboy results", len(results))
-	return results, nil
-}
-
 // scrapeMetArtGallery scrapes full metadata from a MetArt gallery page/API
 func scrapeMetArtGallery(urlStr, uuid string) (*GalleryMetadata, error) {
 	// The user identified that the correct API endpoint uses name and date parameter
@@ -1059,8 +999,12 @@ func searchVivThomas(query string) ([]GallerySearchResult, error) {
 			logger.Warnf("[VivThomas] candidate failed: %s -> %v", apiURL, err)
 			continue
 		}
-		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyBytes, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if readErr != nil {
+			logger.Warnf("[VivThomas] failed to read body from %s: %v", apiURL, readErr)
+			continue
+		}
 
 		if resp.StatusCode != 200 {
 			logger.Warnf("[VivThomas] candidate returned status %d", resp.StatusCode)
@@ -1138,12 +1082,22 @@ func searchWowGirls(query string) ([]GallerySearchResult, error) {
 			logger.Warnf("[WowGirls] candidate failed: %s -> %v", apiURL, err)
 			continue
 		}
-		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyBytes, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if readErr != nil {
+			logger.Warnf("[WowGirls] failed to read body from %s: %v", apiURL, readErr)
+			continue
+		}
 
 		if resp.StatusCode != 200 {
 			logger.Warnf("[WowGirls] candidate returned status %d", resp.StatusCode)
 			continue
+		}
+
+		if resp.Request != nil && resp.Request.URL != nil &&
+			strings.EqualFold(resp.Request.URL.Hostname(), "wowgirls.com") &&
+			strings.HasPrefix(strings.ToLower(resp.Request.URL.Path), "/tour/regulations") {
+			return nil, fmt.Errorf("WowGirls search redirected to its regulations page; search results are unavailable")
 		}
 
 		doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(bodyBytes)))
@@ -2162,6 +2116,13 @@ func scrapePlayboyGallery(url string) (*GalleryMetadata, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.Request != nil && resp.Request.URL != nil {
+		host := strings.ToLower(resp.Request.URL.Hostname())
+		if host != "playboy.com" && host != "www.playboy.com" {
+			return nil, fmt.Errorf("Playboy gallery redirected to %s; gallery metadata is unavailable", host)
+		}
+	}
+
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("Playboy gallery returned status %d", resp.StatusCode)
 	}
@@ -2243,8 +2204,14 @@ func searchVixen(query string) ([]GallerySearchResult, error) {
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("Vixen API returned status %d", resp.StatusCode)
 	}
+	if contentType := strings.ToLower(resp.Header.Get("Content-Type")); !strings.Contains(contentType, "json") {
+		return nil, fmt.Errorf("Vixen API returned non-JSON content type %q; the GraphQL endpoint may have redirected to an access page", contentType)
+	}
 
 	var apiResp struct {
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
 		Data struct {
 			Search struct {
 				Videos []struct {
@@ -2264,6 +2231,9 @@ func searchVixen(query string) ([]GallerySearchResult, error) {
 
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
 		return nil, fmt.Errorf("failed to decode Vixen API response: %w", err)
+	}
+	if len(apiResp.Errors) > 0 {
+		return nil, fmt.Errorf("Vixen GraphQL search failed: %s", apiResp.Errors[0].Message)
 	}
 
 	var results []GallerySearchResult
@@ -2379,12 +2349,135 @@ func min(a, b int) int {
 	return b
 }
 
+type playboyPlusAlgoliaConfig struct {
+	applicationID string
+	apiKey        string
+}
+
+var (
+	playboyPlusEnvPattern  = regexp.MustCompile(`(?s)window\.env\s*=\s*(\{.*?\})\s*;`)
+	playboyPlusConfigCache struct {
+		sync.Mutex
+		config    playboyPlusAlgoliaConfig
+		expiresAt time.Time
+	}
+)
+
+func parsePlayboyPlusAlgoliaConfig(page string, now time.Time) (playboyPlusAlgoliaConfig, time.Time, error) {
+	match := playboyPlusEnvPattern.FindStringSubmatch(page)
+	if len(match) != 2 {
+		return playboyPlusAlgoliaConfig{}, time.Time{}, fmt.Errorf("PlayboyPlus page did not contain its Algolia configuration")
+	}
+
+	var env struct {
+		API struct {
+			Algolia struct {
+				ApplicationID string `json:"applicationID"`
+				APIKey        string `json:"apiKey"`
+			} `json:"algolia"`
+		} `json:"api"`
+	}
+	if err := json.Unmarshal([]byte(match[1]), &env); err != nil {
+		return playboyPlusAlgoliaConfig{}, time.Time{}, fmt.Errorf("failed to decode PlayboyPlus Algolia configuration: %w", err)
+	}
+	config := playboyPlusAlgoliaConfig{
+		applicationID: env.API.Algolia.ApplicationID,
+		apiKey:        env.API.Algolia.APIKey,
+	}
+	if config.applicationID == "" || config.apiKey == "" {
+		return playboyPlusAlgoliaConfig{}, time.Time{}, fmt.Errorf("PlayboyPlus page contained incomplete Algolia configuration")
+	}
+
+	cacheUntil := now.Add(30 * time.Minute)
+	decodedKey, err := base64.StdEncoding.DecodeString(config.apiKey)
+	if err != nil {
+		decodedKey, err = base64.RawStdEncoding.DecodeString(config.apiKey)
+	}
+	if err == nil {
+		if keyParams, parseErr := url.ParseQuery(string(decodedKey)); parseErr == nil {
+			if validUntil, parseErr := strconv.ParseInt(keyParams.Get("validUntil"), 10, 64); parseErr == nil {
+				keyExpiry := time.Unix(validUntil, 0).Add(-time.Minute)
+				if !keyExpiry.After(now) {
+					return playboyPlusAlgoliaConfig{}, time.Time{}, fmt.Errorf("PlayboyPlus page returned an expired Algolia key")
+				}
+				if keyExpiry.Before(cacheUntil) {
+					cacheUntil = keyExpiry
+				}
+			}
+		}
+	}
+
+	return config, cacheUntil, nil
+}
+
+func getPlayboyPlusAlgoliaConfig() (playboyPlusAlgoliaConfig, error) {
+	playboyPlusConfigCache.Lock()
+	defer playboyPlusConfigCache.Unlock()
+
+	now := time.Now()
+	if playboyPlusConfigCache.config.apiKey != "" && playboyPlusConfigCache.expiresAt.After(now) {
+		return playboyPlusConfigCache.config, nil
+	}
+
+	const pageURL = "https://www.playboyplus.com/"
+	req, err := http.NewRequest(http.MethodGet, pageURL, nil)
+	if err != nil {
+		return playboyPlusAlgoliaConfig{}, fmt.Errorf("failed to create PlayboyPlus config request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+	resp, err := GetHTTPClient(pageURL).Do(req)
+	if err != nil {
+		return playboyPlusAlgoliaConfig{}, fmt.Errorf("failed to fetch PlayboyPlus Algolia configuration: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return playboyPlusAlgoliaConfig{}, fmt.Errorf("PlayboyPlus configuration returned status %d", resp.StatusCode)
+	}
+
+	page, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return playboyPlusAlgoliaConfig{}, fmt.Errorf("failed to read PlayboyPlus configuration: %w", err)
+	}
+	config, expiresAt, err := parsePlayboyPlusAlgoliaConfig(string(page), now)
+	if err != nil {
+		return playboyPlusAlgoliaConfig{}, err
+	}
+	playboyPlusConfigCache.config = config
+	playboyPlusConfigCache.expiresAt = expiresAt
+	return config, nil
+}
+
 // searchPlayboyPlus searches PlayboyPlus using their Algolia API
+type playboyPlusSearchHit struct {
+	ObjectID    string `json:"objectID"`
+	Title       string `json:"title"`
+	URLTitle    string `json:"url_title"`
+	ReleaseDate string `json:"date_online"`
+	Thumbnail   string `json:"picture"`
+	Actors      []struct {
+		Name string `json:"name"`
+	} `json:"actors"`
+}
+
+func playboyPlusActorFacetParams(actorID int) (string, error) {
+	filters, err := json.Marshal([][]string{{fmt.Sprintf("actors.actor_id:%d", actorID)}})
+	if err != nil {
+		return "", fmt.Errorf("failed to encode PlayboyPlus actor filter: %w", err)
+	}
+
+	params := url.Values{}
+	params.Set("hitsPerPage", "50")
+	params.Set("facetFilters", string(filters))
+	return params.Encode(), nil
+}
+
 func searchPlayboyPlus(query string) ([]GallerySearchResult, error) {
-	// Algolia API info from their public site
-	appID := "TSMKFA364Q"
-	// Note: This key is short-lived and extracted from window.env on playboyplus.com
-	apiKey := "MDJmMzNkZTQ5YzY1NGFkOGY5NDU1OTU5M2Y4ZGFhNDdiZDM4N2QwZjY1ZWNmODkyOWRlNzE0NjRlNTVmYzNhNnZhbGlkVW50aWw9MTc3MjIzNjk3OCZyZXN0cmljdEluZGljZXM9YWxsJTJBJmZpbHRlcnM9c2VnbWVudCUzQXBsYXlib3lwbHVz"
+	config, err := getPlayboyPlusAlgoliaConfig()
+	if err != nil {
+		return nil, err
+	}
+	appID := config.applicationID
 	indexName := "all_photosets"
 
 	apiURL := fmt.Sprintf("https://%s-dsn.algolia.net/1/indexes/%s/query", appID, indexName)
@@ -2399,10 +2492,13 @@ func searchPlayboyPlus(query string) ([]GallerySearchResult, error) {
 	}
 
 	client := GetHTTPClient(apiURL)
-	req, _ := http.NewRequest("POST", apiURL, strings.NewReader(string(bodyBytes)))
+	req, err := http.NewRequest("POST", apiURL, strings.NewReader(string(bodyBytes)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create PlayboyPlus Algolia request: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Algolia-Application-Id", appID)
-	req.Header.Set("X-Algolia-API-Key", apiKey)
+	req.Header.Set("X-Algolia-API-Key", config.apiKey)
 	req.Header.Set("Referer", "https://www.playboyplus.com/")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
 
@@ -2417,15 +2513,7 @@ func searchPlayboyPlus(query string) ([]GallerySearchResult, error) {
 	}
 
 	var apiResp struct {
-		Hits []struct {
-			ObjectID    string `json:"objectID"`
-			Title       string `json:"title"`
-			URLTitle    string `json:"urlTitle"`
-			ReleaseDate string `json:"release_date"`
-			Thumbnails  struct {
-				Standard string `json:"standard"`
-			} `json:"thumbnails"`
-		} `json:"hits"`
+		Hits []playboyPlusSearchHit `json:"hits"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
@@ -2434,13 +2522,18 @@ func searchPlayboyPlus(query string) ([]GallerySearchResult, error) {
 
 	var results []GallerySearchResult
 	for _, hit := range apiResp.Hits {
+		models := make([]string, 0, len(hit.Actors))
+		for _, actor := range hit.Actors {
+			models = append(models, actor.Name)
+		}
 		results = append(results, GallerySearchResult{
 			Provider:    "PlayboyPlus",
 			Title:       hit.Title,
 			URL:         fmt.Sprintf("https://www.playboyplus.com/en/update/%s/%s", hit.URLTitle, hit.ObjectID),
-			Thumbnail:   hit.Thumbnails.Standard,
+			Thumbnail:   absolutePlayboyPlusURL(hit.Thumbnail),
 			ReleaseDate: hit.ReleaseDate,
 			SourceID:    hit.ObjectID,
+			Models:      models,
 		})
 	}
 
@@ -2450,8 +2543,11 @@ func searchPlayboyPlus(query string) ([]GallerySearchResult, error) {
 // searchPlayboyPlusByModel searches PlayboyPlus for galleries by model name
 // First searches for the model, then gets their galleries
 func searchPlayboyPlusByModel(modelName string) ([]GallerySearchResult, error) {
-	appID := "TSMKFA364Q"
-	apiKey := "MDJmMzNkZTQ5YzY1NGFkOGY5NDU1OTU5M2Y4ZGFhNDdiZDM4N2QwZjY1ZWNmODkyOWRlNzE0NjRlNTVmYzNhNnZhbGlkVW50aWw9MTc3MjIzNjk3OCZyZXN0cmljdEluZGljZXM9YWxsJTJBJmZpbHRlcnM9c2VnbWVudCUzQXBsYXlib3lwbHVz"
+	config, err := getPlayboyPlusAlgoliaConfig()
+	if err != nil {
+		return nil, err
+	}
+	appID := config.applicationID
 
 	// Step 1: Search for the model in all_actors index
 	actorsURL := fmt.Sprintf("https://%s-dsn.algolia.net/1/indexes/all_actors/query", appID)
@@ -2466,10 +2562,13 @@ func searchPlayboyPlusByModel(modelName string) ([]GallerySearchResult, error) {
 	}
 
 	client := GetHTTPClient(actorsURL)
-	req, _ := http.NewRequest("POST", actorsURL, strings.NewReader(string(actorsBody)))
+	req, err := http.NewRequest("POST", actorsURL, strings.NewReader(string(actorsBody)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create PlayboyPlus actors request: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Algolia-Application-Id", appID)
-	req.Header.Set("X-Algolia-API-Key", apiKey)
+	req.Header.Set("X-Algolia-API-Key", config.apiKey)
 	req.Header.Set("Referer", "https://www.playboyplus.com/")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
@@ -2490,9 +2589,8 @@ func searchPlayboyPlusByModel(modelName string) ([]GallerySearchResult, error) {
 
 	var actorsResp struct {
 		Hits []struct {
-			ObjectID string `json:"objectID"`
-			Name     string `json:"name"`
-			URLName  string `json:"urlName"`
+			ActorID int    `json:"actor_id"`
+			Name    string `json:"name"`
 		} `json:"hits"`
 	}
 
@@ -2501,25 +2599,28 @@ func searchPlayboyPlusByModel(modelName string) ([]GallerySearchResult, error) {
 	}
 
 	// Find exact match
-	var actorID string
+	var actorID int
 	for _, actor := range actorsResp.Hits {
 		// Case-insensitive exact match
 		if strings.EqualFold(actor.Name, modelName) {
-			actorID = actor.ObjectID
+			actorID = actor.ActorID
 			break
 		}
 	}
 
-	if actorID == "" {
+	if actorID == 0 {
 		return nil, nil
 	}
 
 	// Step 2: Search for galleries by this actor using the format the website uses
 	galleriesURL := fmt.Sprintf("https://%s-dsn.algolia.net/1/indexes/all_photosets/query", appID)
 
-	// Use the same format the website uses - facetFilters with nested arrays
+	facetParams, err := playboyPlusActorFacetParams(actorID)
+	if err != nil {
+		return nil, err
+	}
 	galleriesParams := map[string]interface{}{
-		"params": fmt.Sprintf("hitsPerPage=50&facetFilters=[[\\\"actors.id:%s\\\"]]", actorID),
+		"params": facetParams,
 	}
 
 	galleriesBody, err := json.Marshal(galleriesParams)
@@ -2527,10 +2628,13 @@ func searchPlayboyPlusByModel(modelName string) ([]GallerySearchResult, error) {
 		return nil, fmt.Errorf("failed to marshal galleries query: %w", err)
 	}
 
-	req2, _ := http.NewRequest("POST", galleriesURL, strings.NewReader(string(galleriesBody)))
+	req2, err := http.NewRequest("POST", galleriesURL, strings.NewReader(string(galleriesBody)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create PlayboyPlus galleries request: %w", err)
+	}
 	req2.Header.Set("Content-Type", "application/json")
 	req2.Header.Set("X-Algolia-Application-Id", appID)
-	req2.Header.Set("X-Algolia-API-Key", apiKey)
+	req2.Header.Set("X-Algolia-API-Key", config.apiKey)
 	req2.Header.Set("Referer", "https://www.playboyplus.com/")
 
 	resp2, err := client.Do(req2)
@@ -2549,15 +2653,7 @@ func searchPlayboyPlusByModel(modelName string) ([]GallerySearchResult, error) {
 	}
 
 	var galleriesResp struct {
-		Hits []struct {
-			ObjectID    string `json:"objectID"`
-			Title       string `json:"title"`
-			URLTitle    string `json:"urlTitle"`
-			ReleaseDate string `json:"release_date"`
-			Thumbnails  struct {
-				Standard string `json:"standard"`
-			} `json:"thumbnails"`
-		} `json:"hits"`
+		Hits []playboyPlusSearchHit `json:"hits"`
 	}
 
 	if err := json.Unmarshal(bodyBytes2, &galleriesResp); err != nil {
@@ -2566,17 +2662,29 @@ func searchPlayboyPlusByModel(modelName string) ([]GallerySearchResult, error) {
 
 	var results []GallerySearchResult
 	for _, hit := range galleriesResp.Hits {
+		models := make([]string, 0, len(hit.Actors))
+		for _, actor := range hit.Actors {
+			models = append(models, actor.Name)
+		}
 		results = append(results, GallerySearchResult{
 			Provider:    "PlayboyPlus",
 			Title:       hit.Title,
 			URL:         fmt.Sprintf("https://www.playboyplus.com/en/update/%s/%s", hit.URLTitle, hit.ObjectID),
-			Thumbnail:   hit.Thumbnails.Standard,
+			Thumbnail:   absolutePlayboyPlusURL(hit.Thumbnail),
 			ReleaseDate: hit.ReleaseDate,
 			SourceID:    hit.ObjectID,
+			Models:      models,
 		})
 	}
 
 	return results, nil
+}
+
+func absolutePlayboyPlusURL(path string) string {
+	if path != "" && strings.HasPrefix(path, "/") {
+		return "https://www.playboyplus.com" + path
+	}
+	return path
 }
 
 type PersonScanResult struct {
@@ -2605,137 +2713,87 @@ func filterResultsByModel(results []GallerySearchResult, term string, provider s
 	return filtered
 }
 func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonScanResult, error) {
+	if strings.EqualFold(provider, "playboy") {
+		provider = "PlayboyPlus"
+	}
+	if strings.EqualFold(provider, "vixen") {
+		return nil, fmt.Errorf("Vixen provides video content, not photo galleries; it cannot be used for missing-gallery scans")
+	}
+
 	var person models.Person
 	if err := database.DB.First(&person, personID).Error; err != nil {
 		return nil, fmt.Errorf("person not found: %w", err)
 	}
 
-	var searchTerms []string
-	if alias != "" {
-		searchTerms = []string{alias}
-	} else {
-		searchTerms = []string{person.Name}
-		if person.Aliases != "" {
-			var aliases []string
-			if err := json.Unmarshal([]byte(person.Aliases), &aliases); err == nil {
-				searchTerms = append(searchTerms, aliases...)
-			}
-		}
+	var providerAliases []models.PersonProviderAlias
+	if err := database.DB.Where("person_id = ? AND LOWER(provider) = LOWER(?)", personID, provider).
+		Find(&providerAliases).Error; err != nil {
+		return nil, fmt.Errorf("failed to load provider aliases: %w", err)
 	}
+	searchTerms := PersonSearchTerms(person, providerAliases, alias)
 
 	var allResults []GallerySearchResult
+	var searchFailures []error
+	search := func(term, providerName string, searchProvider func(string) ([]GallerySearchResult, error)) {
+		results, err := searchProvider(term)
+		if err != nil {
+			logger.Warnf("%s search failed for term %s: %v", providerName, term, err)
+			searchFailures = append(searchFailures, fmt.Errorf("%s (%q): %w", providerName, term, err))
+			return
+		}
+		allResults = append(allResults, filterResultsByModel(results, term, provider)...)
+	}
 
 	switch strings.ToLower(provider) {
 	case "metart":
 		for _, term := range searchTerms {
-			results, err := searchMetArt(term)
-			if err != nil {
-				logger.Warnf("MetArt search failed for term %s: %v", term, err)
-				continue
-			}
-			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
+			search(term, "MetArt", searchMetArt)
 		}
 	case "metartx":
 		for _, term := range searchTerms {
-			results, err := searchMetartX(term)
-			if err != nil {
-				logger.Warnf("MetartX search failed for term %s: %v", term, err)
-				continue
-			}
-			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
-		}
-	case "playboy":
-		for _, term := range searchTerms {
-			results, err := searchPlayboy(term)
-			if err != nil {
-				logger.Warnf("Playboy search failed for term %s: %v", term, err)
-				continue
-			}
-			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
+			search(term, "MetartX", searchMetartX)
 		}
 	case "playboyplus":
 		for _, term := range searchTerms {
-			results, err := searchPlayboyPlusByModel(term)
-			if err != nil {
-				logger.Warnf("PlayboyPlus search failed for term %s: %v", term, err)
-				continue
-			}
-			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
+			search(term, "PlayboyPlus", searchPlayboyPlusByModel)
 		}
 	case "vixen":
 		for _, term := range searchTerms {
-			results, err := searchVixen(term)
-			if err != nil {
-				logger.Warnf("Vixen search failed for term %s: %v", term, err)
-				continue
-			}
-			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
+			search(term, "Vixen", searchVixen)
 		}
 	case "sexart":
 		for _, term := range searchTerms {
-			results, err := searchSexArt(term)
-			if err != nil {
-				logger.Warnf("SexArt search failed for term %s: %v", term, err)
-				continue
-			}
-			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
+			search(term, "SexArt", searchSexArt)
 		}
 	case "lifeerotic":
 		for _, term := range searchTerms {
-			results, err := searchLifeErotic(term)
-			if err != nil {
-				logger.Warnf("LifeErotic search failed for term %s: %v", term, err)
-				continue
-			}
-			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
+			search(term, "LifeErotic", searchLifeErotic)
 		}
 	case "eternaldesire":
 		for _, term := range searchTerms {
-			results, err := searchEternalDesire(term)
-			if err != nil {
-				logger.Warnf("EternalDesire search failed for term %s: %v", term, err)
-				continue
-			}
-			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
+			search(term, "EternalDesire", searchEternalDesire)
 		}
 	case "mplstudios":
 		for _, term := range searchTerms {
-			results, err := searchMPLStudios(term)
-			if err != nil {
-				logger.Warnf("MPLStudios search failed for term %s: %v", term, err)
-				continue
-			}
-			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
+			search(term, "MPLStudios", searchMPLStudios)
 		}
 	case "vivthomas":
 		for _, term := range searchTerms {
-			results, err := searchVivThomas(term)
-			if err != nil {
-				logger.Warnf("VivThomas search failed for term %s: %v", term, err)
-				continue
-			}
-			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
+			search(term, "VivThomas", searchVivThomas)
 		}
 	case "wowgirls":
 		for _, term := range searchTerms {
-			results, err := searchWowGirls(term)
-			if err != nil {
-				logger.Warnf("WowGirls search failed for term %s: %v", term, err)
-				continue
-			}
-			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
+			search(term, "WowGirls", searchWowGirls)
 		}
 	case "rylskyart":
 		for _, term := range searchTerms {
-			results, err := searchRylskyArt(term)
-			if err != nil {
-				logger.Warnf("RylskyArt search failed for term %s: %v", term, err)
-				continue
-			}
-			allResults = append(allResults, filterResultsByModel(results, term, provider)...)
+			search(term, "RylskyArt", searchRylskyArt)
 		}
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", provider)
+	}
+	if len(searchTerms) > 0 && len(searchFailures) == len(searchTerms) {
+		return nil, fmt.Errorf("all %s searches failed: %w", provider, errors.Join(searchFailures...))
 	}
 
 	seen := make(map[string]bool)
@@ -2870,7 +2928,7 @@ func isGalleryResult(result GallerySearchResult) bool {
 	lowerTitle := strings.ToLower(result.Title)
 
 	// Filter out video/clip content
-	videoKeywords := []string{"/videos/", "/clips/", "/video/", "/clip/", "video", "scene"}
+	videoKeywords := []string{"/videos/", "/clips/", "/video/", "/clip/", "/movies/", "/movie/", "video", "scene"}
 	for _, keyword := range videoKeywords {
 		if strings.Contains(lowerURL, keyword) || strings.Contains(lowerTitle, keyword) {
 			return false
@@ -2982,6 +3040,7 @@ func modelMatchesSearchTerm(result GallerySearchResult, searchTerm string) bool 
 	}
 	return false
 }
+
 // scrapePlayboyPlusGallery attempts to scrape metadata for a PlayboyPlus gallery
 func scrapePlayboyPlusGallery(urlStr string) (*GalleryMetadata, error) {
 	// Since direct scraping often redirects to join page for non-logged users,
@@ -2997,16 +3056,22 @@ func scrapePlayboyPlusGallery(urlStr string) (*GalleryMetadata, error) {
 	objectID := parts[len(parts)-1]
 
 	// Query Algolia for this specific object
-	appID := "TSMKFA364Q"
-	apiKey := "MDJmMzNkZTQ5YzY1NGFkOGY5NDU1OTU5M2Y4ZGFhNDdiZDM4N2QwZjY1ZWNmODkyOWRlNzE0NjRlNTVmYzNhNnZhbGlkVW50aWw9MTc3MjIzNjk3OCZyZXN0cmljdEluZGljZXM9YWxsJTJBJmZpbHRlcnM9c2VnbWVudCUzQXBsYXlib3lwbHVz"
+	config, err := getPlayboyPlusAlgoliaConfig()
+	if err != nil {
+		return nil, err
+	}
+	appID := config.applicationID
 	indexName := "all_photosets"
 
 	apiURL := fmt.Sprintf("https://%s-dsn.algolia.net/1/indexes/%s/%s", appID, indexName, objectID)
 
 	client := GetHTTPClient(apiURL)
-	req, _ := http.NewRequest("GET", apiURL, nil)
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create PlayboyPlus record request: %w", err)
+	}
 	req.Header.Set("X-Algolia-Application-Id", appID)
-	req.Header.Set("X-Algolia-API-Key", apiKey)
+	req.Header.Set("X-Algolia-API-Key", config.apiKey)
 	req.Header.Set("Referer", "https://www.playboyplus.com/")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
 

@@ -17,6 +17,7 @@ import (
 // EmbeddingResult bundles the vector and the analytic features produced for an
 // image (features are always extracted, even by a semantic embedder).
 type EmbeddingResult struct {
+	Embedder string
 	Vector   []float32
 	Features *LowLevelFeatures
 }
@@ -50,7 +51,7 @@ func (e *LowLevelEmbedder) Embed(path string) (*EmbeddingResult, error) {
 	if vec == nil {
 		return nil, fmt.Errorf("zero-magnitude low-level vector for %s", path)
 	}
-	return &EmbeddingResult{Vector: vec, Features: feats}, nil
+	return &EmbeddingResult{Embedder: e.Name(), Vector: vec, Features: feats}, nil
 }
 
 // OnnxEmbedder generates semantic vectors with a local ONNX Runtime worker.
@@ -76,7 +77,7 @@ func (e *OnnxEmbedder) Embed(path string) (*EmbeddingResult, error) {
 	if len(vector) != e.dim {
 		return nil, fmt.Errorf("semantic model returned %d dimensions; expected %d", len(vector), e.dim)
 	}
-	return &EmbeddingResult{Vector: vector, Features: features}, nil
+	return &EmbeddingResult{Embedder: e.Name(), Vector: vector, Features: features}, nil
 }
 
 // InitEmbedding selects the active embedder based on config, then rebuilds the
@@ -131,6 +132,9 @@ func CurrentEmbedder() Embedder {
 // updates its low-level feature JSON, and upserts it into the index.
 // Returns the stored normalized vector.
 func StoreImageEmbedding(imageID uint, res *EmbeddingResult) ([]float32, error) {
+	if res == nil || res.Embedder == "" {
+		return nil, fmt.Errorf("embedding provider is missing for image %d", imageID)
+	}
 	vec := normalizeVec(res.Vector)
 	if vec == nil {
 		return nil, fmt.Errorf("refusing to store zero vector for image %d", imageID)
@@ -149,7 +153,7 @@ func StoreImageEmbedding(imageID uint, res *EmbeddingResult) ([]float32, error) 
 		}
 		row := models.ImageEmbedding{
 			ImageID:   imageID,
-			Embedder:  CurrentEmbedder().Name(),
+			Embedder:  res.Embedder,
 			Dimension: len(vec),
 			Vector:    vecToBytes(vec),
 		}
@@ -168,7 +172,7 @@ func StoreImageEmbedding(imageID uint, res *EmbeddingResult) ([]float32, error) 
 		return nil, err
 	}
 
-	VectorIndex.Upsert(imageID, vec)
+	VectorIndex.Upsert(imageID, vec, res.Embedder)
 	return vec, nil
 }
 

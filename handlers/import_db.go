@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"gallery_api/config"
+	"gallery_api/database"
 	"gallery_api/logger"
 	"github.com/gin-gonic/gin"
 )
@@ -19,9 +20,7 @@ import (
 // matching tables in the target database, so this is a full restore, not a merge.
 // Uploaded as multipart form field "file".
 func ImportDB(c *gin.Context) {
-	token := c.GetHeader("X-Maintenance-Token")
-	if config.Global.MaintenanceToken != "" && strings.TrimSpace(token) != strings.TrimSpace(config.Global.MaintenanceToken) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+	if !authorizeMaintenance(c) {
 		return
 	}
 
@@ -59,8 +58,8 @@ func ImportDB(c *gin.Context) {
 
 	start := time.Now()
 
-	// Reset public schema first so dumps without --clean restore into a fresh schema
-	resetCmd := exec.Command(psql, "-d", config.Global.DatabaseDSN(), "-c", "DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO postgres; GRANT ALL ON SCHEMA public TO public;")
+	// Terminate other connections and reset public schema first so dumps without --clean restore into a fresh schema
+	resetCmd := exec.Command(psql, "-d", config.Global.DatabaseDSN(), "-c", "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid(); DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO postgres; GRANT ALL ON SCHEMA public TO public;")
 	resetCmd.Env = append(os.Environ(), "PGPASSWORD="+config.Global.DBPassword)
 	if resetOut, err := resetCmd.CombinedOutput(); err != nil {
 		logger.Warnf("Import: schema reset warning: %v (%s)", err, string(resetOut))
@@ -82,6 +81,13 @@ func ImportDB(c *gin.Context) {
 	}
 
 	logger.Infof("Import: restored %s (%d bytes) in %s", header.Filename, header.Size, time.Since(start).Round(time.Millisecond))
+
+	// Reconnect to database after restore
+	logger.Info("Import: reconnecting to database...")
+	database.Connect(config.Global.DatabaseDSN())
+	database.Migrate()
+	database.MigrateData()
+
 	c.JSON(http.StatusOK, gin.H{
 		"message":     "database restored",
 		"file":        header.Filename,

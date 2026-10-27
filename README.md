@@ -34,6 +34,16 @@ go run .
 
 The server will start on port 8080.
 
+### ThePornDB provider aliases
+
+Set `TPDB_API_KEY` in the server process environment or local `.env`, then
+restart the server. Prefer the process environment and do not commit the key.
+The key stays on the server and is not sent to the browser. The `.env.example`
+file lists the required setting.
+
+On a person's page, select **Find with TPDB** in the Provider Aliases section.
+Review the matched performers and add each studio-specific name individually.
+
 ## Log Levels
 
 The application supports different log levels to control verbosity. By default, only **WARN** and **ERROR** messages are shown.

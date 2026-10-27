@@ -33,16 +33,11 @@ func AutoTagPerson(personID uint, minConfidence float64, autoApply bool) (*AutoT
 		return nil, fmt.Errorf("person not found: %w", err)
 	}
 
-	// Collect search terms (name + aliases)
-	searchTerms := []string{person.Name}
-
-	// Parse aliases from JSON
-	if person.Aliases != "" {
-		var aliases []string
-		if err := json.Unmarshal([]byte(person.Aliases), &aliases); err == nil {
-			searchTerms = append(searchTerms, aliases...)
-		}
+	var providerAliases []models.PersonProviderAlias
+	if err := database.DB.Where("person_id = ?", personID).Find(&providerAliases).Error; err != nil {
+		return nil, fmt.Errorf("failed to load provider aliases: %w", err)
 	}
+	searchTerms := PersonSearchTerms(person, providerAliases)
 
 	// Get exclusions for this person
 	var exclusions []models.PersonExclusion
@@ -197,6 +192,38 @@ func AutoTagPerson(personID uint, minConfidence float64, autoApply bool) (*AutoT
 	}
 
 	return result, nil
+}
+
+// PersonSearchTerms returns the distinct non-empty names and aliases used to find a person's galleries.
+func PersonSearchTerms(person models.Person, providerAliases []models.PersonProviderAlias, additionalTerms ...string) []string {
+	searchTerms := make([]string, 0, 1+len(providerAliases)+len(additionalTerms)+4)
+	seen := make(map[string]bool)
+	appendTerm := func(term string) {
+		term = strings.TrimSpace(term)
+		key := strings.ToLower(term)
+		if term == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		searchTerms = append(searchTerms, term)
+	}
+
+	appendTerm(person.Name)
+	if person.Aliases != "" {
+		var aliases []string
+		if err := json.Unmarshal([]byte(person.Aliases), &aliases); err == nil {
+			for _, alias := range aliases {
+				appendTerm(alias)
+			}
+		}
+	}
+	for _, alias := range providerAliases {
+		appendTerm(alias.Alias)
+	}
+	for _, term := range additionalTerms {
+		appendTerm(term)
+	}
+	return searchTerms
 }
 
 // CalculateMatchConfidence returns a confidence score (0.0-1.0) for a name match

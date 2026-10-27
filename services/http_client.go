@@ -246,6 +246,11 @@ func GetOrFetchCookies(pageURL string) ([]*http.Cookie, error) {
 }
 
 // ClearCookieCache clears the cached cookies (e.g. at the start of a new crawl).
+// Entries are removed in place so in-flight callers holding a reference to the
+// previous map instance are not affected by a wholesale replacement.
 func ClearCookieCache() {
-	cookieCache = sync.Map{}
+	cookieCache.Range(func(k, v any) bool {
+		cookieCache.Delete(k)
+		return true
+	})
 }

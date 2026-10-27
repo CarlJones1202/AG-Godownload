@@ -31,6 +31,18 @@ type semanticInferenceWorker struct {
 	closed bool
 }
 
+// newSemanticWorkerCommand builds the Python child process for the semantic
+// worker. PYTHONUTF8=1 forces UTF-8 text I/O on the child: the Go side writes
+// UTF-8 JSON paths, but Python otherwise decodes stdin with the locale codec
+// (cp1252 on Windows), which mangles non-ASCII paths and outright rejects
+// byte sequences that are undefined in cp1252.
+func newSemanticWorkerCommand(pythonPath, scriptPath, modelPath string) *exec.Cmd {
+	cmd := exec.Command(pythonPath, "-u", scriptPath, modelPath)
+	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(), "PYTHONUTF8=1")
+	return cmd
+}
+
 func startSemanticInferenceWorker(pythonPath, modelPath string, expectedDimension int) (*semanticInferenceWorker, error) {
 	script, err := os.CreateTemp("", "ag-godownload-semantic-*.py")
 	if err != nil {
@@ -47,8 +59,7 @@ func startSemanticInferenceWorker(pythonPath, modelPath string, expectedDimensio
 		return nil, fmt.Errorf("close semantic worker script: %w", err)
 	}
 
-	cmd := exec.Command(pythonPath, "-u", scriptPath, modelPath)
-	cmd.Stderr = os.Stderr
+	cmd := newSemanticWorkerCommand(pythonPath, scriptPath, modelPath)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		os.Remove(scriptPath)

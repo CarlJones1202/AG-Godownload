@@ -76,7 +76,10 @@ func IsHotlinkPlaceholder(imgPath string, providerHint string) (bool, string, er
 		return false, "", err
 	}
 	hashStr := hex.EncodeToString(hash.Sum(nil))
+	return checkHotlinkPlaceholder(imgPath, providerHint, size, hashStr)
+}
 
+func checkHotlinkPlaceholder(imgPath, providerHint string, size int64, hashStr string) (bool, string, error) {
 	// Log the hash at DEBUG level so the user can find and add unknown placeholders
 	logger.Debugf("Image hash for %s: %s (provider=%s, size=%d)", filepath.Base(imgPath), hashStr, providerHint, size)
 
@@ -250,6 +253,15 @@ func downloadImageWithCookies(url string, sourceName string, referer string, coo
 	}
 
 	hashStr := hex.EncodeToString(hash.Sum(nil))
+	provider := extractImageProvider(url)
+	if isPlaceholder, reason, err := checkHotlinkPlaceholder(tmpPath, provider, written, hashStr); err == nil && isPlaceholder {
+		os.Remove(tmpPath)
+		logger.Warnf("Rejected placeholder image from %s: %s (%s)", provider, url, reason)
+		return nil, fmt.Errorf("hotlinking placeholder detected from %s: %s", provider, reason)
+	} else if err != nil {
+		logger.Warnf("Failed to check placeholder status for %s: %v", tmpPath, err)
+	}
+
 	filename := hashStr + ext
 
 	// Full path for the image
@@ -283,16 +295,6 @@ func downloadImageWithCookies(url string, sourceName string, referer string, coo
 		}
 		// For other decode errors, still return the error but without assuming it's a placeholder
 		return nil, fmt.Errorf("failed to decode image: %w", err)
-	}
-
-	// Check for known hotlinking-placeholder images
-	provider := extractImageProvider(url)
-	if isPlaceholder, reason, err := IsHotlinkPlaceholder(destPath, provider); err == nil && isPlaceholder {
-		os.Remove(destPath)
-		logger.Warnf("Rejected placeholder image from %s: %s (%s)", provider, url, reason)
-		return nil, fmt.Errorf("hotlinking placeholder detected from %s: %s", provider, reason)
-	} else if err != nil {
-		logger.Warnf("Failed to check placeholder status for %s: %v", destPath, err)
 	}
 
 	// Extract dominant colors
@@ -753,120 +755,120 @@ func ScanMissingMetadata(db *gorm.DB, force bool) error {
 		}
 
 		for _, video := range videos {
-		// Construct full path
-		// We need to resolve the path similar to how ServeImage does or use what we know about storage
-		// Usually UploadsDir + SourceName + Filename
-		// But image.Filename might be relative or absolute-ish depending on legacy
+			// Construct full path
+			// We need to resolve the path similar to how ServeImage does or use what we know about storage
+			// Usually UploadsDir + SourceName + Filename
+			// But image.Filename might be relative or absolute-ish depending on legacy
 
-		var sourceName string
-		if video.SourceID != nil {
-			var source models.Source
-			if err := db.First(&source, *video.SourceID).Error; err == nil {
-				sourceName = source.Name
-			}
-		} else {
-			// Try gallery
-			var gallery models.Gallery
-			if err := db.Joins("JOIN image_galleries ON image_galleries.gallery_id = galleries.id").
-				Where("image_galleries.image_id = ?", video.ID).First(&gallery).Error; err == nil {
-				if gallery.SourceID != nil {
-					var source models.Source
-					if err := db.First(&source, *gallery.SourceID).Error; err == nil {
-						sourceName = source.Name
-					}
+			var sourceName string
+			if video.SourceID != nil {
+				var source models.Source
+				if err := db.First(&source, *video.SourceID).Error; err == nil {
+					sourceName = source.Name
 				}
-			}
-		}
-
-		if sourceName == "" {
-			sourceName = "uncategorized"
-		}
-
-		// Sanitize
-		dirName := SanitizeDirectoryName(sourceName)
-		fullPath := filepath.Join(UploadsDir, dirName, filepath.Base(video.Filename))
-
-		// Verify file exists
-		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-			// Try direct if video.Filename contains path
-			if _, err := os.Stat(filepath.Join(UploadsDir, video.Filename)); err == nil {
-				fullPath = filepath.Join(UploadsDir, video.Filename)
-			} else if _, err := os.Stat(video.Filename); err == nil {
-				// Handle absolute path stored in DB
-				fullPath = video.Filename
 			} else {
-				// Fallback: Recursive search in uploads folder
-				foundPath := ""
-				baseName := filepath.Base(video.Filename)
-				err := filepath.Walk(UploadsDir, func(path string, info os.FileInfo, err error) error {
-					if err != nil {
-						return err
+				// Try gallery
+				var gallery models.Gallery
+				if err := db.Joins("JOIN image_galleries ON image_galleries.gallery_id = galleries.id").
+					Where("image_galleries.image_id = ?", video.ID).First(&gallery).Error; err == nil {
+					if gallery.SourceID != nil {
+						var source models.Source
+						if err := db.First(&source, *gallery.SourceID).Error; err == nil {
+							sourceName = source.Name
+						}
 					}
-					if !info.IsDir() && filepath.Base(path) == baseName {
-						foundPath = path
-						return io.EOF // Stop search
-					}
-					// Also check if filename matches without processing (legacy reasons)
-					if !info.IsDir() && info.Name() == video.Filename {
-						foundPath = path
-						return io.EOF
-					}
-					return nil
-				})
-
-				if err != nil && err != io.EOF {
-					logger.Warnf("Recursive search error for video %d: %v", video.ID, err)
-				}
-
-				if foundPath != "" {
-					fullPath = foundPath
-					logger.Infof("Found moved video file for %d at: %s", video.ID, fullPath)
-				} else {
-					logger.Warnf("Could not find file for video %d. Checked: %s and recursive search", video.ID, fullPath)
-					continue
 				}
 			}
+
+			if sourceName == "" {
+				sourceName = "uncategorized"
+			}
+
+			// Sanitize
+			dirName := SanitizeDirectoryName(sourceName)
+			fullPath := filepath.Join(UploadsDir, dirName, filepath.Base(video.Filename))
+
+			// Verify file exists
+			if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+				// Try direct if video.Filename contains path
+				if _, err := os.Stat(filepath.Join(UploadsDir, video.Filename)); err == nil {
+					fullPath = filepath.Join(UploadsDir, video.Filename)
+				} else if _, err := os.Stat(video.Filename); err == nil {
+					// Handle absolute path stored in DB
+					fullPath = video.Filename
+				} else {
+					// Fallback: Recursive search in uploads folder
+					foundPath := ""
+					baseName := filepath.Base(video.Filename)
+					err := filepath.Walk(UploadsDir, func(path string, info os.FileInfo, err error) error {
+						if err != nil {
+							return err
+						}
+						if !info.IsDir() && filepath.Base(path) == baseName {
+							foundPath = path
+							return io.EOF // Stop search
+						}
+						// Also check if filename matches without processing (legacy reasons)
+						if !info.IsDir() && info.Name() == video.Filename {
+							foundPath = path
+							return io.EOF
+						}
+						return nil
+					})
+
+					if err != nil && err != io.EOF {
+						logger.Warnf("Recursive search error for video %d: %v", video.ID, err)
+					}
+
+					if foundPath != "" {
+						fullPath = foundPath
+						logger.Infof("Found moved video file for %d at: %s", video.ID, fullPath)
+					} else {
+						logger.Warnf("Could not find file for video %d. Checked: %s and recursive search", video.ID, fullPath)
+						continue
+					}
+				}
+			}
+
+			// Get Metadata
+			meta, err := GetVideoMetadata(fullPath)
+			if err != nil {
+				logger.Warnf("Failed to extract metadata for video %d: %v", video.ID, err)
+				continue
+			}
+
+			// Update DB
+			video.Duration = meta.Duration
+			video.Width = meta.Width
+			video.Height = meta.Height
+			video.SizeMB = meta.SizeMB
+
+			// Backfill title if missing or if it looks like a filename (contains underscores)
+			// We want to improve titles even if they "exist" but look like "my_video_file"
+			shouldUpdateTitle := video.Title == "" || strings.Contains(video.Title, "_") || strings.Contains(video.Title, ".")
+
+			if shouldUpdateTitle {
+				// Use filename without extension and clean it
+				baseName := filepath.Base(video.Filename)
+				ext := filepath.Ext(baseName)
+				rawName := strings.TrimSuffix(baseName, ext)
+
+				// Replace separators
+				cleanName := strings.ReplaceAll(rawName, "_", " ")
+				cleanName = strings.ReplaceAll(cleanName, ".", " ")
+				video.Title = strings.TrimSpace(cleanName)
+			}
+
+			// If title is empty or same as filename, try to prettify it or leave it
+			// For now, let's just fix the technical metadata. User complained about "Unknown" size/quality.
+
+			if err := db.Save(&video).Error; err != nil {
+				logger.Errorf("Failed to save metadata for video %d: %v", video.ID, err)
+			} else {
+				logger.Infof("Updated metadata for video %d: %s (%dp)", video.ID, video.Filename, video.Height)
+			}
+			processedCount++
 		}
-
-		// Get Metadata
-		meta, err := GetVideoMetadata(fullPath)
-		if err != nil {
-			logger.Warnf("Failed to extract metadata for video %d: %v", video.ID, err)
-			continue
-		}
-
-		// Update DB
-		video.Duration = meta.Duration
-		video.Width = meta.Width
-		video.Height = meta.Height
-		video.SizeMB = meta.SizeMB
-
-		// Backfill title if missing or if it looks like a filename (contains underscores)
-		// We want to improve titles even if they "exist" but look like "my_video_file"
-		shouldUpdateTitle := video.Title == "" || strings.Contains(video.Title, "_") || strings.Contains(video.Title, ".")
-
-		if shouldUpdateTitle {
-			// Use filename without extension and clean it
-			baseName := filepath.Base(video.Filename)
-			ext := filepath.Ext(baseName)
-			rawName := strings.TrimSuffix(baseName, ext)
-
-			// Replace separators
-			cleanName := strings.ReplaceAll(rawName, "_", " ")
-			cleanName = strings.ReplaceAll(cleanName, ".", " ")
-			video.Title = strings.TrimSpace(cleanName)
-		}
-
-		// If title is empty or same as filename, try to prettify it or leave it
-		// For now, let's just fix the technical metadata. User complained about "Unknown" size/quality.
-
-		if err := db.Save(&video).Error; err != nil {
-			logger.Errorf("Failed to save metadata for video %d: %v", video.ID, err)
-		} else {
-			logger.Infof("Updated metadata for video %d: %s (%dp)", video.ID, video.Filename, video.Height)
-		}
-		processedCount++
-	}
 
 		lastID = videos[len(videos)-1].ID
 	}

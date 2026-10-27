@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 func GetProviderAliases(c *gin.Context) {
@@ -37,7 +38,7 @@ func GetProviderAliases(c *gin.Context) {
 	var scans []models.PersonScanQueue
 	if err := database.DB.Select("DISTINCT provider, alias").Where("person_id = ?", personID).Find(&scans).Error; err == nil {
 		for _, s := range scans {
-			if s.Provider == "" || seen[strings.ToLower(s.Provider)] {
+			if s.Provider == "" || strings.EqualFold(s.Provider, "playboy") || seen[strings.ToLower(s.Provider)] {
 				continue
 			}
 			seen[strings.ToLower(s.Provider)] = true
@@ -70,9 +71,25 @@ func CreateProviderAlias(c *gin.Context) {
 		return
 	}
 
+	provider := strings.ToLower(req.Provider)
+	if provider == "playboy" {
+		var existing models.PersonProviderAlias
+		err := database.DB.Where("person_id = ? AND LOWER(provider) = ?", person.ID, "playboyplus").
+			Order("id ASC").First(&existing).Error
+		if err == nil {
+			c.JSON(http.StatusOK, existing)
+			return
+		}
+		if err != gorm.ErrRecordNotFound {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check existing PlayboyPlus alias"})
+			return
+		}
+		provider = "playboyplus"
+	}
+
 	alias := models.PersonProviderAlias{
 		PersonID: person.ID,
-		Provider: strings.ToLower(req.Provider),
+		Provider: provider,
 		Alias:    strings.ToLower(req.Alias),
 	}
 

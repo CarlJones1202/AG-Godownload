@@ -22,9 +22,13 @@ function parsePhotos(photos?: string): string[] {
   } catch { return []; }
 }
 
-function ProfileTile({ name, photo }: { name: string; photo?: string }) {
-  return photo ? (
-    <img src={photo} alt={name} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
+function ProfileTile({ name, photo, fallbackPhoto }: { name: string; photo?: string; fallbackPhoto?: string }) {
+  const [failedPhoto, setFailedPhoto] = useState<string>();
+  const displayPhoto = [photo, fallbackPhoto].find((candidate) => candidate && candidate !== failedPhoto);
+
+  return displayPhoto ? (
+    <img src={displayPhoto} alt={name} onError={() => setFailedPhoto(displayPhoto)}
+      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
   ) : (
     <div className="flex h-full w-full items-center justify-center bg-zinc-800">
       <User size={44} className="text-zinc-600" />
@@ -145,7 +149,9 @@ export function PeoplePage() {
 
           <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {personList.map((p) => {
-              const photo = parsePhotos(p.photos)[0];
+              const photos = parsePhotos(p.photos);
+              const photo = p.thumbnail_path || photos[0];
+              const fallbackPhoto = p.thumbnail_path ? photos[0] : undefined;
               if (editMode) {
                 return (
                   <div key={p.id} className="group overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/30">
@@ -155,7 +161,7 @@ export function PeoplePage() {
                       <h3 className="text-sm font-medium text-white truncate">{p.name}</h3>
                     </div>
                     <div className="relative aspect-[4/5] overflow-hidden">
-                      <ProfileTile name={p.name} photo={photo} />
+                      <ProfileTile name={p.name} photo={photo} fallbackPhoto={fallbackPhoto} />
                     </div>
                     <div className="p-2 space-y-0.5">
                       {p.aliases && <span className="block text-[10px] text-zinc-400 truncate">{p.aliases.split(',').slice(0,3).join(', ')}{p.aliases.split(',').length > 3 && '…'}</span>}
@@ -167,7 +173,7 @@ export function PeoplePage() {
               return (
                 <Link to={`/people/${p.id}`} key={p.id} className="group overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/30 hover:border-zinc-700 transition-all block">
                   <div className="relative aspect-[4/5] overflow-hidden">
-                    <ProfileTile name={p.name} photo={photo} />
+                    <ProfileTile name={p.name} photo={photo} fallbackPhoto={fallbackPhoto} />
                   </div>
                   <div className="p-2 space-y-0.5">
                     <h3 className="text-sm font-medium text-white truncate">{p.name}</h3>

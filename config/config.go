@@ -50,6 +50,9 @@ type Config struct {
 	// Maintenance token for privileged API endpoints
 	MaintenanceToken string
 
+	// ThePornDB
+	TPDBAPIKey string
+
 	// Embedding / content similarity
 	Embedding struct {
 		ModelPath    string // ONNX model path; empty = built-in low-level provider
@@ -88,6 +91,7 @@ func Load() {
 		HTTPRequestTimeout:     time.Duration(getEnvAsInt("HTTP_REQUEST_TIMEOUT_SEC", 30)) * time.Second,
 		HTTPMaxRetries:         getEnvAsInt("HTTP_MAX_RETRIES", 3),
 		MaintenanceToken:       getEnv("MAINTENANCE_TOKEN", ""),
+		TPDBAPIKey:             getEnv("TPDB_API_KEY", ""),
 	}
 
 	// GalleryDL defaults

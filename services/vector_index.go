@@ -20,7 +20,7 @@ type ScoredImage struct {
 // be swapped in behind this interface without touching callers.
 type VectorStore interface {
 	Rebuild() error
-	Upsert(imageID uint, vec []float32)
+	Upsert(imageID uint, vec []float32, embedder string)
 	Remove(imageID uint)
 	Get(imageID uint) ([]float32, bool)
 	SearchByVector(vec []float32, k int, exclude map[uint]bool) []ScoredImage
@@ -93,8 +93,12 @@ func (m *MemoryIndex) Rebuild() error {
 	return nil
 }
 
-func (m *MemoryIndex) Upsert(imageID uint, vec []float32) {
+func (m *MemoryIndex) Upsert(imageID uint, vec []float32, embedder string) {
 	m.mu.Lock()
+	if m.embedder != embedder {
+		m.mu.Unlock()
+		return
+	}
 	m.ensure()
 	m.vecs[imageID] = vec
 	if m.dim == 0 {

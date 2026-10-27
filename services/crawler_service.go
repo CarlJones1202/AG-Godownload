@@ -536,57 +536,36 @@ func CrawlSource(sourceID uint) error {
 			imagesWithoutAssoc[i].Galleries = nil
 		}
 
-		// Use raw SQL for bulk insert instead of CreateInBatches for better performance
-		var placeholders []string
-		var args []interface{}
-
-		for _, img := range imagesWithoutAssoc {
-			placeholders = append(placeholders, "(?, ?, ?, ?, ?, ?)")
-			args = append(args, img.GalleryID, img.Filename, img.OriginalURL, img.DownloadURL, img.DominantColors, true)
-		}
-
-		stmt := fmt.Sprintf(
-			"INSERT INTO images (gallery_id, filename, original_url, download_url, dominant_colors, file_exists) VALUES %s",
-			strings.Join(placeholders, ","),
-		)
-
-		if err := database.DB.Exec(stmt, args...).Error; err != nil {
+		// Use GORM batch insert so each struct's primary key is populated after
+		// creation. This lets us pair each newly inserted image with its galleries
+		// unambiguously (fixes a previous bug where all gallery images were
+		// selected and zipped with the new images, producing wrong associations).
+		if err := database.DB.CreateInBatches(imagesWithoutAssoc, 100).Error; err != nil {
 			logger.Errorf("Failed to bulk insert images: %v", err)
 		} else {
-			// Get the IDs of inserted images
-			var insertedIDs []uint
-			database.DB.Model(&models.Image{}).Where("gallery_id = ?", gallery.ID).Pluck("id", &insertedIDs)
-
-			logger.Infof("Successfully inserted %d images", len(insertedIDs))
+			logger.Infof("Successfully inserted %d images", len(imagesWithoutAssoc))
 
 			// Enqueue embedding + derived tag work for any newly added images.
 			if n := EnqueueMissingEmbeddings(); n > 0 {
 				logger.Debugf("Enqueued embs for %d new images after crawl", n)
 			}
 
-			// Now update the M2M associations using raw SQL for performance
-			if len(insertedIDs) > 0 {
+			// Now update the M2M associations using raw SQL for performance.
+			// imagesWithoutAssoc[i].ID is populated by CreateInBatches, so we pair
+			// each newly inserted image with its galleries unambiguously.
+			if len(imagesWithoutAssoc) > 0 {
 				var valueStrings []string
 				var valueArgs []interface{}
 
-				// Guard against mismatched lengths between insertedIDs and imagesToInsert.
-				// A mismatch can happen if other rows exist in the DB or the select returned
-				// more rows than we inserted. Use the smaller length and log a warning.
-				pairCount := len(insertedIDs)
-				if pairCount > len(imagesToInsert) {
-					logger.Warnf("Mismatch between inserted IDs (%d) and imagesToInsert (%d); truncating associations to %d", len(insertedIDs), len(imagesToInsert), len(imagesToInsert))
-					pairCount = len(imagesToInsert)
-				}
-
-				for i := 0; i < pairCount; i++ {
-					imgID := insertedIDs[i]
+				for i := 0; i < len(imagesWithoutAssoc); i++ {
+					imgID := imagesWithoutAssoc[i].ID
 					for _, g := range imagesToInsert[i].Galleries {
 						valueStrings = append(valueStrings, "(?, ?)")
 						valueArgs = append(valueArgs, imgID, g.ID)
 					}
 				}
 
-				// Chunked insert to avoid SQLite variable limit
+				// Chunked insert to avoid SQL variable limit
 				const chunkSize = 400
 				totalAssocs := len(valueStrings)
 				if totalAssocs > 0 {
@@ -607,7 +586,7 @@ func CrawlSource(sourceID uint) error {
 							logger.Warnf("Failed to batch associate images chunk: %v", err)
 						}
 					}
-					logger.Infof("Successfully associated %d images with galleries", len(insertedIDs))
+					logger.Infof("Successfully associated %d images with galleries", len(imagesWithoutAssoc))
 				}
 			}
 		}

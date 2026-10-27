@@ -91,8 +91,51 @@ func Migrate() {
 	}
 	logger.Info("Database migrated successfully")
 
+	if err := migratePlayboyProviderAliases(); err != nil {
+		logger.Fatal("Failed to migrate Playboy provider aliases:", err)
+	}
+
 	addPersonGalleriesIndex()
 	addPersonScanQueueIndexes()
+}
+
+func migratePlayboyProviderAliases() error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var aliases []models.PersonProviderAlias
+		if err := tx.Where("LOWER(provider) = ?", "playboy").Find(&aliases).Error; err != nil {
+			return err
+		}
+
+		personIDs := make(map[uint]bool)
+		for _, alias := range aliases {
+			personIDs[alias.PersonID] = true
+		}
+
+		for personID := range personIDs {
+			var playboyPlusCount int64
+			if err := tx.Model(&models.PersonProviderAlias{}).
+				Where("person_id = ? AND LOWER(provider) = ?", personID, "playboyplus").
+				Count(&playboyPlusCount).Error; err != nil {
+				return err
+			}
+
+			if playboyPlusCount > 0 {
+				if err := tx.Where("person_id = ? AND LOWER(provider) = ?", personID, "playboy").
+					Delete(&models.PersonProviderAlias{}).Error; err != nil {
+					return err
+				}
+				continue
+			}
+
+			if err := tx.Model(&models.PersonProviderAlias{}).
+				Where("person_id = ? AND LOWER(provider) = ?", personID, "playboy").
+				Update("provider", "playboyplus").Error; err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
 }
 
 // addPersonScanQueueIndexes helps the dashboard "missing galleries" attention
@@ -192,6 +235,10 @@ func Shutdown() {
 		logger.Errorf("Failed to get underlying sql.DB for shutdown: %v", err)
 		return
 	}
+
+	// Set max open conns to 0 to prevent new connections
+	sqlDB.SetMaxOpenConns(0)
+	sqlDB.SetMaxIdleConns(-1)
 
 	if err := sqlDB.Close(); err != nil {
 		logger.Errorf("Failed to close database connection: %v", err)

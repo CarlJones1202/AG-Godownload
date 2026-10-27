@@ -28,7 +28,7 @@ import {
 import { cn } from '@/lib/utils';
 
 const PROVIDER_OPTIONS = [
-  "MetArt", "MetartX", "Playboy", "PlayboyPlus", "Vixen",
+  "MetArt", "MetartX", "PlayboyPlus", "Vixen",
   "SexArt", "LifeErotic", "EternalDesire", "MPLStudios",
   "VivThomas", "WowGirls", "RylskyArt",
 ];

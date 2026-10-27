@@ -180,6 +180,7 @@ func main() {
 
 	// Provider alias routes
 	r.GET("/people/:id/provider-aliases", handlers.GetProviderAliases)
+	r.GET("/people/:id/provider-alias-suggestions", handlers.SuggestProviderAliases)
 	r.POST("/people/:id/provider-aliases", handlers.CreateProviderAlias)
 	r.DELETE("/people/:id/provider-aliases/:aliasId", handlers.DeleteProviderAlias)
 

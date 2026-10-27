@@ -1,10 +1,18 @@
 import json
+import signal
 import sys
 import traceback
 
 import numpy as np
 import onnxruntime as ort
 from PIL import Image, ImageOps
+
+# The Go parent owns this process's lifecycle (it closes our stdin to end the
+# loop, or kills us). Ignore console Ctrl+C: on Windows a single Ctrl+C is
+# delivered to every process attached to the console, so without this the API's
+# shutdown signal raises KeyboardInterrupt here mid-request and prints a
+# traceback while the Go side is still waiting for a response.
+signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 IMAGE_SIZE = 224
 OUTPUT_DIM = 768

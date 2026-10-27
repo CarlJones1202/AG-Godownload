@@ -331,37 +331,64 @@ func DeleteGallery(c *gin.Context) {
 	deleteImages := c.Query("delete_images") == "true"
 
 	var gallery models.Gallery
-	// Only load filenames if we're deleting images
-	if deleteImages {
-		if err := database.DB.Preload("Images", func(db *gorm.DB) *gorm.DB {
-			return db.Select("id", "gallery_id", "filename")
-		}).First(&gallery, id).Error; err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Gallery not found"})
-			return
-		}
-	} else {
-		if err := database.DB.First(&gallery, id).Error; err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Gallery not found"})
-			return
-		}
+	if err := database.DB.First(&gallery, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Gallery not found"})
+		return
 	}
 
-	if deleteImages {
-		// Delete all images in this gallery
-		for _, image := range gallery.Images {
-			imagePath := filepath.Join(services.UploadsDir, image.Filename)
-			services.DeleteFile(imagePath)
-			thumbnailPath := filepath.Join(services.UploadsDir, "thumbnails", image.Filename)
-			services.DeleteFile(thumbnailPath)
-		}
-		// Delete image records
-		database.DB.Where("gallery_id = ?", id).Delete(&models.Image{})
+	type orphanedImage struct {
+		ID       uint
+		Filename string
 	}
+	var orphaned []orphanedImage
+	err = database.DB.Transaction(func(tx *gorm.DB) error {
+		if deleteImages {
+			if err := tx.Table("images").
+				Select("images.id, images.filename").
+				Joins("JOIN image_galleries ig ON ig.image_id = images.id").
+				Where("ig.gallery_id = ?", id).
+				Group("images.id, images.filename").
+				Having("COUNT(*) = 1").
+				Find(&orphaned).Error; err != nil {
+				return err
+			}
+		}
 
-	// Delete gallery
-	if err := database.DB.Delete(&gallery).Error; err != nil {
+		// Remove the gallery's junction rows regardless of whether its images
+		// are retained. The deprecated images.gallery_id column is not reliable.
+		if err := tx.Exec("DELETE FROM image_galleries WHERE gallery_id = ?", id).Error; err != nil {
+			return err
+		}
+		if deleteImages && len(orphaned) > 0 {
+			orphanedIDs := make([]uint, 0, len(orphaned))
+			for _, image := range orphaned {
+				orphanedIDs = append(orphanedIDs, image.ID)
+			}
+			if err := tx.Where(
+				"id IN ? AND NOT EXISTS (SELECT 1 FROM image_galleries ig WHERE ig.image_id = images.id)",
+				orphanedIDs,
+			).Delete(&models.Image{}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Delete(&gallery).Error
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete gallery"})
 		return
+	}
+
+	if deleteImages {
+		for _, image := range orphaned {
+			imagePath := filepath.Join(services.UploadsDir, image.Filename)
+			if err := services.DeleteFile(imagePath); err != nil {
+				logger.Warnf("Failed to delete orphaned gallery image %s: %v", imagePath, err)
+			}
+			thumbnailPath := filepath.Join(services.UploadsDir, "thumbnails", image.Filename)
+			if err := services.DeleteFile(thumbnailPath); err != nil {
+				logger.Warnf("Failed to delete orphaned gallery thumbnail %s: %v", thumbnailPath, err)
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Gallery deleted successfully"})

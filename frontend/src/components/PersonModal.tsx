@@ -6,7 +6,7 @@ import { Badge, Button, Input, Spinner } from '@/components/UI';
 import { X, Search, Info, User, Calendar, MapPin, Maximize2, Weight, Palette, Fingerprint, Check } from 'lucide-react';
 
 const PROVIDER_LIST = [
-  "MetArt", "MetartX", "Playboy", "PlayboyPlus", "Vixen",
+  "MetArt", "MetartX", "PlayboyPlus", "Vixen",
   "SexArt", "LifeErotic", "EternalDesire", "MPLStudios",
   "VivThomas", "WowGirls", "RylskyArt",
 ];

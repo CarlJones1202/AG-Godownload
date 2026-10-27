@@ -17,6 +17,12 @@ func newCollector(targetURL string) *colly.Collector {
 	c.SetRequestTimeout(60 * time.Second)
 	c.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0"
 
+	// Colly discards Set-Cookie headers unless a cookie jar is installed. Hosts
+	// such as imagetwist and imx.to require session cookies obtained from a prior
+	// page visit, so every collector gets a jar.
+	jar, _ := cookiejar.New(nil)
+	c.SetCookieJar(jar)
+
 	// Use WireGuard for blocked domains
 	if ShouldUseWireGuard(targetURL) {
 		dialer, err := GetWireGuardDialer()
@@ -222,6 +228,14 @@ func RipImx(src string) (string, error) {
 func RipTurboImg(src string) (string, error) {
 	logger.Debugf("Starting RipTurboImg for %s", src)
 	c := newCollector(src)
+	// TurboImageHost returns 403 Forbidden for page visits without a Referer
+	// header (hotlink/bot protection), regardless of User-Agent. A forum or
+	// self-referer both pass.
+	c.OnRequest(func(r *colly.Request) {
+		r.Headers.Set("Referer", src)
+		r.Headers.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+		r.Headers.Set("Accept-Language", "en-US,en;q=0.9")
+	})
 	c.OnResponse(func(r *colly.Response) {
 		logger.Debugf("RipTurboImg response for %s: Status %d", r.Request.URL.String(), r.StatusCode)
 	})

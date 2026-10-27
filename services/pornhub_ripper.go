@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"gallery_api/config"
 	"gallery_api/logger"
 	"io"
 	"net/http"
@@ -20,13 +21,71 @@ type PornhubMediaDefinition struct {
 	VideoUrl       string          `json:"videoUrl"`
 }
 
+// extractFlashvarsJSON locates a `var flashvars_<id> = {...};` assignment and
+// returns the balanced JSON object text. Brace depth is tracked (respecting
+// string literals) so nested structures such as mediaDefinitions are captured
+// in full instead of being cut off at the first `}`.
+func extractFlashvarsJSON(body string) string {
+	key := "var flashvars_"
+	start := 0
+	for {
+		idx := strings.Index(body[start:], key)
+		if idx < 0 {
+			return ""
+		}
+		idx += start
+		eq := strings.IndexByte(body[idx+len(key):], '=')
+		if eq < 0 {
+			start = idx + len(key)
+			continue
+		}
+		eq += idx + len(key)
+		brace := strings.IndexByte(body[eq+1:], '{')
+		if brace < 0 {
+			start = eq + 1
+			continue
+		}
+		brace += eq + 1
+
+		depth := 0
+		inString := false
+		esc := false
+		for i := brace; i < len(body); i++ {
+			c := body[i]
+			if inString {
+				if esc {
+					esc = false
+				} else if c == '\\' {
+					esc = true
+				} else if c == '"' {
+					inString = false
+				}
+				continue
+			}
+			switch c {
+			case '"':
+				inString = true
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					return body[brace : i+1]
+				}
+			}
+		}
+		// Unbalanced object; try the next flashvars occurrence.
+		start = brace + 1
+	}
+}
+
 // RipPornhub extracts the highest quality video URL from a Pornhub page
 func RipPornhub(url string) (string, string, error) {
 	logger.Infof("Attempting to rip Pornhub video from: %s", url)
 
 	// 1. Fetch the page
 	// We need a proper User-Agent to avoid being blocked or served partial content
-	client := &http.Client{}
+	client := &http.Client{Timeout: config.Global.HTTPRequestTimeout}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create request: %w", err)
@@ -50,41 +109,32 @@ func RipPornhub(url string) (string, string, error) {
 	bodyString := string(bodyBytes)
 
 	// 2. Extract Flashvars
-	// Pattern: var flashvars_\d+ = {...};
-	// We look for the variable assignment	// Try to find the flashvars_{video_id} JavaScript variable
-	// Pattern: var flashvars_449554261 = {...};
-	flashvarsPattern := regexp.MustCompile(`var\s+flashvars_\d+\s*=\s*(\{.+?\});`)
-	matches := flashvarsPattern.FindStringSubmatch(bodyString)
-
-	var flashvarsJSON string
-	if len(matches) > 1 {
-		flashvarsJSON = matches[1]
-		logger.Debugf("Found flashvars JavaScript variable")
-	} else {
-		// Fallback: try older patterns
+	// Pornhub embeds flashvars as `var flashvars_<id> = {...};` where the object
+	// contains nested structures (e.g. mediaDefinitions). A non-greedy regex
+	// stops at the first `}`, so we extract by balancing braces instead.
+	jsonContent := extractFlashvarsJSON(bodyString)
+	if jsonContent == "" {
+		// Fallback: older / simpler page layouts
 		patterns := []string{
-			`flashvars\s*=\s*(\{[^;]+\});`,
-			`"mediaDefinitions":\s*(\[[^\]]+\])`,
+			`flashvars\s*=\s*(\{.*\});`,
+			`"mediaDefinitions":\s*(\[.*\])`,
 		}
-
 		for _, pattern := range patterns {
 			re := regexp.MustCompile(pattern)
-			fallbackMatches := re.FindStringSubmatch(bodyString)
-			if len(fallbackMatches) > 1 {
-				flashvarsJSON = fallbackMatches[1]
+			if matches := re.FindStringSubmatch(bodyString); len(matches) > 1 {
+				jsonContent = matches[1]
 				logger.Debugf("Found flashvars with fallback pattern: %s", pattern)
 				break
 			}
 		}
 	}
 
-	if flashvarsJSON == "" {
+	if jsonContent == "" {
 		// DEBUG: Save the failed HTML to a file for inspection
 		os.WriteFile("last_failed_pornhub.html", []byte(bodyString), 0644)
 		logger.Errorf("Failed to find flashvars. Saved page content to last_failed_pornhub.html")
 		return "", "", fmt.Errorf("could not find flashvars in page content")
 	}
-	jsonContent := flashvarsJSON
 
 	// 3. Parse JSON
 	type FlashVars struct {
