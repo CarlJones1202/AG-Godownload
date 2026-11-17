@@ -147,43 +147,10 @@ func CrawlSource(sourceID uint) error {
 	}
 	fragment := u.Fragment
 
-	var selection *goquery.Selection
-	if strings.HasPrefix(fragment, "post") {
-		postID := strings.TrimPrefix(fragment, "post")
-		logger.Debugf("Crawling specific post ID: %s", postID)
-		selection = doc.Find(fmt.Sprintf("div[id='post_message_%s']", postID))
-	} else if strings.Contains(source.Location, "jkforum.net") {
-		logger.Debug("Crawling jkforum.net")
-		// For newer JKF (Nuxt), we might need to look for article or content divs
-		selection = doc.Find("article, div.article-content, div.post-content, div[id^='post_message_']")
-		if selection.Length() == 0 {
-			logger.Debug("No specific post container found, falling back to body")
-			selection = doc.Find("body")
-		}
-	} else if strings.Contains(source.Location, "kitty-kats.net") {
-		logger.Debug("Crawling kitty-kats.net")
-		// XenForo forum structure: posts are in article.message--post
-		// target the message body wrapper where BBCode content and image links live
-		selection = doc.Find("article.message--post .message-userContent .bbWrapper")
-		if selection.Length() == 0 {
-			logger.Debug("No kitty-kats specific container found, falling back to first post")
-			selection = doc.Find("div[id^='post_message_']").First()
-		}
-	} else {
-		logger.Debug("Crawling first post only")
-		selection = doc.Find("div[id^='post_message_']").First()
-	}
+	selection := selectSourcePost(doc, source.Location, fragment)
 
 	// Pre-count total items to download for progress tracking
-	totalImageLinks := 0
-	selection.Each(func(i int, s *goquery.Selection) {
-		s.Find("a img").Each(func(j int, img *goquery.Selection) {
-			if img.AttrOr("alt", "") == "View Post" {
-				return
-			}
-			totalImageLinks++
-		})
-	})
+	totalImageLinks := countPostImageLinks(selection)
 
 	// Initialize progress tracking
 	database.DB.Model(&source).Updates(map[string]interface{}{

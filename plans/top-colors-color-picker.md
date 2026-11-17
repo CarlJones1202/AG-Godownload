@@ -1,6 +1,6 @@
 # Top-16 Colors + Color Picker for Image Color Search
 
-**Status:** In progress
+**Status:** Completed (2026-11-17)
 
 ## Problem & Intended Outcome
 
@@ -105,4 +105,44 @@ input; clicking a swatch runs the similarity search for that color.
 
 ## Validation
 
-- _pending_
+Completed 2026-11-17. All 8 implementation steps done.
+
+**Backend tests** (new, all PASS):
+- `services/color_top_test.go`: `TestTopDominantColorsRanksDedupesAndAverages`
+  (bucket merge, per-image dedupe, malformed/invalid/NULL/empty/`[]` skipping,
+  ranking, member-average color), `TestTopDominantColorsLimitAndTieBreak`
+  (limit, tie-break, default/oversized limits),
+  `TestTopDominantColorsSingleQuery` (sqlCounter proves exactly 1 statement),
+  `TestTopDominantColorsEmptyLibrary` (`[]` not `null`),
+  `TestColorBucketKeyQuantizesTo16Shades` (packing + boundaries).
+- `handlers/color_top_test.go`: `TestGetTopColorsClampsLimit` (default 16,
+  clamp 1–64, unparsable/non-positive → default, `#RRGGBB` + positive count on
+  every entry, 70-seed DB), `TestGetTopColorsEmptyLibrary` (200 + body `[]`).
+- Shared helpers `setupRecoveryTestDB`/`seedImages` widened to `testing.TB`
+  (benchmark reuse); `file_exists_service_test.go` re-verified CLEAN.
+
+**Commands run:**
+- `go vet ./...` → exit 0.
+- `go test ./... -count=1` → PASS (database, handlers, services).
+- `gofmt` modulo CRLF on all 6 touched Go files → clean (verified by byte
+  comparison of `gofmt` output vs file with line endings normalized; the repo
+  is CRLF and `gofmt -l` flags ~100 pre-existing files, so a raw `-l` is not
+  the signal here).
+- Frontend `npx tsc -b` → exit 0.
+- `npx eslint` on touched files → only pre-existing `no-explicit-any` errors
+  (api.ts:115/286, ImagesPage.tsx:37/70, types/index.ts:211) and the
+  pre-existing `displayImages` exhaustive-deps warnings — all on untouched
+  lines; project-wide baseline is 28 such errors, none introduced by this
+  change (new code contains no `any`).
+
+**Benchmark** (`go test ./services/ -run XXX -bench BenchmarkTopDominantColors
+-benchtime=50x -count=3`, 2000 images × 5 colors, AMD Ryzen 7 7700X):
+6.17 ms / 4.17 ms / 8.24 ms per op (median ≈ 6.2 ms). Far below the
+multi-hundred-ms threshold in Risks — no server-side cache needed; client
+`staleTime` (5 min) bounds request frequency as planned.
+
+**Acceptance criteria:** all 7 met (endpoint shape/ordering/empty behavior,
+bucket merge + dedupe, invalid-row tolerance, single-query proof, swatch row
++ picker + immediate swatch search + active highlight + fill-only picker,
+design-system compliance with real buttons/`aria-label`/`aria-pressed`/2px
+accent focus ring, full validation above).

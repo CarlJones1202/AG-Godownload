@@ -31,11 +31,11 @@ func TestTopDominantColorsRanksDedupesAndAverages(t *testing.T) {
 	seedImages(t, []models.Image{
 		{Filename: "src/a.jpg", Type: "image", DominantColors: mustPalette(t, "#FF0000", "#FE0101", "#00FF00")},
 		{Filename: "src/b.jpg", Type: "image", DominantColors: mustPalette(t, "#FF0000")},
-		{Filename: "src/c.jpg", Type: "image", DominantColors: "not-json"},          // malformed palette: skipped
+		{Filename: "src/c.jpg", Type: "image", DominantColors: "not-json"},                // malformed palette: skipped
 		{Filename: "src/d.jpg", Type: "image", DominantColors: mustPalette(t, "#ZZZZZZ")}, // invalid hex: skipped
-		{Filename: "src/e.jpg", Type: "image", DominantColors: ""},                  // empty: excluded by query
-		{Filename: "src/f.jpg", Type: "image", DominantColors: "[]"},                // empty array: excluded by query
-		{Filename: "src/g.jpg", Type: "image"},                                      // NULL: excluded by query
+		{Filename: "src/e.jpg", Type: "image", DominantColors: ""},                        // empty: excluded by query
+		{Filename: "src/f.jpg", Type: "image", DominantColors: "[]"},                      // empty array: excluded by query
+		{Filename: "src/g.jpg", Type: "image"},                                            // NULL: excluded by query
 	})
 	if err := database.DB.Exec("UPDATE images SET dominant_colors = NULL WHERE filename = ?", "src/g.jpg").Error; err != nil {
 		t.Fatalf("failed to null out dominant_colors: %v", err)

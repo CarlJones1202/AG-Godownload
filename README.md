@@ -43,6 +43,31 @@ when the server starts again. The wait can last as long as the current source
 takes; keep PostgreSQL running until the server reports that shutdown is
 complete.
 
+### Recover a gallery with missing photos
+
+If a crawl was interrupted and its gallery may be incomplete, inspect one
+gallery and queue its source again when the saved photo count differs from the
+count found in the source post:
+
+```powershell
+go run ./cmd/recover-source -gallery-id 123
+```
+
+To audit all galleries with an HTTP(S) source, use:
+
+```powershell
+go run ./cmd/recover-source -all
+```
+
+The command reports both counts and persists a queued status only when they
+differ, then asks the running server to start the crawl immediately. Keep the
+server running and use the same database configuration as the server. By
+default, the command contacts `http://localhost:<PORT>` using the configured
+`PORT`; use `-server-url` if the API is hosted elsewhere. Batch audits run
+sequentially; galleries without an HTTP(S) source are skipped, and a failure
+for one gallery does not stop the rest. If a live request fails, its queued
+status remains persisted for the next server startup.
+
 ### ThePornDB provider aliases
 
 Set `TPDB_API_KEY` in the server process environment or local `.env`, then

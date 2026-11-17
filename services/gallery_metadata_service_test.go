@@ -54,6 +54,61 @@ func TestIsGalleryResultExcludesMovieURLs(t *testing.T) {
 	}
 }
 
+func TestFindBestPersonFromSearchForRequiresExactNormalizedName(t *testing.T) {
+	tests := []struct {
+		name  string
+		root  interface{}
+		alias string
+		want  bool
+	}{
+		{
+			name:  "exact person",
+			root:  []interface{}{map[string]interface{}{"name": "Lily Chey", "url": "/models/lily-chey"}},
+			alias: "Lily Chey",
+			want:  true,
+		},
+		{
+			name:  "punctuation variant",
+			root:  []interface{}{map[string]interface{}{"name": "Lily Chey", "url": "/models/lily-chey"}},
+			alias: "Lily-Chey",
+			want:  true,
+		},
+		{
+			name:  "longer name containing alias",
+			root:  []interface{}{map[string]interface{}{"name": "Lily Cheyenne", "url": "/models/lily-cheyenne"}},
+			alias: "Lily Chey",
+			want:  false,
+		},
+		{
+			name:  "similar name",
+			root:  []interface{}{map[string]interface{}{"name": "Lily Cher", "url": "/models/lily-cher"}},
+			alias: "Lily Chey",
+			want:  false,
+		},
+		{
+			name:  "gallery result is not a person page",
+			root:  []interface{}{map[string]interface{}{"name": "Lily Chey", "url": "/gallery/lily-chey"}},
+			alias: "Lily Chey",
+			want:  false,
+		},
+		{
+			name:  "non-person search URL is rejected",
+			root:  []interface{}{map[string]interface{}{"name": "Lily Chey", "url": "/search/lily-chey"}},
+			alias: "Lily Chey",
+			want:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, got := findBestPersonFromSearchFor(tt.root, tt.alias)
+			if got != tt.want {
+				t.Errorf("findBestPersonFromSearchFor() found person = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPlayboyPlusGalleryNameRequiresPersonInTitle(t *testing.T) {
 	galleryName, ok := PlayboyPlusGalleryName("Kate Jones in Exquisite Allure", "Kate Jones")
 	if !ok || galleryName != "Exquisite Allure" {

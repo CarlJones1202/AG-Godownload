@@ -19,7 +19,7 @@ func ShutdownChan() <-chan struct{} {
 }
 
 // StopWorkers signals background workers to exit and waits for active source
-// crawls to finish before the database is closed. Safe to call multiple times.
+// crawls to finish before the application exits. Safe to call multiple times.
 func StopWorkers() {
 	stopOnce.Do(func() {
 		StopTaskQueues()

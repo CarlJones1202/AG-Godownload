@@ -90,8 +90,8 @@ func TestGetTopColorsClampsLimit(t *testing.T) {
 		query string
 		want  int
 	}{
-		{"", 16},          // default
-		{"?limit=2", 2},   // explicit low limit
+		{"", 16},           // default
+		{"?limit=2", 2},    // explicit low limit
 		{"?limit=999", 64}, // clamped to 64
 		{"?limit=abc", 16}, // unparsable → default
 		{"?limit=0", 16},   // non-positive → default

@@ -223,10 +223,10 @@ func TopDominantColors(limit int) ([]TopColor, error) {
 	defer rows.Close()
 
 	type bucket struct {
-		imageCount int
-		sumR       int
-		sumG       int
-		sumB       int
+		imageCount  int
+		sumR        int
+		sumG        int
+		sumB        int
 		occurrences int
 	}
 	buckets := make(map[uint16]*bucket)

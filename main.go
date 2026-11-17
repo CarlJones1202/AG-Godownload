@@ -291,8 +291,5 @@ func main() {
 	// crawls to finish while the database is still available.
 	services.StopWorkers()
 
-	// Step 3: Close the database after all active source crawls have completed.
-	database.Shutdown()
-
 	logger.Info("Shutdown complete")
 }

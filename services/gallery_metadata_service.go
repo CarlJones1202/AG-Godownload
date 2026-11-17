@@ -1405,12 +1405,7 @@ func searchMPLStudios(query string) ([]GallerySearchResult, error) {
 	// First, try the site search endpoint that returns nested arrays containing person results
 	// Example: https://www.mplstudios.com/searchFor/?value={{ALIAS}}
 	searchForURL := fmt.Sprintf("https://www.mplstudios.com/searchFor/?value=%s", url.QueryEscape(query))
-	candidates := []string{
-		searchForURL,
-		fmt.Sprintf("https://www.mplstudios.com/api/search?query=%s", url.QueryEscape(query)),
-		fmt.Sprintf("https://www.mplstudios.com/search?query=%s", url.QueryEscape(query)),
-		fmt.Sprintf("https://www.mplstudios.com/galleries?search=%s", url.QueryEscape(query)),
-	}
+	candidates := []string{searchForURL}
 
 	var results []GallerySearchResult
 
@@ -1446,37 +1441,6 @@ func searchMPLStudios(query string) ([]GallerySearchResult, error) {
 			// Try to parse JSON (it's typically an array of arrays)
 			var root interface{}
 			if err := json.Unmarshal(bodyBytes, &root); err == nil {
-				// This endpoint frequently returns gallery search results in root[1]
-				// Parse galleries directly from the searchFor response first (gallery search)
-				if rootArr, ok := root.([]interface{}); ok && len(rootArr) > 1 {
-					if galleryGroups, ok := rootArr[1].([]interface{}); ok && len(galleryGroups) > 0 {
-						if firstGroup, ok := galleryGroups[0].([]interface{}); ok {
-							for gi, entry := range firstGroup {
-								if entArr, ok := entry.([]interface{}); ok && len(entArr) > 2 {
-									titleRaw := fmt.Sprintf("%v", entArr[2])
-									urlRaw := fmt.Sprintf("%v", entArr[1])
-									thumbRaw := fmt.Sprintf("%v", entArr[0])
-									titleClean := stripHTML(titleRaw)
-									urlClean := urlRaw
-									if !strings.HasPrefix(urlClean, "http") {
-										if strings.HasPrefix(urlClean, "/") {
-											urlClean = "https://www.mplstudios.com" + urlClean
-										} else {
-											urlClean = "https://www.mplstudios.com/" + urlClean
-										}
-									}
-									results = append(results, GallerySearchResult{Provider: "MPLStudios", Title: titleClean, URL: urlClean, Thumbnail: thumbRaw})
-									logger.Debugf("[MPLStudios] parsed gallery candidate from searchFor %d: title=%s url=%s", gi, titleClean, urlClean)
-								}
-							}
-							if len(results) > 0 {
-								logger.Infof("[MPLStudios] parsed %d galleries directly from searchFor response", len(results))
-								return results, nil
-							}
-						}
-					}
-				}
-
 				if href, name, ok := findBestPersonFromSearchFor(root, query); ok {
 					logger.Infof("[MPLStudios] searchFor matched person '%s' -> %s", name, href)
 					// Build full person URL if necessary
@@ -1578,37 +1542,7 @@ func searchMPLStudios(query string) ([]GallerySearchResult, error) {
 						logger.Warnf("[MPLStudios] no galleries found on person page %s", href)
 					}
 				} else {
-					logger.Debugf("[MPLStudios] searchFor did not find a person match for '%s'; attempting to parse galleries directly from searchFor response", query)
-					// The searchFor response can include galleries in the second element
-					if rootArr, ok := root.([]interface{}); ok && len(rootArr) > 1 {
-						if galleryGroups, ok := rootArr[1].([]interface{}); ok && len(galleryGroups) > 0 {
-							if firstGroup, ok := galleryGroups[0].([]interface{}); ok {
-								for gi, entry := range firstGroup {
-									if entArr, ok := entry.([]interface{}); ok && len(entArr) > 2 {
-										titleRaw := fmt.Sprintf("%v", entArr[2])
-										urlRaw := fmt.Sprintf("%v", entArr[1])
-										thumbRaw := fmt.Sprintf("%v", entArr[0])
-										titleClean := stripHTML(titleRaw)
-										urlClean := urlRaw
-										if !strings.HasPrefix(urlClean, "http") {
-											if strings.HasPrefix(urlClean, "/") {
-												urlClean = "https://www.mplstudios.com" + urlClean
-											} else {
-												urlClean = "https://www.mplstudios.com/" + urlClean
-											}
-										}
-										results = append(results, GallerySearchResult{Provider: "MPLStudios", Title: titleClean, URL: urlClean, Thumbnail: thumbRaw})
-										logger.Debugf("[MPLStudios] parsed gallery candidate from searchFor %d: title=%s url=%s", gi, titleClean, urlClean)
-									}
-								}
-								if len(results) > 0 {
-									logger.Infof("[MPLStudios] parsed %d galleries directly from searchFor response", len(results))
-									return results, nil
-								}
-							}
-						}
-					}
-					logger.Debugf("[MPLStudios] no direct galleries found in searchFor response for '%s'", query)
+					logger.Debugf("[MPLStudios] searchFor did not find an exact person match for '%s'", query)
 				}
 			} else {
 				logger.Debugf("[MPLStudios] searchFor response not JSON: %v", err)
@@ -1715,115 +1649,19 @@ func searchMPLStudios(query string) ([]GallerySearchResult, error) {
 					logger.Debugf("[MPLStudios] extractJSONFromHTML failed: %v", exErr)
 				}
 			}
-			// Continue to other candidates if person lookup didn't yield galleries
-		}
-
-		// If JSON, try to parse expected shapes
-		var js map[string]interface{}
-		if err := json.Unmarshal(bodyBytes, &js); err == nil {
-			logger.Debugf("[MPLStudios] parsed JSON keys: %v", keysOf(js))
-			// Try common shapes: data.items or results
-			found := 0
-			if data, ok := js["data"].(map[string]interface{}); ok {
-				if items, ok := data["items"].([]interface{}); ok {
-					for _, it := range items {
-						if m, ok := it.(map[string]interface{}); ok {
-							title := fmt.Sprintf("%v", m["title"])
-							path := fmt.Sprintf("%v", m["url"])
-							thumb := fmt.Sprintf("%v", m["thumbnail"])
-							date := fmt.Sprintf("%v", m["release_date"])
-							if !strings.HasPrefix(path, "http") {
-								path = "https://www.mplstudios.com" + path
-							}
-							results = append(results, GallerySearchResult{Provider: "MPLStudios", Title: title, URL: path, Thumbnail: thumb, ReleaseDate: date})
-							found++
-						}
-					}
-				}
-			}
-			// Some endpoints return {results: [...]}
-			if resultsArr, ok := js["results"].([]interface{}); ok {
-				for _, it := range resultsArr {
-					if m, ok := it.(map[string]interface{}); ok {
-						title := fmt.Sprintf("%v", m["title"])
-						path := fmt.Sprintf("%v", m["url"])
-						thumb := fmt.Sprintf("%v", m["thumbnail"])
-						date := fmt.Sprintf("%v", m["release_date"])
-						if !strings.HasPrefix(path, "http") {
-							path = "https://www.mplstudios.com" + path
-						}
-						results = append(results, GallerySearchResult{Provider: "MPLStudios", Title: title, URL: path, Thumbnail: thumb, ReleaseDate: date})
-						found++
-					}
-				}
-			}
-
-			logger.Infof("[MPLStudios] JSON parsing found %d items in candidate %d", found, idx)
-			if len(results) > 0 {
-				return results, nil
-			}
-		} else {
-			logger.Debugf("[MPLStudios] response from %s is not JSON: %v", apiURL, err)
-		}
-
-		// Fallback: parse HTML for links
-		doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(bodyBytes)))
-		if err != nil {
-			logger.Warnf("[MPLStudios] failed to parse HTML from %s: %v", apiURL, err)
+			// Search-result galleries are not person-specific, so only accept galleries
+			// parsed from an exact matched person's page above.
 			continue
-		}
-
-		anchors := doc.Find("a[href*='/gallery/'], a[href*='/galleries/']")
-		logger.Infof("[MPLStudios] candidate %d: found %d anchor(s) matching gallery pattern", idx, anchors.Length())
-		// Log first few hrefs for inspection
-		anchors.EachWithBreak(func(i int, s *goquery.Selection) bool {
-			if i >= 10 {
-				return false
-			}
-			href, _ := s.Attr("href")
-			text := strings.TrimSpace(s.Text())
-			logger.Debugf("[MPLStudios] anchor %d -> href=%s text=%s", i, href, text)
-			return true
-		})
-
-		anchors.Each(func(i int, s *goquery.Selection) {
-			href, _ := s.Attr("href")
-			text := strings.TrimSpace(s.Text())
-			// thumbnail may be in img child
-			thumb := ""
-			if img := s.Find("img"); img.Length() > 0 {
-				if src, ok := img.Attr("src"); ok {
-					thumb = src
-				}
-			}
-			if href != "" {
-				if !strings.HasPrefix(href, "http") {
-					if strings.HasPrefix(href, "/") {
-						href = "https://www.mplstudios.com" + href
-					} else {
-						href = "https://www.mplstudios.com/" + href
-					}
-				}
-				results = append(results, GallerySearchResult{Provider: "MPLStudios", Title: text, URL: href, Thumbnail: thumb})
-			}
-		})
-
-		if len(results) > 0 {
-			logger.Infof("[MPLStudios] candidate %d produced %d HTML results", idx, len(results))
-			return results, nil
 		}
 	}
 
 	return nil, fmt.Errorf("no results from MPLStudios search")
 }
 
-// findBestPersonFromSearchFor inspects the nested array response from /searchFor/
-// and returns the href and display name for the best matching person if found.
-// The response is often an array of arrays where each inner item contains
-// ["type", "name", "url", ...] or similar shapes. We search for values
-// that look like person entries and pick the one whose name best matches alias.
+// findBestPersonFromSearchFor returns a person only when the normalized name
+// exactly matches the requested alias.
 func findBestPersonFromSearchFor(root interface{}, alias string) (href string, name string, ok bool) {
-	aliasLower := strings.ToLower(alias)
+	normalizedAlias := normalizeGalleryName(alias)
 	var candidates []struct {
 		href  string
 		name  string
@@ -1854,15 +1692,10 @@ func findBestPersonFromSearchFor(root interface{}, alias string) (href string, n
 							candidateName = t
 						}
 					}
-					if candidateHref != "" && candidateName != "" {
+					if candidateName != "" && isMPLPersonHref(candidateHref) {
 						score := 0
-						lname := strings.ToLower(candidateName)
-						if strings.EqualFold(candidateName, alias) || strings.Contains(aliasLower, strings.ToLower(candidateName)) || strings.Contains(lname, aliasLower) {
+						if normalizedAlias != "" && normalizeGalleryName(candidateName) == normalizedAlias {
 							score += 10
-						}
-						// fuzzy length similarity
-						if levenshteinLenClose(aliasLower, strings.ToLower(candidateName)) {
-							score += 5
 						}
 						candidates = append(candidates, struct {
 							href, name string
@@ -1880,8 +1713,7 @@ func findBestPersonFromSearchFor(root interface{}, alias string) (href string, n
 			if n, ok := v["name"].(string); ok {
 				if u, ok2 := v["url"].(string); ok2 {
 					score := 0
-					lname := strings.ToLower(n)
-					if strings.Contains(lname, aliasLower) || strings.EqualFold(n, alias) {
+					if normalizedAlias != "" && normalizeGalleryName(n) == normalizedAlias && isMPLPersonHref(u) {
 						score += 10
 					}
 					candidates = append(candidates, struct {
@@ -1912,17 +1744,17 @@ func findBestPersonFromSearchFor(root interface{}, alias string) (href string, n
 	return "", "", false
 }
 
-// levenshteinLenClose is a lightweight heuristic: return true if lengths are within 3 and
-// there are at least 2 matching starting characters. This avoids importing heavy libs.
-func levenshteinLenClose(a, b string) bool {
-	if abs(len(a)-len(b)) > 3 {
+func isMPLPersonHref(href string) bool {
+	lowerHref := strings.ToLower(href)
+	if strings.Contains(lowerHref, "/gallery/") || strings.Contains(lowerHref, "/galleries/") {
 		return false
 	}
-	minLen := 2
-	if len(a) < minLen || len(b) < minLen {
-		return false
+	for _, path := range []string{"/model/", "/models/", "/performer/", "/performers/", "/person/", "/people/"} {
+		if strings.Contains(lowerHref, path) {
+			return true
+		}
 	}
-	return a[:2] == b[:2]
+	return false
 }
 
 func abs(x int) int {

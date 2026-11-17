@@ -135,7 +135,7 @@ export function ImagesPage() {
   };
 
   const validTypedColor = normalizeHexColor(colorSearch);
-  const pickerValue = validTypedColor || '#000000';
+  const pickerValue = (validTypedColor || '#000000').toLowerCase();
 
   const displayImages = activeColorSearch
     ? (colorResults?.data ?? [])

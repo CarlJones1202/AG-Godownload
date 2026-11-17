@@ -761,16 +761,21 @@ func CrawlSource(c *gin.Context) {
 		return
 	}
 
-	// Trigger crawl in background - route to video queue if applicable
 	var src models.Source
-	if err := database.DB.Select("location").First(&src, id).Error; err == nil {
-		if services.IsVideoURL(src.Location) || services.IsVideoFile(src.Location) {
-			services.AddToVideoQueue(uint(id))
-		} else {
-			services.AddToCrawlerQueue(uint(id))
-		}
+	if err := database.DB.Select("id, location").First(&src, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Source not found"})
+		return
+	}
+
+	if services.IsVideoURL(src.Location) || services.IsVideoFile(src.Location) {
+		err = services.QueueVideoSource(src.ID)
 	} else {
-		services.AddToCrawlerQueue(uint(id))
+		err = services.QueueCrawlerSource(src.ID)
+	}
+	if err != nil {
+		logger.Errorf("Failed to queue source %d from crawl endpoint: %v", src.ID, err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Failed to queue source"})
+		return
 	}
 
 	c.JSON(http.StatusAccepted, gin.H{"message": "Crawl started"})

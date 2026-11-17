@@ -379,7 +379,7 @@ The codebase has several good practices worth preserving:
 - Batched progress updates to reduce DB contention (`crawler_service.go`)
 - Batched image counts and first-image lookups (`gallery_handlers.go`, `person_handlers.go`)
 - Chunked 8 MB ranged video downloads with fallback (`video_ripper_service.go`)
-- Proper graceful shutdown (workers stop, HTTP drains, DB closes) (`main.go`)
+- Proper graceful shutdown (workers stop and HTTP drains; database remains running) (`main.go`)
 - Use of `sync.Map`, `sync.Cond`, `container/heap` for task queues (`worker_service.go`, `scan_queue_service.go`)
 
 ---

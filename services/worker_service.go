@@ -2,6 +2,7 @@ package services
 
 import (
 	"container/heap"
+	"fmt"
 	"gallery_api/config"
 	"gallery_api/database"
 	"gallery_api/logger"
@@ -101,43 +102,55 @@ var VideoTaskQueue = NewTaskQueue()
 var crawlerWorkerWG sync.WaitGroup
 
 func AddToCrawlerQueue(sourceID uint) {
+	if err := QueueCrawlerSource(sourceID); err != nil {
+		logger.Errorf("Failed to queue source %d for crawling: %v", sourceID, err)
+	}
+}
+
+func QueueCrawlerSource(sourceID uint) error {
 	var source models.Source
 	if err := database.DB.Select("id, priority").First(&source, sourceID).Error; err != nil {
-		logger.Errorf("Failed to find source %d for queueing: %v", sourceID, err)
-		return
+		return fmt.Errorf("find source: %w", err)
 	}
 
-	// Update status to queued
-	database.DB.Model(&source).Update("Status", "queued")
+	if err := database.DB.Model(&source).Update("Status", "queued").Error; err != nil {
+		return fmt.Errorf("mark source queued: %w", err)
+	}
 
 	if !CrawlerTaskQueue.Push(&CrawlerTask{
 		SourceID: source.ID,
 		Priority: source.Priority,
 	}) {
-		logger.Warnf("Crawler queue stopped; source %d remains queued for the next startup", sourceID)
-		return
+		return fmt.Errorf("crawler queue stopped; source remains queued for the next startup")
 	}
 	logger.Infof("Added source %d to crawler queue (priority %d)", sourceID, source.Priority)
+	return nil
 }
 
 func AddToVideoQueue(sourceID uint) {
+	if err := QueueVideoSource(sourceID); err != nil {
+		logger.Errorf("Failed to queue source %d for video crawling: %v", sourceID, err)
+	}
+}
+
+func QueueVideoSource(sourceID uint) error {
 	var source models.Source
 	if err := database.DB.Select("id, priority").First(&source, sourceID).Error; err != nil {
-		logger.Errorf("Failed to find source %d for video queueing: %v", sourceID, err)
-		return
+		return fmt.Errorf("find source: %w", err)
 	}
 
-	// Update status to queued
-	database.DB.Model(&source).Update("Status", "queued")
+	if err := database.DB.Model(&source).Update("Status", "queued").Error; err != nil {
+		return fmt.Errorf("mark source queued: %w", err)
+	}
 
 	if !VideoTaskQueue.Push(&CrawlerTask{
 		SourceID: source.ID,
 		Priority: source.Priority,
 	}) {
-		logger.Warnf("Video queue stopped; source %d remains queued for the next startup", sourceID)
-		return
+		return fmt.Errorf("video queue stopped; source remains queued for the next startup")
 	}
 	logger.Infof("Added source %d to video queue (priority %d)", sourceID, source.Priority)
+	return nil
 }
 
 // RequeuePendingCrawls restores queued and interrupted sources from the database.

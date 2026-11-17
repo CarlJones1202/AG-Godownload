@@ -323,30 +323,6 @@ func addImageIndexes() {
 	logger.Info("Added composite index idx_images_type_file_exists_deleted_created on images")
 }
 
-// Shutdown closes the database connection. PostgreSQL persists each committed
-// transaction to disk, so no explicit checkpoint is required on shutdown.
-func Shutdown() {
-	if DB == nil {
-		return
-	}
-	logger.Info("Database shutdown: closing connection pool...")
-	sqlDB, err := DB.DB()
-	if err != nil {
-		logger.Errorf("Failed to get underlying sql.DB for shutdown: %v", err)
-		return
-	}
-
-	// Set max open conns to 0 to prevent new connections
-	sqlDB.SetMaxOpenConns(0)
-	sqlDB.SetMaxIdleConns(-1)
-
-	if err := sqlDB.Close(); err != nil {
-		logger.Errorf("Failed to close database connection: %v", err)
-	} else {
-		logger.Info("Database connection closed cleanly")
-	}
-}
-
 func MigrateData() {
 	// Migrate existing one-to-many relationships to many-to-many
 	// We use raw SQL for performance and simplicity
