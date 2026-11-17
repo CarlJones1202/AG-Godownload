@@ -11,7 +11,7 @@ import (
 // vectors from different model versions are never mixed in the same index.
 type ImageEmbedding struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
-	ImageID   uint      `gorm:"uniqueIndex;index" json:"image_id"`
+	ImageID   uint      `gorm:"uniqueIndex" json:"image_id"`
 	Embedder  string    `gorm:"index" json:"embedder"`
 	Dimension int       `json:"dimension"`
 	Vector    []byte    `json:"-"` // raw float32 little-endian bytes (BYTEA / BLOB)

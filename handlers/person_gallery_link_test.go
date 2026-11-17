@@ -205,4 +205,28 @@ func TestGetAllMissingGalleriesOmitsLinkedResults(t *testing.T) {
 	if response.Data[0].GalleryName != "Desert Ride" {
 		t.Fatalf("remaining gallery = %q, want %q", response.Data[0].GalleryName, "Desert Ride")
 	}
+
+	for _, test := range []struct {
+		query string
+		want  int
+	}{
+		{query: "gel", want: 0},
+		{query: "des", want: 1},
+	} {
+		recorder = httptest.NewRecorder()
+		context, _ = gin.CreateTestContext(recorder)
+		context.Request = httptest.NewRequest("GET", fmt.Sprintf("/admin/missing-galleries?person_id=%d&q=%s", person.ID, test.query), nil)
+
+		GetAllMissingGalleries(context)
+
+		if recorder.Code != 200 {
+			t.Fatalf("search %q status = %d, want 200: %s", test.query, recorder.Code, recorder.Body.String())
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			t.Fatalf("failed to decode search %q response: %v", test.query, err)
+		}
+		if len(response.Data) != test.want {
+			t.Errorf("search %q result count = %d, want %d: %#v", test.query, len(response.Data), test.want, response.Data)
+		}
+	}
 }

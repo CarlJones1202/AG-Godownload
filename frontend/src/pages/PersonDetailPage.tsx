@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { people, admin } from '@/lib/api';
-import type { PersonScanResponse, TagSuggestion, NotWantedGallery } from '@/types';
+import { people, admin, images as imagesApi } from '@/lib/api';
+import type { Image, PersonScanResponse, TagSuggestion, NotWantedGallery } from '@/types';
 import {
   Badge,
   Button,
   Spinner,
   EmptyState,
   Input,
+  Pagination,
+  VideoThumb,
 } from '@/components/UI';
 import {
   ArrowLeft,
@@ -34,9 +36,12 @@ import {
   Check,
   ExternalLink,
   Camera,
+  Play,
 } from 'lucide-react';
 import { CoverGrid } from '@/components/CoverGrid';
 import { getScanGalleryName } from '@/lib/utils';
+import { usePagination } from '@/hooks/usePagination';
+import { VideoPlayer } from '@/components/VideoPlayer';
 
 const PROVIDER_LIST = [
   "MetArt", "MetartX", "PlayboyPlus", "Vixen",
@@ -71,6 +76,8 @@ export function PersonDetailPage() {
   const { id } = useParams<{ id: string }>();
   const personId = Number(id);
   const queryClient = useQueryClient();
+  const { page: videoPage, offset: videoOffset, limit: videoLimit, prevPage: prevVideoPage, nextPage: nextVideoPage } =
+    usePagination({ limit: 24, paramName: 'videosPage' });
 
   const [editing, setEditing] = useState(false);
   const [showTools, setShowTools] = useState(false);
@@ -82,7 +89,8 @@ export function PersonDetailPage() {
   const [autoTagResults, setAutoTagResults] = useState<TagSuggestion[]>([]);
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [autoTagMinConfidence, setAutoTagMinConfidence] = useState(0.6);
-  const [galleryTab, setGalleryTab] = useState<'galleries' | 'missing'>('galleries');
+  const [galleryTab, setGalleryTab] = useState<'galleries' | 'videos' | 'missing'>('galleries');
+  const [activeVideo, setActiveVideo] = useState<Image | null>(null);
   const [scanSource, setScanSource] = useState('MetArt');
   const [scanAlias, setScanAlias] = useState('');
   const [scanResults, setScanResults] = useState<PersonScanResponse | null>(null);
@@ -225,6 +233,17 @@ export function PersonDetailPage() {
     queryKey: ['person-images', personId],
     queryFn: () => people.profileImages(personId),
     enabled: profilePickerOpen,
+  });
+
+  const { data: personVideos, isLoading: loadingPersonVideos, isError: personVideosError } = useQuery({
+    queryKey: ['person-videos', personId, { offset: videoOffset, limit: videoLimit }],
+    queryFn: () => imagesApi.list({
+      filter_person: personId,
+      type: 'video',
+      limit: videoLimit,
+      offset: videoOffset,
+    }),
+    enabled: galleryTab === 'videos',
   });
 
   const setProfileImageMut = useMutation({
@@ -502,6 +521,10 @@ export function PersonDetailPage() {
             className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium transition-colors border-b-2 -mb-[1px] ${galleryTab === 'galleries' ? 'text-white border-blue-500' : 'text-zinc-500 border-transparent hover:text-zinc-300'}`}>
             <Layers size={14} /> Galleries <span className="text-[10px] text-zinc-500 ml-1">({galleryList.length})</span>
           </button>
+          <button onClick={() => setGalleryTab('videos')}
+            className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium transition-colors border-b-2 -mb-[1px] ${galleryTab === 'videos' ? 'text-white border-blue-500' : 'text-zinc-500 border-transparent hover:text-zinc-300'}`}>
+            <Play size={14} /> Videos <span className="text-[10px] text-zinc-500 ml-1">({personVideos?.meta.total_items ?? stats?.videos ?? 0})</span>
+          </button>
           <button onClick={() => setGalleryTab('missing')}
             className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium transition-colors border-b-2 -mb-[1px] ${galleryTab === 'missing' ? 'text-white border-blue-500' : 'text-zinc-500 border-transparent hover:text-zinc-300'}`}>
             <Search size={14} /> Missing Galleries
@@ -515,6 +538,39 @@ export function PersonDetailPage() {
             thumbnailPath: g.provider_thumbnail ? g.provider_thumbnail.replace(/\\/g, '/').split('/').pop() : g.images?.[0]?.filename,
             provider: g.provider ?? null, createdAt: g.created_at,
           }))} />
+        )}
+
+        {galleryTab === 'videos' && (
+          loadingPersonVideos ? <Spinner /> :
+          personVideosError ? <p role="alert" className="py-8 text-center text-sm text-red-400">Could not load this person's videos.</p> :
+          !personVideos || personVideos.data.length === 0 ? <EmptyState message="No videos linked yet. Use Link to Person on the Videos page to tag one manually." /> :
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              {personVideos.data.map((video) => (
+                <button key={video.id} type="button" onClick={() => setActiveVideo(video)}
+                  className="group overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/50 text-left hover:border-zinc-700 transition-colors">
+                  <div className="relative aspect-video bg-zinc-800">
+                    <VideoThumb filename={video.filename} thumbnailPath={video.thumbnail_path} alt={video.title || video.filename} />
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/60">
+                        <Play size={20} className="ml-0.5 text-white" />
+                      </span>
+                    </div>
+                  </div>
+                  <span className="block truncate p-2 text-xs text-zinc-200" title={video.title || video.filename}>
+                    {video.title || video.filename}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <Pagination
+              page={videoPage}
+              totalPages={personVideos.meta.total_pages}
+              hasMore={videoPage < personVideos.meta.total_pages}
+              onPrev={prevVideoPage}
+              onNext={nextVideoPage}
+            />
+          </>
         )}
 
         {galleryTab === 'missing' && (
@@ -705,6 +761,8 @@ export function PersonDetailPage() {
           </div>
         )}
       </div>
+
+      {activeVideo && <VideoPlayer video={activeVideo} onClose={() => setActiveVideo(null)} />}
 
       {/* Edit Modal */}
       {editing && (

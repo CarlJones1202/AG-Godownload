@@ -14,8 +14,53 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
+
+// Bounds for provider-thumbnail migration/validation: galleries are processed
+// by a small worker pool (local stat/decode runs in parallel), while provider
+// scrapes and thumbnail downloads are further capped by semaphores so remote
+// hosts see bounded concurrent traffic.
+const (
+	providerThumbnailWorkers       = 8
+	providerThumbnailScrapeSlots   = 4
+	providerThumbnailDownloadSlots = 8
+)
+
+// acquire takes a slot from sem and returns the function that releases it.
+func acquire(sem chan struct{}) func() {
+	sem <- struct{}{}
+	return func() { <-sem }
+}
+
+// runGalleryJobs processes items with up to n concurrent workers, calling fn
+// for each item. fn must be safe for concurrent use.
+func runGalleryJobs[T any](items []T, n int, fn func(T)) {
+	if len(items) == 0 {
+		return
+	}
+	if n > len(items) {
+		n = len(items)
+	}
+	ch := make(chan T, n)
+	var wg sync.WaitGroup
+	for w := 0; w < n; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for item := range ch {
+				fn(item)
+			}
+		}()
+	}
+	for _, item := range items {
+		ch <- item
+	}
+	close(ch)
+	wg.Wait()
+}
 
 // MigrateImagesToNewStructure migrates existing images from flat structure to source-based subdirectories
 func MigrateImagesToNewStructure() error {
@@ -261,28 +306,33 @@ func MigrateMissingProviderThumbnails() error {
 
 	logger.Infof("Found %d galleries with provider but missing thumbnail", len(galleries))
 
-	downloaded := 0
-	failed := 0
+	var downloaded, failed int32
+	scrapeSem := make(chan struct{}, providerThumbnailScrapeSlots)
+	downloadSem := make(chan struct{}, providerThumbnailDownloadSlots)
 
-	for _, gallery := range galleries {
+	runGalleryJobs(galleries, providerThumbnailWorkers, func(gallery models.Gallery) {
 		// Re-scrape metadata to get thumbnail URL
+		release := acquire(scrapeSem)
 		metadata, err := ScrapeGalleryMetadata(gallery.SourceURL, gallery.Provider, "")
+		release()
 		if err != nil {
 			logger.Warnf("Failed to scrape metadata for gallery %d: %v", gallery.ID, err)
-			failed++
-			continue
+			atomic.AddInt32(&failed, 1)
+			return
 		}
 
 		if metadata.ThumbnailURL == "" {
 			logger.Debugf("No thumbnail URL found for gallery %d", gallery.ID)
-			continue
+			return
 		}
 
+		release = acquire(downloadSem)
 		localPath, err := DownloadProviderThumbnail(metadata.ThumbnailURL)
+		release()
 		if err != nil {
 			logger.Warnf("Failed to download thumbnail for gallery %d: %v", gallery.ID, err)
-			failed++
-			continue
+			atomic.AddInt32(&failed, 1)
+			return
 		}
 
 		gallery.ProviderThumbnail = localPath
@@ -290,12 +340,12 @@ func MigrateMissingProviderThumbnails() error {
 
 		if err := database.DB.Save(&gallery).Error; err != nil {
 			logger.Warnf("Failed to save gallery %d: %v", gallery.ID, err)
-			failed++
-			continue
+			atomic.AddInt32(&failed, 1)
+			return
 		}
 
-		downloaded++
-	}
+		atomic.AddInt32(&downloaded, 1)
+	})
 
 	// Also check for galleries where thumbnail file is missing
 	var galleriesWithThumb []models.Gallery
@@ -303,25 +353,31 @@ func MigrateMissingProviderThumbnails() error {
 		return fmt.Errorf("failed to load galleries with thumbnails: %w", err)
 	}
 
-	missingFiles := 0
-	for _, gallery := range galleriesWithThumb {
-		if _, err := os.Stat(gallery.ProviderThumbnail); os.IsNotExist(err) {
-			// File missing, try to re-download
-			if gallery.ProviderThumbnailURL != "" {
-				localPath, err := DownloadProviderThumbnail(gallery.ProviderThumbnailURL)
-				if err != nil {
-					logger.Warnf("Failed to re-download thumbnail for gallery %d: %v", gallery.ID, err)
-					missingFiles++
-					continue
-				}
-				gallery.ProviderThumbnail = localPath
-				database.DB.Save(&gallery)
-			}
+	var missingFiles int32
+	runGalleryJobs(galleriesWithThumb, providerThumbnailWorkers, func(gallery models.Gallery) {
+		if _, err := os.Stat(gallery.ProviderThumbnail); !os.IsNotExist(err) {
+			return
 		}
-	}
+		// File missing, try to re-download
+		if gallery.ProviderThumbnailURL == "" {
+			return
+		}
+		release := acquire(downloadSem)
+		localPath, err := DownloadProviderThumbnail(gallery.ProviderThumbnailURL)
+		release()
+		if err != nil {
+			logger.Warnf("Failed to re-download thumbnail for gallery %d: %v", gallery.ID, err)
+			atomic.AddInt32(&missingFiles, 1)
+			return
+		}
+		gallery.ProviderThumbnail = localPath
+		if err := database.DB.Save(&gallery).Error; err != nil {
+			logger.Warnf("Failed to save re-downloaded thumbnail for gallery %d: %v", gallery.ID, err)
+		}
+	})
 
 	logger.Infof("Provider thumbnail migration complete: %d downloaded, %d failed, %d files missing",
-		downloaded, failed, missingFiles)
+		atomic.LoadInt32(&downloaded), atomic.LoadInt32(&failed), atomic.LoadInt32(&missingFiles))
 
 	return nil
 }
@@ -336,10 +392,13 @@ func ValidateProviderThumbnails() (int, int, error) {
 		return 0, 0, fmt.Errorf("failed to load galleries with provider thumbnails: %w", err)
 	}
 
-	valid := 0
-	fixed := 0
+	valid := int32(0)
+	fixed := int32(0)
 
-	for _, g := range galleries {
+	scrapeSem := make(chan struct{}, providerThumbnailScrapeSlots)
+	downloadSem := make(chan struct{}, providerThumbnailDownloadSlots)
+
+	runGalleryJobs(galleries, providerThumbnailWorkers, func(g models.Gallery) {
 		path := g.ProviderThumbnail
 		ok := false
 
@@ -358,70 +417,77 @@ func ValidateProviderThumbnails() (int, int, error) {
 			}
 		}
 
-		if !ok {
-			// Attempt to re-download from stored URL if available
-			if g.ProviderThumbnailURL != "" {
-				logger.Infof("Re-downloading provider thumbnail for gallery %d from %s", g.ID, g.ProviderThumbnailURL)
-				localPath, err := DownloadProviderThumbnail(g.ProviderThumbnailURL)
-				if err == nil {
-					// validate
-					if _, err := imaging.Open(localPath); err == nil {
-						g.ProviderThumbnail = localPath
-						// update stored URL in case it changed
-						g.ProviderThumbnailURL = g.ProviderThumbnailURL
-						if err := database.DB.Save(&g).Error; err != nil {
-							logger.Warnf("Failed to save re-downloaded thumbnail path for gallery %d: %v", g.ID, err)
-						}
-						fixed++
-						continue
-					}
-					// remove invalid file
-					_ = os.Remove(localPath)
-				} else {
-					logger.Warnf("Failed to re-download provider thumbnail for gallery %d: %v", g.ID, err)
-				}
-
-				// If the stored URL failed and the provider is MetArt, try to re-scrape metadata
-				// and use the API-provided media path which points to an actual image.
-				if strings.EqualFold(g.Provider, "MetArt") || strings.EqualFold(g.Provider, "Metart") {
-					logger.Infof("Attempting MetArt API fallback for gallery %d", g.ID)
-					if meta, serr := ScrapeGalleryMetadata(g.SourceURL, g.Provider, ""); serr == nil {
-						if meta.ThumbnailURL != "" && meta.ThumbnailURL != g.ProviderThumbnailURL {
-							logger.Infof("MetArt fallback thumbnail URL for gallery %d -> %s", g.ID, meta.ThumbnailURL)
-							localPath2, derr := DownloadProviderThumbnail(meta.ThumbnailURL)
-							if derr == nil {
-								if _, err := imaging.Open(localPath2); err == nil {
-									g.ProviderThumbnail = localPath2
-									g.ProviderThumbnailURL = meta.ThumbnailURL
-									if err := database.DB.Save(&g).Error; err != nil {
-										logger.Warnf("Failed to save MetArt fallback thumbnail for gallery %d: %v", g.ID, err)
-									}
-									fixed++
-									continue
-								}
-								_ = os.Remove(localPath2)
-							} else {
-								logger.Warnf("Failed to download MetArt fallback thumbnail for gallery %d: %v", g.ID, derr)
-							}
-						}
-					} else {
-						logger.Debugf("MetArt API scrape failed for gallery %d: %v", g.ID, serr)
-					}
-				}
-			}
-
-			// If we reach here, we couldn't validate or re-download — clear DB path
-			g.ProviderThumbnail = ""
-			if err := database.DB.Save(&g).Error; err != nil {
-				logger.Warnf("Failed to clear invalid provider thumbnail for gallery %d: %v", g.ID, err)
-			}
-		} else {
-			valid++
+		if ok {
+			atomic.AddInt32(&valid, 1)
+			return
 		}
-	}
 
-	logger.Infof("Provider thumbnail validation complete: %d valid, %d fixed/updated", valid, fixed)
-	return valid, fixed, nil
+		// Attempt to re-download from stored URL if available
+		if g.ProviderThumbnailURL != "" {
+			logger.Infof("Re-downloading provider thumbnail for gallery %d from %s", g.ID, g.ProviderThumbnailURL)
+			release := acquire(downloadSem)
+			localPath, err := DownloadProviderThumbnail(g.ProviderThumbnailURL)
+			release()
+			if err == nil {
+				// validate
+				if _, err := imaging.Open(localPath); err == nil {
+					g.ProviderThumbnail = localPath
+					if err := database.DB.Save(&g).Error; err != nil {
+						logger.Warnf("Failed to save re-downloaded thumbnail path for gallery %d: %v", g.ID, err)
+					}
+					atomic.AddInt32(&fixed, 1)
+					return
+				}
+				// remove invalid file
+				_ = os.Remove(localPath)
+			} else {
+				logger.Warnf("Failed to re-download provider thumbnail for gallery %d: %v", g.ID, err)
+			}
+
+			// If the stored URL failed and the provider is MetArt, try to re-scrape metadata
+			// and use the API-provided media path which points to an actual image.
+			if strings.EqualFold(g.Provider, "MetArt") || strings.EqualFold(g.Provider, "Metart") {
+				logger.Infof("Attempting MetArt API fallback for gallery %d", g.ID)
+				release = acquire(scrapeSem)
+				meta, serr := ScrapeGalleryMetadata(g.SourceURL, g.Provider, "")
+				release()
+				if serr == nil {
+					if meta.ThumbnailURL != "" && meta.ThumbnailURL != g.ProviderThumbnailURL {
+						logger.Infof("MetArt fallback thumbnail URL for gallery %d -> %s", g.ID, meta.ThumbnailURL)
+						release = acquire(downloadSem)
+						localPath2, derr := DownloadProviderThumbnail(meta.ThumbnailURL)
+						release()
+						if derr == nil {
+							if _, err := imaging.Open(localPath2); err == nil {
+								g.ProviderThumbnail = localPath2
+								g.ProviderThumbnailURL = meta.ThumbnailURL
+								if err := database.DB.Save(&g).Error; err != nil {
+									logger.Warnf("Failed to save MetArt fallback thumbnail for gallery %d: %v", g.ID, err)
+								}
+								atomic.AddInt32(&fixed, 1)
+								return
+							}
+							_ = os.Remove(localPath2)
+						} else {
+							logger.Warnf("Failed to download MetArt fallback thumbnail for gallery %d: %v", g.ID, derr)
+						}
+					}
+				} else {
+					logger.Debugf("MetArt API scrape failed for gallery %d: %v", g.ID, serr)
+				}
+			}
+		}
+
+		// If we reach here, we couldn't validate or re-download — clear DB path
+		g.ProviderThumbnail = ""
+		if err := database.DB.Save(&g).Error; err != nil {
+			logger.Warnf("Failed to clear invalid provider thumbnail for gallery %d: %v", g.ID, err)
+		}
+	})
+
+	logger.Infof("Provider thumbnail validation complete: %d valid, %d fixed/updated",
+		atomic.LoadInt32(&valid), atomic.LoadInt32(&fixed))
+	return int(atomic.LoadInt32(&valid)), int(atomic.LoadInt32(&fixed)), nil
 }
 
 // SyncVideoTitlesToSourceNames retroactively updates video image titles to match

@@ -226,6 +226,11 @@ export function DashboardPage() {
       e.target.value = '';
       return;
     }
+    const token = prompt('Enter maintenance token:');
+    if (token === null) {
+      e.target.value = '';
+      return;
+    }
     setImporting(true);
     setImportStatus(null);
     const formData = new FormData();
@@ -233,6 +238,7 @@ export function DashboardPage() {
     try {
       const res = await fetch('/api/import/db', {
         method: 'POST',
+        headers: { 'X-Maintenance-Token': token },
         body: formData,
       });
       const json = await res.json();

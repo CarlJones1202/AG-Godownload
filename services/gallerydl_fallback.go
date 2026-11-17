@@ -22,6 +22,19 @@ import (
 // gallery-dl external tool. It's intended as a fallback for hosts like imx.to
 // where a normal HTTP client may return 503 or other bot-blocking behavior.
 func DownloadImageWithGalleryDL(ctx context.Context, url string, sourceName string, timeout time.Duration) (*DownloadImageResult, error) {
+	return downloadImageWithGalleryDL(ctx, url, sourceName, timeout, true)
+}
+
+// DownloadImageWithGalleryDLWithoutPostProcessing behaves like
+// DownloadImageWithGalleryDL but skips dominant-color extraction and thumbnail
+// generation so bulk recovery can defer that CPU-bound work to a
+// post-processing pool. The returned DominantColors is empty; callers must
+// compute it before persisting.
+func DownloadImageWithGalleryDLWithoutPostProcessing(ctx context.Context, url string, sourceName string, timeout time.Duration) (*DownloadImageResult, error) {
+	return downloadImageWithGalleryDL(ctx, url, sourceName, timeout, false)
+}
+
+func downloadImageWithGalleryDL(ctx context.Context, url string, sourceName string, timeout time.Duration, postProcess bool) (*DownloadImageResult, error) {
 	if !config.Global.GalleryDL.Enabled {
 		return nil, errors.New("gallery-dl fallback disabled in config")
 	}
@@ -175,15 +188,18 @@ func DownloadImageWithGalleryDL(ctx context.Context, url string, sourceName stri
 		return nil, fmt.Errorf("gallery-dl downloaded invalid image: %w; rawOutput=%s", err, strings.TrimSpace(string(out)))
 	}
 
-	// Extract colors (best effort)
-	colors, cerr := ExtractDominantColors(destPath)
-	if cerr != nil {
-		colors = "[]"
-	}
-
-	// Generate thumbnail (fire-and-forget may be acceptable but we run it here)
-	if _, terr := GenerateThumbnail(destPath); terr != nil {
-		logger.Warnf("gallery-dl: failed to generate thumbnail for %s: %v", destPath, terr)
+	// Extract colors and generate thumbnail unless the caller deferred that
+	// work to a post-processing pool (bulk recovery path).
+	colors := ""
+	if postProcess {
+		var cerr error
+		colors, cerr = ExtractDominantColors(destPath)
+		if cerr != nil {
+			colors = "[]"
+		}
+		if _, terr := GenerateThumbnail(destPath); terr != nil {
+			logger.Warnf("gallery-dl: failed to generate thumbnail for %s: %v", destPath, terr)
+		}
 	}
 
 	logger.Debugf("gallery-dl: downloaded %s -> %s (size=%d) in tempdir %s", url, destPath, bestSize, tmpDir)

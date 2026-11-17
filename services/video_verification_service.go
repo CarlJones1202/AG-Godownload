@@ -36,6 +36,215 @@ func SortVideoRecoveryTasks(tasks []VideoRecoveryTask) {
 	})
 }
 
+// videoScanRow is one missing-video row plus its source links. The LEFT JOINs
+// can duplicate a row when a video belongs to several galleries; callers must
+// dedupe by ID.
+type videoScanRow struct {
+	ID              uint
+	Filename        string
+	DownloadURL     string
+	OriginalURL     string
+	Title           string
+	SizeMB          float64
+	DirectSourceID  *uint
+	GallerySourceID *uint
+}
+
+// collectMissingVideoTasks selects video rows whose files are not on disk,
+// using the file_exists column that SyncFileExists computes immediately before
+// recovery runs at startup (callers must run it first — no per-row stat or
+// UPDATE is performed here). Source names are resolved from the row's own
+// direct source_id first and the linked gallery's source as fallback, using
+// one chunked query per batch plus a single source-name lookup instead of two
+// queries per row. Returns the recovery tasks, the number of missing rows, the
+// number skipped as unrecoverable, and the first query error encountered (with
+// everything collected up to that point).
+func collectMissingVideoTasks() ([]VideoRecoveryTask, int, int, error) {
+	const chunkSize = 500
+	var lastID uint
+	missing := 0
+	skipped := 0
+	var firstErr error
+
+	var candidates []videoScanRow
+	sourceIDFor := make(map[uint]uint) // image ID -> source ID (direct link wins)
+
+	for {
+		var rows []videoScanRow
+		if err := database.DB.
+			Model(&models.Image{}).
+			Select("images.id, images.filename, images.download_url, images.original_url, images.title, images.size_mb, images.source_id AS direct_source_id, galleries.source_id AS gallery_source_id").
+			Joins("LEFT JOIN image_galleries ON image_galleries.image_id = images.id").
+			Joins("LEFT JOIN galleries ON galleries.id = image_galleries.gallery_id").
+			Where("images.type = ? AND images.file_exists = ? AND images.id > ?", "video", false, lastID).
+			Order("images.id ASC").
+			Limit(chunkSize).
+			Find(&rows).Error; err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			logger.Errorf("failed to query missing video batch: %v", err)
+			break
+		}
+		if len(rows) == 0 {
+			break
+		}
+
+		var prevID uint
+		for _, v := range rows {
+			// Dedupe gallery-join duplicates within the page (keyset
+			// pagination guarantees duplicates never span pages).
+			if v.ID == prevID {
+				continue
+			}
+			prevID = v.ID
+
+			missing++
+			IncVideoVerificationProcessed()
+			IncVideoVerificationMissing()
+
+			// Local file handling
+			if strings.HasPrefix(v.OriginalURL, "file://") {
+				localPath := strings.TrimPrefix(v.OriginalURL, "file://")
+				if _, err := os.Stat(localPath); os.IsNotExist(err) {
+					logger.Infof("[Source: %s] Local video file no longer exists at original path: %s (ID: %d)", v.OriginalURL, localPath, v.ID)
+					logger.Infof("[Source: %s] Expected location in uploads: %s", v.OriginalURL, filepath.Join(UploadsDir, v.Filename))
+				} else {
+					logger.Infof("[Source: %s] Local video file still exists at original path but not in expected location", v.OriginalURL)
+				}
+				skipped++
+				continue
+			}
+
+			if v.DownloadURL == "" {
+				logger.Infof("No DownloadURL for video ID %d → cannot recover", v.ID)
+				skipped++
+				continue
+			}
+
+			if v.DirectSourceID != nil {
+				sourceIDFor[v.ID] = *v.DirectSourceID
+			} else if v.GallerySourceID != nil {
+				if _, seen := sourceIDFor[v.ID]; !seen {
+					sourceIDFor[v.ID] = *v.GallerySourceID
+				}
+			}
+
+			candidates = append(candidates, v)
+		}
+
+		lastID = rows[len(rows)-1].ID
+	}
+
+	// One source-name lookup for every source referenced by any candidate.
+	sourceNames := make(map[uint]string, len(sourceIDFor))
+	if len(sourceIDFor) > 0 {
+		seen := make(map[uint]bool, len(sourceIDFor))
+		sourceIDs := make([]uint, 0, len(sourceIDFor))
+		for _, sid := range sourceIDFor {
+			if !seen[sid] {
+				seen[sid] = true
+				sourceIDs = append(sourceIDs, sid)
+			}
+		}
+		var sources []struct {
+			ID   uint
+			Name string
+		}
+		if err := database.DB.Model(&models.Source{}).
+			Select("id, name").
+			Where("id IN ?", sourceIDs).
+			Find(&sources).Error; err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			logger.Errorf("failed to resolve video source names: %v", err)
+		} else {
+			for _, s := range sources {
+				sourceNames[s.ID] = s.Name
+			}
+		}
+	}
+
+	tasks := make([]VideoRecoveryTask, 0, len(candidates))
+	for _, v := range candidates {
+		sourceName := "uncategorized"
+		if sid, ok := sourceIDFor[v.ID]; ok {
+			if name, ok := sourceNames[sid]; ok && name != "" {
+				sourceName = name
+			}
+		}
+		tasks = append(tasks, VideoRecoveryTask{
+			ID:            v.ID,
+			CurrentDBPath: v.Filename,
+			DownloadURL:   v.DownloadURL,
+			OriginalURL:   v.OriginalURL,
+			SourceName:    sourceName,
+			Title:         v.Title,
+			SizeMB:        v.SizeMB,
+		})
+	}
+
+	return tasks, missing, skipped, firstErr
+}
+
+// regeneratePresentVideoThumbnails scans videos whose files are present
+// (file_exists = true) and submits thumbnail regeneration for any whose
+// thumbnail is missing. Stat work is bounded by statConcurrency; the
+// CPU-heavy generation runs on the post pool. This pass replaces the per-row
+// thumbnail stat that used to run inside the main scan loop. It also advances
+// the processed counter for present rows so the progress total is reached.
+func regeneratePresentVideoThumbnails(postChan chan func()) {
+	const chunkSize = 500
+	var lastID uint
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, statConcurrency)
+
+	for {
+		var rows []struct {
+			ID       uint
+			Filename string
+		}
+		if err := database.DB.Model(&models.Image{}).
+			Select("id, filename").
+			Where("type = ? AND file_exists = ? AND id > ?", "video", true, lastID).
+			Order("id ASC").
+			Limit(chunkSize).
+			Find(&rows).Error; err != nil {
+			logger.Errorf("failed to query present video batch: %v", err)
+			return
+		}
+		if len(rows) == 0 {
+			break
+		}
+
+		for _, r := range rows {
+			IncVideoVerificationProcessed()
+			wg.Add(1)
+			go func(id uint, filename string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				expectedFullPath := filepath.Join(UploadsDir, filename)
+				thumbFilename := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename)) + ".jpg"
+				thumbPath := filepath.Join(UploadsDir, filepath.Dir(filename), "thumbnails", thumbFilename)
+				if _, err := os.Stat(thumbPath); os.IsNotExist(err) {
+					if _, err2 := os.Stat(expectedFullPath); err2 == nil {
+						postChan <- func() {
+							if _, err := GenerateVideoThumbnail(expectedFullPath); err != nil {
+								logger.Warnf("[Video ID %d] Thumbnail generation failed: %v", id, err)
+							}
+						}
+					}
+				}
+			}(r.ID, r.Filename)
+		}
+		wg.Wait()
+		lastID = rows[len(rows)-1].ID
+	}
+}
+
 // VerifyDownloadedVideos checks all videos in the database and re-downloads any missing files
 func VerifyDownloadedVideos() error {
 	logger.Info("Verifying downloaded videos...")
@@ -50,11 +259,8 @@ func VerifyDownloadedVideos() error {
 		SetVideoVerificationRunning(true, int(total))
 		defer SetVideoVerificationRunning(false, 0)
 
-		missingCount := 0
 		var recoveredCount int32
 		var skippedCount int32
-
-		var tasks []VideoRecoveryTask
 
 		type videoUpdateResult struct {
 			ID       uint
@@ -86,11 +292,11 @@ func VerifyDownloadedVideos() error {
 					if err := tx.Unscoped().Model(&models.Image{}).
 						Where("id = ?", res.ID).
 						Updates(map[string]interface{}{
-							"filename": res.RelPath,
-							"duration": res.Duration,
-							"width":    res.Width,
-							"height":   res.Height,
-							"size_mb":  res.SizeMB,
+							"filename":    res.RelPath,
+							"duration":    res.Duration,
+							"width":       res.Width,
+							"height":      res.Height,
+							"size_mb":     res.SizeMB,
 							"file_exists": true,
 						}).Error; err != nil {
 						logger.Errorf("Failed to update video %d: %v", res.ID, err)
@@ -120,114 +326,46 @@ func VerifyDownloadedVideos() error {
 			}
 		}()
 
-		// Phase 1: scan and collect missing files (chunked)
-		const chunkSize = 100
-		var lastID uint
-		for {
-			var videos []struct {
-				ID          uint
-				Filename    string
-				DownloadURL string
-				OriginalURL string
-				Title       string
-				FileExists  bool
-				SizeMB      float64
-			}
-
-			q := database.DB.Model(&models.Image{}).
-				Select("id, filename, download_url, original_url, title, size_mb, file_exists").
-				Where("type = ? AND id > ?", "video", lastID).
-				Order("id ASC").
-				Limit(chunkSize)
-
-			if err := q.Find(&videos).Error; err != nil {
-				logger.Errorf("failed to query video batch: %v", err)
-				break
-			}
-			if len(videos) == 0 {
-				break
-			}
-
-			for _, v := range videos {
-				IncVideoVerificationProcessed()
-				expectedFullPath := filepath.Join(UploadsDir, v.Filename)
-
-				// Regenerate thumbnail if missing
-				thumbFilename := strings.TrimSuffix(filepath.Base(v.Filename), filepath.Ext(v.Filename)) + ".jpg"
-				thumbPath := filepath.Join(UploadsDir, filepath.Dir(v.Filename), "thumbnails", thumbFilename)
-				if _, err := os.Stat(thumbPath); os.IsNotExist(err) {
-					if _, err2 := os.Stat(expectedFullPath); err2 == nil {
-						go GenerateVideoThumbnail(expectedFullPath)
-					}
+		// Post-processing pool: video thumbnail + trickplay generation are
+		// CPU-bound (trickplay can block a download slot for minutes) and
+		// must not run inline with downloads.
+		postChan := make(chan func(), 128)
+		var wgPost sync.WaitGroup
+		for w := 0; w < recoveryPostprocessWorkers(); w++ {
+			wgPost.Add(1)
+			go func() {
+				defer wgPost.Done()
+				for job := range postChan {
+					job()
 				}
+			}()
+		}
 
-				if _, err := os.Stat(expectedFullPath); os.IsNotExist(err) {
-					missingCount++
-					IncVideoVerificationMissing()
-					if v.FileExists {
-						database.DB.Model(&models.Image{}).Where("id = ?", v.ID).Update("file_exists", false)
-					}
-					fmt.Printf("Missing video: %s (ID: %d)\n", v.Filename, v.ID)
+		// Thumbnail regeneration for videos already on disk runs alongside
+		// collection and downloads instead of blocking recovery start.
+		var wgPresent sync.WaitGroup
+		wgPresent.Add(1)
+		go func() {
+			defer wgPresent.Done()
+			regeneratePresentVideoThumbnails(postChan)
+		}()
 
-					// Local file handling
-					if strings.HasPrefix(v.OriginalURL, "file://") {
-						localPath := strings.TrimPrefix(v.OriginalURL, "file://")
-						if _, err := os.Stat(localPath); os.IsNotExist(err) {
-							logger.Infof("[Source: %s] Local video file no longer exists at original path: %s (ID: %d)", v.OriginalURL, localPath, v.ID)
-							logger.Infof("[Source: %s] Expected location in uploads: %s", v.OriginalURL, expectedFullPath)
-							atomic.AddInt32(&skippedCount, 1)
-							continue
-						}
-						logger.Infof("[Source: %s] Local video file still exists at original path but not in expected location", v.OriginalURL)
-						atomic.AddInt32(&skippedCount, 1)
-						continue
-					}
-
-					if v.DownloadURL == "" {
-						logger.Infof("No DownloadURL for video ID %d → cannot recover", v.ID)
-						atomic.AddInt32(&skippedCount, 1)
-						continue
-					}
-
-					// Resolve source name
-					sourceName := "uncategorized"
-					var sourceID *uint
-					err := database.DB.Table("galleries").
-						Select("galleries.source_id").
-						Joins("JOIN image_galleries ON image_galleries.gallery_id = galleries.id").
-						Where("image_galleries.image_id = ?", v.ID).
-						Limit(1).
-						Scan(&sourceID).Error
-					if err == nil && sourceID != nil {
-						var src models.Source
-						if database.DB.Select("name").First(&src, *sourceID).Error == nil {
-							sourceName = src.Name
-						}
-					}
-
-					tasks = append(tasks, VideoRecoveryTask{
-						ID:            v.ID,
-						CurrentDBPath: v.Filename,
-						DownloadURL:   v.DownloadURL,
-						OriginalURL:   v.OriginalURL,
-						SourceName:    sourceName,
-						Title:         v.Title,
-						SizeMB:        v.SizeMB,
-					})
-				}
-			}
-
-			// keep scanning from last ID in this batch
-			lastID = videos[len(videos)-1].ID
+		// Phase 1: collect missing files from the file_exists column, which
+		// SyncFileExists computed immediately before this runs at startup.
+		tasks, missingCount, skipped, collectErr := collectMissingVideoTasks()
+		if collectErr != nil {
+			logger.Errorf("Missing-video scan finished with errors: %v", collectErr)
+		}
+		atomic.AddInt32(&skippedCount, int32(skipped))
+		if missingCount > 0 {
+			logger.Infof("Found %d missing videos (%d not recoverable)", missingCount, skipped)
 		}
 
 		// Phase 2: prioritize (smallest first) and concurrent recovery
 		if len(tasks) > 0 {
 			SortVideoRecoveryTasks(tasks)
-			logger.Infof("Prioritized %d missing videos by file size (smallest first)", len(tasks))
-
-			fmt.Printf("Recovering %d missing videos (smallest first, max 10 concurrent)...\n", len(tasks))
-			const maxConcurrent = 10
+			maxConcurrent := recoveryConcurrency()
+			logger.Infof("Recovering %d missing videos (smallest first, max %d concurrent)...", len(tasks), maxConcurrent)
 			numWorkers := maxConcurrent
 			if len(tasks) < numWorkers {
 				numWorkers = len(tasks)
@@ -259,7 +397,7 @@ func VerifyDownloadedVideos() error {
 								pageURL = t.DownloadURL
 							}
 
-							result, err := DownloadVideo(t.DownloadURL, t.SourceName, pageURL, t.Title)
+							result, err := DownloadVideoWithoutPostProcessing(t.DownloadURL, t.SourceName, pageURL, t.Title)
 							if err != nil {
 								// try to refresh URLs for some providers
 								refreshed := false
@@ -272,14 +410,14 @@ func VerifyDownloadedVideos() error {
 										newVideoURL, newTitle, ripErr = RipPornhub(t.OriginalURL)
 									} else if isYouTubeURL(t.OriginalURL) {
 										// YouTube stream URLs go stale; re-rip the page and import the fresh file
-										result, err = DownloadVideo(t.OriginalURL, t.SourceName, t.OriginalURL, t.Title)
+										result, err = DownloadVideoWithoutPostProcessing(t.OriginalURL, t.SourceName, t.OriginalURL, t.Title)
 										if err == nil {
 											refreshed = true
 										}
 									}
 									if ripErr == nil && newVideoURL != "" {
 										database.DB.Model(&models.Image{ID: t.ID}).Update("download_url", newVideoURL)
-										result, err = DownloadVideo(newVideoURL, t.SourceName, pageURL, newTitle)
+										result, err = DownloadVideoWithoutPostProcessing(newVideoURL, t.SourceName, pageURL, newTitle)
 										if err == nil {
 											refreshed = true
 										}
@@ -298,7 +436,8 @@ func VerifyDownloadedVideos() error {
 								relPath = filepath.Join(t.SourceName, filepath.Base(result.Path))
 							}
 
-							// send to batch writer
+							// DB update goes to the batch writer immediately;
+							// heavy post-processing is handed to the pool.
 							resultChan <- videoUpdateResult{
 								ID:       t.ID,
 								RelPath:  relPath,
@@ -308,12 +447,14 @@ func VerifyDownloadedVideos() error {
 								SizeMB:   result.SizeMB,
 							}
 
-							// extra processing
-							if _, err := GenerateVideoThumbnail(result.Path); err != nil {
-								logger.Warnf("[Video ID %d] Thumbnail generation failed: %v", t.ID, err)
-							}
-							if err := GenerateTrickplayData(result.Path); err != nil {
-								logger.Warnf("[Video ID %d] Trickplay generation failed: %v", t.ID, err)
+							postPath := result.Path
+							postChan <- func() {
+								if _, err := GenerateVideoThumbnail(postPath); err != nil {
+									logger.Warnf("[Video ID %d] Thumbnail generation failed: %v", t.ID, err)
+								}
+								if err := GenerateTrickplayData(postPath); err != nil {
+									logger.Warnf("[Video ID %d] Trickplay generation failed: %v", t.ID, err)
+								}
 							}
 
 							dur := time.Since(start)
@@ -326,10 +467,15 @@ func VerifyDownloadedVideos() error {
 			}
 
 			wg.Wait()
-			close(resultChan)
-			wgBatch.Wait()
-			database.Checkpoint()
 		}
+
+		// All submitters are done: drain post-processing, then the batch writer.
+		wgPresent.Wait()
+		close(postChan)
+		wgPost.Wait()
+		close(resultChan)
+		wgBatch.Wait()
+		database.Checkpoint()
 
 		logger.Infof("Video verification complete — Missing: %d | Recovered: %d | Skipped: %d",
 			missingCount, atomic.LoadInt32(&recoveredCount), atomic.LoadInt32(&skippedCount))

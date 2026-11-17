@@ -34,10 +34,11 @@ func (pq *PriorityQueue) Pop() interface{} {
 }
 
 type TaskQueue struct {
-	pq   PriorityQueue
-	mu   sync.Mutex
-	cond *sync.Cond
-	done chan struct{}
+	pq       PriorityQueue
+	mu       sync.Mutex
+	cond     *sync.Cond
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 func NewTaskQueue() *TaskQueue {
@@ -47,42 +48,57 @@ func NewTaskQueue() *TaskQueue {
 	return tq
 }
 
-func (tq *TaskQueue) Push(task *CrawlerTask) {
+func (tq *TaskQueue) Push(task *CrawlerTask) bool {
 	tq.mu.Lock()
+	select {
+	case <-tq.done:
+		tq.mu.Unlock()
+		return false
+	default:
+	}
 	heap.Push(&tq.pq, task)
 	tq.mu.Unlock()
 	tq.cond.Signal()
+	return true
 }
 
 // Pop blocks until a task is available or the queue is stopped.
-// Returns nil when the queue is stopped and drained.
+// Returns nil on stop without starting any remaining queued tasks.
 func (tq *TaskQueue) Pop() *CrawlerTask {
 	tq.mu.Lock()
-	for tq.pq.Len() == 0 {
-		// Check shutdown before sleeping
+	for {
 		select {
 		case <-tq.done:
 			tq.mu.Unlock()
 			return nil
 		default:
 		}
+
+		if tq.pq.Len() > 0 {
+			task := heap.Pop(&tq.pq).(*CrawlerTask)
+			tq.mu.Unlock()
+			return task
+		}
 		tq.cond.Wait()
 	}
-	task := heap.Pop(&tq.pq).(*CrawlerTask)
-	tq.mu.Unlock()
-	return task
 }
 
-// Stop signals the queue to wake all blocked Pop callers and refuse new tasks.
+// Stop wakes blocked Pop callers and prevents queued tasks from being started.
 func (tq *TaskQueue) Stop() {
-	close(tq.done)
-	tq.cond.Broadcast()
+	tq.stopOnce.Do(func() {
+		close(tq.done)
+		tq.mu.Lock()
+		tq.cond.Broadcast()
+		tq.mu.Unlock()
+	})
 }
 
 var CrawlerTaskQueue = NewTaskQueue()
 
 // Video queue (separate queue for known video sources)
 var VideoTaskQueue = NewTaskQueue()
+
+var crawlerWorkerWG sync.WaitGroup
 
 func AddToCrawlerQueue(sourceID uint) {
 	var source models.Source
@@ -94,10 +110,13 @@ func AddToCrawlerQueue(sourceID uint) {
 	// Update status to queued
 	database.DB.Model(&source).Update("Status", "queued")
 
-	CrawlerTaskQueue.Push(&CrawlerTask{
+	if !CrawlerTaskQueue.Push(&CrawlerTask{
 		SourceID: source.ID,
 		Priority: source.Priority,
-	})
+	}) {
+		logger.Warnf("Crawler queue stopped; source %d remains queued for the next startup", sourceID)
+		return
+	}
 	logger.Infof("Added source %d to crawler queue (priority %d)", sourceID, source.Priority)
 }
 
@@ -111,32 +130,44 @@ func AddToVideoQueue(sourceID uint) {
 	// Update status to queued
 	database.DB.Model(&source).Update("Status", "queued")
 
-	VideoTaskQueue.Push(&CrawlerTask{
+	if !VideoTaskQueue.Push(&CrawlerTask{
 		SourceID: source.ID,
 		Priority: source.Priority,
-	})
+	}) {
+		logger.Warnf("Video queue stopped; source %d remains queued for the next startup", sourceID)
+		return
+	}
 	logger.Infof("Added source %d to video queue (priority %d)", sourceID, source.Priority)
 }
 
-func StartCrawlerWorker() {
-	go func() {
-		logger.Debug("Checking for interrupted or queued crawls...")
-		var sources []models.Source
-		// Find sources that are 'crawling' (interrupted) or 'queued' on startup
-		if err := database.DB.Where("status IN ?", []string{"crawling", "queued"}).Find(&sources).Error; err == nil {
-			logger.Infof("Found %d pending crawls, re-queueing...", len(sources))
-			for _, s := range sources {
-				AddToCrawlerQueue(s.ID)
-			}
-		}
-	}()
+// RequeuePendingCrawls restores queued and interrupted sources from the database.
+// It must run once before either worker pool starts.
+func RequeuePendingCrawls() error {
+	var sources []models.Source
+	if err := database.DB.Where("status IN ?", []string{"crawling", "queued"}).Find(&sources).Error; err != nil {
+		return err
+	}
 
+	logger.Infof("Found %d pending crawls, re-queueing...", len(sources))
+	for _, source := range sources {
+		if IsVideoURL(source.Location) || IsVideoFile(source.Location) {
+			AddToVideoQueue(source.ID)
+		} else {
+			AddToCrawlerQueue(source.ID)
+		}
+	}
+	return nil
+}
+
+func StartCrawlerWorker() {
 	numWorkers := config.Global.CrawlerWorkers
 	if numWorkers < 1 {
 		numWorkers = 1
 	}
 	for i := 0; i < numWorkers; i++ {
+		crawlerWorkerWG.Add(1)
 		go func(workerID int) {
+			defer crawlerWorkerWG.Done()
 			logger.Debugf("Crawler worker %d started", workerID)
 			for {
 				task := CrawlerTaskQueue.Pop()
@@ -165,29 +196,14 @@ func StartCrawlerWorker() {
 }
 
 func StartVideoWorker() {
-	go func() {
-		logger.Debug("Checking for interrupted or queued video crawls...")
-		var sources []models.Source
-		// Find sources that are 'crawling' (interrupted) or 'queued' on startup
-		if err := database.DB.Where("status IN ?", []string{"crawling", "queued"}).Find(&sources).Error; err == nil {
-			logger.Infof("Found %d pending video crawls, re-queueing...", len(sources))
-			for _, s := range sources {
-				// Re-queue into the appropriate queue based on source type
-				if IsVideoURL(s.Location) || IsVideoFile(s.Location) {
-					AddToVideoQueue(s.ID)
-				} else {
-					AddToCrawlerQueue(s.ID)
-				}
-			}
-		}
-	}()
-
 	numWorkers := config.Global.CrawlerWorkers
 	if numWorkers < 1 {
 		numWorkers = 1
 	}
 	for i := 0; i < numWorkers; i++ {
+		crawlerWorkerWG.Add(1)
 		go func(workerID int) {
+			defer crawlerWorkerWG.Done()
 			logger.Debugf("Video worker %d started", workerID)
 			for {
 				task := VideoTaskQueue.Pop()
@@ -215,12 +231,17 @@ func StartVideoWorker() {
 	}
 }
 
-// StopTaskQueues signals both crawler and video task queues to stop accepting
-// and delivering tasks. Workers will exit after finishing their current task.
+// StopTaskQueues stops workers from starting queued tasks. Pending sources remain
+// marked queued in the database and are restored by RequeuePendingCrawls.
 func StopTaskQueues() {
 	CrawlerTaskQueue.Stop()
 	VideoTaskQueue.Stop()
 	logger.Info("Task queues stopped")
+}
+
+// WaitForCrawlerWorkers waits until each active source crawl has completed.
+func WaitForCrawlerWorkers() {
+	crawlerWorkerWG.Wait()
 }
 
 /*

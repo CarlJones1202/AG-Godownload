@@ -336,7 +336,8 @@ func GetAllMissingGalleries(c *gin.Context) {
 
 	sortBy := c.DefaultQuery("sort", "name")
 	providerFilter := strings.ToLower(c.Query("provider"))
-	q := strings.ToLower(c.Query("q"))
+	q := strings.TrimSpace(c.Query("q"))
+	queryTokens := missingGallerySearchTokens(q)
 	var personIDFilter uint
 	if pid := c.Query("person_id"); pid != "" {
 		if parsed, err := strconv.ParseUint(pid, 10, 32); err == nil {
@@ -505,7 +506,7 @@ func GetAllMissingGalleries(c *gin.Context) {
 				continue
 			}
 
-			if q != "" && !strings.Contains(strings.ToLower(galleryName), q) && !strings.Contains(strings.ToLower(personName), q) {
+			if q != "" && !matchesMissingGallerySearch(queryTokens, galleryName, personName) {
 				continue
 			}
 
@@ -590,6 +591,40 @@ func normalizeMissingGalleryName(name string) string {
 		}
 		return -1
 	}, name)
+}
+
+func matchesMissingGallerySearch(queryTokens []string, galleryName, personName string) bool {
+	if len(queryTokens) == 0 {
+		return false
+	}
+
+	for _, field := range []string{galleryName, personName} {
+		fieldTokens := missingGallerySearchTokens(field)
+		matchesAll := true
+		for _, queryToken := range queryTokens {
+			matchesToken := false
+			for _, fieldToken := range fieldTokens {
+				if strings.HasPrefix(fieldToken, queryToken) {
+					matchesToken = true
+					break
+				}
+			}
+			if !matchesToken {
+				matchesAll = false
+				break
+			}
+		}
+		if matchesAll {
+			return true
+		}
+	}
+	return false
+}
+
+func missingGallerySearchTokens(value string) []string {
+	return strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
 }
 
 func RecheckAllPeople(c *gin.Context) {

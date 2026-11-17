@@ -655,6 +655,19 @@ func formatBytes(b int64) string {
 // falling back to buffered streaming otherwise. This keeps memory usage constant
 // regardless of video file size.
 func DownloadVideo(videoURL string, sourceName string, pageURL string, title string) (*DownloadImageResult, error) {
+	return downloadVideo(videoURL, sourceName, pageURL, title, true)
+}
+
+// DownloadVideoWithoutPostProcessing behaves like DownloadVideo but skips the
+// inline thumbnail/trickplay generation (CPU-bound ffmpeg work that can block
+// a download slot for minutes) so bulk recovery can defer it to a
+// post-processing pool. Video metadata is still extracted because the
+// recovery batch writer persists it with the result.
+func DownloadVideoWithoutPostProcessing(videoURL string, sourceName string, pageURL string, title string) (*DownloadImageResult, error) {
+	return downloadVideo(videoURL, sourceName, pageURL, title, false)
+}
+
+func downloadVideo(videoURL string, sourceName string, pageURL string, title string, postProcess bool) (*DownloadImageResult, error) {
 	logger.Infof("Downloading video from %s", videoURL)
 
 	// YouTube pages / short links can't be streamed directly — rip through yt-dlp
@@ -667,7 +680,7 @@ func DownloadVideo(videoURL string, sourceName string, pageURL string, title str
 		if title == "" && ytTitle != "" {
 			title = ytTitle
 		}
-		result, err := ImportLocalVideo(localPath, sourceName)
+		result, err := importLocalVideo(localPath, sourceName, postProcess)
 		if err != nil {
 			return nil, fmt.Errorf("failed to import YouTube video: %w", err)
 		}
@@ -753,7 +766,7 @@ func DownloadVideo(videoURL string, sourceName string, pageURL string, title str
 	// If final file already exists, remove temp and return
 	if _, err := os.Stat(destPath); err == nil {
 		logger.Debugf("Video file already exists: %s", destPath)
-		return buildVideoResult(destPath, title)
+		return buildVideoResult(destPath, title, postProcess)
 	}
 
 	if err := os.Rename(tmpPath, destPath); err != nil {
@@ -761,17 +774,21 @@ func DownloadVideo(videoURL string, sourceName string, pageURL string, title str
 	}
 	logger.Infof("Saved video to: %s (%s)", destPath, formatBytes(info.Size()))
 
-	return buildVideoResult(destPath, title)
+	return buildVideoResult(destPath, title, postProcess)
 }
 
-// buildVideoResult generates thumbnail, trickplay, metadata for a video and returns the result
-func buildVideoResult(destPath string, title string) (*DownloadImageResult, error) {
-	if _, err := GenerateVideoThumbnail(destPath); err != nil {
-		logger.Warnf("Failed to generate video thumbnail: %v", err)
-	}
+// buildVideoResult generates thumbnail, trickplay, metadata for a video and returns the result.
+// When postProcess is false, thumbnail/trickplay generation is skipped (the
+// caller is expected to schedule it elsewhere) but metadata is still extracted.
+func buildVideoResult(destPath string, title string, postProcess bool) (*DownloadImageResult, error) {
+	if postProcess {
+		if _, err := GenerateVideoThumbnail(destPath); err != nil {
+			logger.Warnf("Failed to generate video thumbnail: %v", err)
+		}
 
-	if err := GenerateTrickplayData(destPath); err != nil {
-		logger.Warnf("Failed to generate trickplay data: %v", err)
+		if err := GenerateTrickplayData(destPath); err != nil {
+			logger.Warnf("Failed to generate trickplay data: %v", err)
+		}
 	}
 
 	meta, err := GetVideoMetadata(destPath)

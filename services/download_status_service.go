@@ -116,6 +116,16 @@ func IncVerificationProcessed() {
 	// Let's just do it for now and see.
 }
 
+// AddVerificationProcessed advances the processed counter by n in one step.
+// Used after a scan phase that no longer walks every row individually (e.g. the
+// file_exists-based missing scan), so the UI progress still reaches the total.
+func AddVerificationProcessed(n int32) {
+	if n <= 0 {
+		return
+	}
+	atomic.AddInt32(&GlobalStatus.Verification.Processed, n)
+}
+
 func IncVerificationMissing() {
 	atomic.AddInt32(&GlobalStatus.Verification.MissingFound, 1)
 }

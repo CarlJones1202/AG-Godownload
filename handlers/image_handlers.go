@@ -161,7 +161,15 @@ func GetImages(c *gin.Context) {
 		query = query.Where("id IN (SELECT image_id FROM image_tags WHERE tag_id IN (?))", strings.Split(tagIDs, ","))
 	}
 	if personID := c.Query("filter_person"); personID != "" {
-		query = query.Where("id IN (SELECT image_id FROM person_images WHERE person_id = ?)", personID)
+		query = query.Where(`id IN (
+			SELECT image_id FROM person_images WHERE person_id = ?
+			UNION
+			SELECT ig.image_id
+			FROM image_galleries ig
+			JOIN person_galleries pg ON pg.gallery_id = ig.gallery_id
+			JOIN galleries g ON g.id = ig.gallery_id AND g.deleted_at IS NULL
+			WHERE pg.person_id = ?
+		)`, personID, personID)
 	}
 
 	// Color filter (approximate match)
@@ -199,7 +207,15 @@ func GetImages(c *gin.Context) {
 		countQuery = countQuery.Where("id IN (SELECT image_id FROM image_tags WHERE tag_id IN (?))", strings.Split(tagIDs, ","))
 	}
 	if personID := c.Query("filter_person"); personID != "" {
-		countQuery = countQuery.Where("id IN (SELECT image_id FROM person_images WHERE person_id = ?)", personID)
+		countQuery = countQuery.Where(`id IN (
+			SELECT image_id FROM person_images WHERE person_id = ?
+			UNION
+			SELECT ig.image_id
+			FROM image_galleries ig
+			JOIN person_galleries pg ON pg.gallery_id = ig.gallery_id
+			JOIN galleries g ON g.id = ig.gallery_id AND g.deleted_at IS NULL
+			WHERE pg.person_id = ?
+		)`, personID, personID)
 	}
 	if color := c.Query("filter_color"); color != "" {
 		countQuery = countQuery.Where("dominant_colors LIKE ?", "%"+color+"%")

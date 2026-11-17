@@ -38,11 +38,47 @@ func main() {
 		logger.Fatal("Failed to create uploads directory:", err)
 	}
 
-	// Run startup verification tasks sequentially to avoid memory thrashing
+	// Run startup verification tasks sequentially to avoid memory thrashing.
+	// Order matters: file_exists must be synced first (the recovery passes
+	// below select on it instead of re-stat'ing), duplicates are removed
+	// before any re-downloads start, and both bulk recoveries are launched
+	// before the slower metadata/thumbnail passes so downloads begin within
+	// seconds of process start and those passes run alongside them.
 	go func() {
 		logger.Info("Syncing file_exists column...")
 		if err := services.SyncFileExists(); err != nil {
 			logger.Error("File exists sync failed:", err)
+		}
+
+		logger.Info("Removing duplicate images...")
+		if err := services.RemoveDuplicateImages(); err != nil {
+			logger.Error("Duplicate image removal failed:", err)
+		}
+
+		logger.Info("Starting background verification of downloaded images...")
+		if err := services.VerifyDownloadedImages(); err != nil {
+			logger.Error("Background verification failed:", err)
+		} else {
+			logger.Info("Background verification started successfully")
+		}
+
+		logger.Info("Starting background verification of videos...")
+		if err := services.VerifyDownloadedVideos(); err != nil {
+			logger.Error("Video verification failed:", err)
+		} else {
+			logger.Info("Video verification started successfully")
+		}
+
+		logger.Info("Starting background verification of person images...")
+		if err := services.VerifyPersonImages(); err != nil {
+			logger.Error("Person image verification failed:", err)
+		}
+
+		logger.Info("Starting scanning for missing video metadata...")
+		if err := services.ScanMissingMetadata(database.DB, false); err != nil {
+			logger.Error("Video metadata scan failed:", err)
+		} else {
+			logger.Info("Video metadata scan completed successfully")
 		}
 
 		logger.Info("Starting migration for missing provider thumbnails...")
@@ -56,36 +92,6 @@ func main() {
 			logger.Infof("Provider thumbnail validation: %d valid, %d fixed/updated", valid, fixed)
 		}
 
-		logger.Info("Starting background verification of downloaded images...")
-		if err := services.RemoveDuplicateImages(); err != nil {
-			logger.Error("Duplicate image removal failed:", err)
-		}
-
-		if err := services.VerifyDownloadedImages(); err != nil {
-			logger.Error("Background verification failed:", err)
-		} else {
-			logger.Info("Background verification completed successfully")
-		}
-
-		logger.Info("Starting scanning for missing video metadata...")
-		if err := services.ScanMissingMetadata(database.DB, false); err != nil {
-			logger.Error("Video metadata scan failed:", err)
-		} else {
-			logger.Info("Video metadata scan completed successfully")
-		}
-
-		logger.Info("Starting background verification of person images...")
-		if err := services.VerifyPersonImages(); err != nil {
-			logger.Error("Person image verification failed:", err)
-		}
-
-		logger.Info("Starting background verification of videos...")
-		if err := services.VerifyDownloadedVideos(); err != nil {
-			logger.Error("Video verification failed:", err)
-		} else {
-			logger.Info("Video verification started successfully")
-		}
-
 		logger.Info("Syncing retroactive video titles to source names...")
 		if updated, err := services.SyncVideoTitlesToSourceNames(); err != nil {
 			logger.Error("Video title sync failed:", err)
@@ -93,6 +99,11 @@ func main() {
 			logger.Infof("Video title sync complete, %d videos updated", updated)
 		}
 	}()
+
+	// Restore queued/interrupted crawls before workers begin processing.
+	if err := services.RequeuePendingCrawls(); err != nil {
+		logger.Errorf("Failed to re-queue pending crawls: %v", err)
+	}
 
 	// Start video worker
 	services.StartVideoWorker()
@@ -229,6 +240,7 @@ func main() {
 	r.PATCH("/images/:imageId/title", handlers.UpdateImageTitle)
 	r.GET("/images", handlers.GetImages)
 	r.GET("/search/color", handlers.SearchByColor)
+	r.GET("/colors/top", handlers.GetTopColors)
 
 	// Content similarity + ratings
 	r.GET("/similar/:id", handlers.GetSimilarImages)
@@ -268,17 +280,18 @@ func main() {
 	sig := <-quit
 	logger.Infof("Received signal %v, shutting down gracefully...", sig)
 
-	// Step 1: Stop accepting new work (workers finish current item then exit)
-	services.StopWorkers()
-
-	// Step 2: Give HTTP server 5 seconds to drain in-flight requests
+	// Step 1: Stop accepting HTTP requests.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Errorf("HTTP server shutdown error: %v", err)
 	}
 
-	// Step 3: Close database — WAL checkpoint ensures no data loss
+	// Step 2: Stop workers from starting queued sources, then wait for active
+	// crawls to finish while the database is still available.
+	services.StopWorkers()
+
+	// Step 3: Close the database after all active source crawls have completed.
 	database.Shutdown()
 
 	logger.Info("Shutdown complete")

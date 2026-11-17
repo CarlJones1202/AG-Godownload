@@ -35,6 +35,10 @@ type Config struct {
 	UploadsDir             string
 	MaxConcurrentDownloads int
 
+	// Recovery (startup bulk re-download of missing files)
+	RecoveryConcurrency        int // download workers per recovery pool
+	RecoveryPostprocessWorkers int // workers for thumbnail/color/trickplay post-processing
+
 	// GalleryDL fallback
 	GalleryDL struct {
 		Enabled    bool
@@ -87,11 +91,14 @@ func Load() {
 		AITagWorkers:           getEnvAsInt("AITAG_WORKERS", 0),
 		UploadsDir:             getEnv("UPLOADS_DIR", "uploads"),
 		MaxConcurrentDownloads: getEnvAsInt("MAX_CONCURRENT_DOWNLOADS", 10),
-		HTTPConnectTimeout:     time.Duration(getEnvAsInt("HTTP_CONNECT_TIMEOUT_SEC", 10)) * time.Second,
-		HTTPRequestTimeout:     time.Duration(getEnvAsInt("HTTP_REQUEST_TIMEOUT_SEC", 30)) * time.Second,
-		HTTPMaxRetries:         getEnvAsInt("HTTP_MAX_RETRIES", 3),
-		MaintenanceToken:       getEnv("MAINTENANCE_TOKEN", ""),
-		TPDBAPIKey:             getEnv("TPDB_API_KEY", ""),
+		// Recovery defaults preserve the previous hardcoded pool size of 10.
+		RecoveryConcurrency:        getEnvAsInt("RECOVERY_CONCURRENCY", 10),
+		RecoveryPostprocessWorkers: getEnvAsInt("RECOVERY_POSTPROCESS_WORKERS", 4),
+		HTTPConnectTimeout:         time.Duration(getEnvAsInt("HTTP_CONNECT_TIMEOUT_SEC", 10)) * time.Second,
+		HTTPRequestTimeout:         time.Duration(getEnvAsInt("HTTP_REQUEST_TIMEOUT_SEC", 30)) * time.Second,
+		HTTPMaxRetries:             getEnvAsInt("HTTP_MAX_RETRIES", 3),
+		MaintenanceToken:           getEnv("MAINTENANCE_TOKEN", ""),
+		TPDBAPIKey:                 getEnv("TPDB_API_KEY", ""),
 	}
 
 	// GalleryDL defaults
@@ -120,6 +127,12 @@ func Load() {
 	Global.Embedding.Concurrency = getEnvAsInt("EMBED_CONCURRENCY", 2)
 	if Global.Embedding.Concurrency < 1 {
 		Global.Embedding.Concurrency = 1
+	}
+	if Global.RecoveryConcurrency < 1 {
+		Global.RecoveryConcurrency = 1
+	}
+	if Global.RecoveryPostprocessWorkers < 1 {
+		Global.RecoveryPostprocessWorkers = 1
 	}
 
 	// Recommendation weights: embed, tags, color, pref

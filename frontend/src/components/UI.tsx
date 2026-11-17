@@ -304,14 +304,15 @@ export function Pagination({ page, totalPages, onPrev, onNext, hasMore }: Pagina
 
 interface VideoThumbProps {
   filename: string;
+  thumbnailPath?: string;
   alt?: string;
 }
 
 /** Video thumbnail with a film-icon fallback when the file is missing or the
  *  thumbnail hasn't been generated yet (avoids broken-image requests/404s). */
-export function VideoThumb({ filename, alt = '' }: VideoThumbProps) {
+export function VideoThumb({ filename, thumbnailPath, alt = '' }: VideoThumbProps) {
   const [failed, setFailed] = useState(false);
-  const src = filename ? thumbnailUrl(filename) : undefined;
+  const src = thumbnailPath || (filename ? thumbnailUrl(filename) : undefined);
 
   if (!src || failed) {
     return (

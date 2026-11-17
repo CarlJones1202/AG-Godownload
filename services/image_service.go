@@ -22,9 +22,9 @@ import (
 	"gorm.io/gorm"
 )
 
-const (
-	UploadsDir = "uploads"
-)
+// UploadsDir is the root directory for stored media. It is a var (same default)
+// so tests can redirect it to a temp directory.
+var UploadsDir = "uploads"
 
 // KnownPlaceholderHashes lists SHA-256 hashes of known "hotlinking disabled"
 // placeholder images from various hosts. Populate this by downloading the
@@ -153,17 +153,25 @@ type DownloadImageResult struct {
 // in a subdirectory named after the source. If referer is provided it will be set
 // on the outgoing request; otherwise the origin (scheme+host) will be used.
 func DownloadImage(url string, sourceName string, referer string) (*DownloadImageResult, error) {
-	return downloadImageWithCookies(url, sourceName, referer, nil)
+	return downloadImageWithCookies(url, sourceName, referer, nil, true)
+}
+
+// DownloadImageWithoutColors behaves like DownloadImage but skips dominant-color
+// extraction (a CPU-bound k-means pass) so bulk recovery can defer that work to
+// a post-processing pool instead of occupying a download slot. The returned
+// DominantColors is empty; callers must compute it before persisting.
+func DownloadImageWithoutColors(url string, sourceName string, referer string) (*DownloadImageResult, error) {
+	return downloadImageWithCookies(url, sourceName, referer, nil, false)
 }
 
 // DownloadImageWithCookies behaves like DownloadImage but also attaches the
 // supplied cookies to the HTTP request. This is needed for hosts (e.g. vipr.im)
 // that require a session cookie obtained by first visiting the hosting page.
 func DownloadImageWithCookies(url string, sourceName string, referer string, cookies []*http.Cookie) (*DownloadImageResult, error) {
-	return downloadImageWithCookies(url, sourceName, referer, cookies)
+	return downloadImageWithCookies(url, sourceName, referer, cookies, true)
 }
 
-func downloadImageWithCookies(url string, sourceName string, referer string, cookies []*http.Cookie) (*DownloadImageResult, error) {
+func downloadImageWithCookies(url string, sourceName string, referer string, cookies []*http.Cookie, extractColors bool) (*DownloadImageResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -297,11 +305,16 @@ func downloadImageWithCookies(url string, sourceName string, referer string, coo
 		return nil, fmt.Errorf("failed to decode image: %w", err)
 	}
 
-	// Extract dominant colors
-	colors, err := ExtractDominantColors(destPath)
-	if err != nil {
-		// Don't fail the whole operation if color extraction fails
-		colors = "[]"
+	// Extract dominant colors unless the caller deferred that work to a
+	// post-processing pool (bulk recovery path).
+	colors := ""
+	if extractColors {
+		var err error
+		colors, err = ExtractDominantColors(destPath)
+		if err != nil {
+			// Don't fail the whole operation if color extraction fails
+			colors = "[]"
+		}
 	}
 
 	return &DownloadImageResult{
@@ -728,6 +741,134 @@ func formatVTTTime(seconds float64) string {
 	return fmt.Sprintf("%02d:%02d:%02d.%03d", hours, minutes, secs, millis)
 }
 
+// resolveSourceNamesBatch resolves display source names for the given image
+// IDs in chunks: the direct images.source_id link wins, falling back to the
+// linked gallery's source (matching recoverImage and the video recovery
+// pipeline). Cost scales with chunks, not rows. IDs that resolve to no name
+// are absent from the result.
+func resolveSourceNamesBatch(db *gorm.DB, ids []uint) map[uint]string {
+	out := make(map[uint]string, len(ids))
+	if len(ids) == 0 {
+		return out
+	}
+
+	const chunkSize = 500
+	sourceIDFor := make(map[uint]uint, len(ids)) // image ID -> source ID (direct wins)
+
+	for i := 0; i < len(ids); i += chunkSize {
+		end := i + chunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		part := ids[i:end]
+
+		type directRow struct {
+			ID       uint
+			SourceID *uint
+		}
+		var direct []directRow
+		if err := db.Model(&models.Image{}).
+			Select("id, source_id").
+			Where("id IN ?", part).
+			Find(&direct).Error; err != nil {
+			logger.Errorf("failed to resolve direct source links: %v", err)
+			continue
+		}
+
+		var galleryFallback []uint
+		for _, r := range direct {
+			if r.SourceID != nil {
+				sourceIDFor[r.ID] = *r.SourceID
+			} else {
+				galleryFallback = append(galleryFallback, r.ID)
+			}
+		}
+
+		if len(galleryFallback) > 0 {
+			var rels []struct {
+				ImageID  uint
+				SourceID *uint
+			}
+			if err := db.Table("image_galleries").
+				Select("image_galleries.image_id, galleries.source_id").
+				Joins("JOIN galleries ON galleries.id = image_galleries.gallery_id").
+				Where("image_galleries.image_id IN ?", galleryFallback).
+				Find(&rels).Error; err != nil {
+				logger.Errorf("failed to resolve gallery source links: %v", err)
+				continue
+			}
+			for _, r := range rels {
+				if r.SourceID == nil {
+					continue
+				}
+				if _, seen := sourceIDFor[r.ImageID]; seen {
+					continue // direct link (or an earlier gallery) already won
+				}
+				sourceIDFor[r.ImageID] = *r.SourceID
+			}
+		}
+	}
+
+	if len(sourceIDFor) == 0 {
+		return out
+	}
+	seen := make(map[uint]bool, len(sourceIDFor))
+	sourceIDs := make([]uint, 0, len(sourceIDFor))
+	for _, sid := range sourceIDFor {
+		if !seen[sid] {
+			seen[sid] = true
+			sourceIDs = append(sourceIDs, sid)
+		}
+	}
+	var sources []struct {
+		ID   uint
+		Name string
+	}
+	if err := db.Model(&models.Source{}).
+		Select("id, name").
+		Where("id IN ?", sourceIDs).
+		Find(&sources).Error; err != nil {
+		logger.Errorf("failed to resolve source names: %v", err)
+		return out
+	}
+	nameByID := make(map[uint]string, len(sources))
+	for _, s := range sources {
+		nameByID[s.ID] = s.Name
+	}
+	for imgID, sid := range sourceIDFor {
+		if name, ok := nameByID[sid]; ok && name != "" {
+			out[imgID] = name
+		}
+	}
+	return out
+}
+
+// buildUploadsFileIndex walks UploadsDir once and maps each file's basename
+// to its full path. The first occurrence wins (filepath.Walk order), matching
+// the previous per-video recursive search. Callers should build the index
+// lazily and reuse it: files moved into UploadsDir while a scan runs are not
+// seen (point-in-time snapshot).
+func buildUploadsFileIndex() map[string]string {
+	index := make(map[string]string)
+	err := filepath.Walk(UploadsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		base := filepath.Base(path)
+		if _, seen := index[base]; !seen {
+			index[base] = path // first match wins, as the walk did
+		}
+		return nil
+	})
+	if err != nil && !os.IsNotExist(err) {
+		logger.Warnf("Failed to fully index uploads directory: %v", err)
+	}
+	return index
+}
+
 // ScanMissingMetadata finds videos with missing metadata and updates them
 func ScanMissingMetadata(db *gorm.DB, force bool) error {
 	logger.Info("Scanning videos for missing metadata...")
@@ -735,6 +876,11 @@ func ScanMissingMetadata(db *gorm.DB, force bool) error {
 	const chunkSize = 100
 	var lastID uint
 	processedCount := 0
+
+	// Lazily-built basename -> path index of UploadsDir. It is built at most
+	// once per scan (and only if some video actually needs the fallback),
+	// replacing the previous full recursive walk per missing video.
+	var fileIndex map[string]string
 
 	for {
 		var videos []models.Image
@@ -754,32 +900,21 @@ func ScanMissingMetadata(db *gorm.DB, force bool) error {
 			break
 		}
 
+		// Resolve source names for the whole chunk in a bounded number of
+		// queries instead of two per video.
+		ids := make([]uint, len(videos))
+		for i, v := range videos {
+			ids[i] = v.ID
+		}
+		sourceNames := resolveSourceNamesBatch(db, ids)
+
 		for _, video := range videos {
 			// Construct full path
 			// We need to resolve the path similar to how ServeImage does or use what we know about storage
 			// Usually UploadsDir + SourceName + Filename
 			// But image.Filename might be relative or absolute-ish depending on legacy
 
-			var sourceName string
-			if video.SourceID != nil {
-				var source models.Source
-				if err := db.First(&source, *video.SourceID).Error; err == nil {
-					sourceName = source.Name
-				}
-			} else {
-				// Try gallery
-				var gallery models.Gallery
-				if err := db.Joins("JOIN image_galleries ON image_galleries.gallery_id = galleries.id").
-					Where("image_galleries.image_id = ?", video.ID).First(&gallery).Error; err == nil {
-					if gallery.SourceID != nil {
-						var source models.Source
-						if err := db.First(&source, *gallery.SourceID).Error; err == nil {
-							sourceName = source.Name
-						}
-					}
-				}
-			}
-
+			sourceName := sourceNames[video.ID]
 			if sourceName == "" {
 				sourceName = "uncategorized"
 			}
@@ -797,34 +932,16 @@ func ScanMissingMetadata(db *gorm.DB, force bool) error {
 					// Handle absolute path stored in DB
 					fullPath = video.Filename
 				} else {
-					// Fallback: Recursive search in uploads folder
-					foundPath := ""
-					baseName := filepath.Base(video.Filename)
-					err := filepath.Walk(UploadsDir, func(path string, info os.FileInfo, err error) error {
-						if err != nil {
-							return err
-						}
-						if !info.IsDir() && filepath.Base(path) == baseName {
-							foundPath = path
-							return io.EOF // Stop search
-						}
-						// Also check if filename matches without processing (legacy reasons)
-						if !info.IsDir() && info.Name() == video.Filename {
-							foundPath = path
-							return io.EOF
-						}
-						return nil
-					})
-
-					if err != nil && err != io.EOF {
-						logger.Warnf("Recursive search error for video %d: %v", video.ID, err)
+					// Fallback: look the file up in the shared uploads index
+					if fileIndex == nil {
+						fileIndex = buildUploadsFileIndex()
 					}
-
+					foundPath := fileIndex[filepath.Base(video.Filename)]
 					if foundPath != "" {
 						fullPath = foundPath
 						logger.Infof("Found moved video file for %d at: %s", video.ID, fullPath)
 					} else {
-						logger.Warnf("Could not find file for video %d. Checked: %s and recursive search", video.ID, fullPath)
+						logger.Warnf("Could not find file for video %d. Checked: %s and uploads index", video.ID, fullPath)
 						continue
 					}
 				}

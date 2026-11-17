@@ -145,14 +145,131 @@ func PrioritizeImageRecoveryTasks(tasks []ImageRecoveryTask, favGalleryIDs map[u
 	return result
 }
 
+// collectMissingImageTasks selects images whose files are not on disk, using
+// the file_exists column that SyncFileExists computes immediately before
+// recovery runs at startup (callers must run it first — no per-row stat is
+// performed here). Videos are excluded: the video recovery pipeline owns them,
+// and image recovery would otherwise download the entire video body only to
+// fail image decoding and discard it. Returns the recovery tasks, the number
+// of missing rows (with or without a download URL), and the first query error
+// encountered while still returning everything collected up to that point.
+func collectMissingImageTasks() ([]ImageRecoveryTask, int, error) {
+	const chunkSize = 1000
+	var lastID uint
+	var tasks []ImageRecoveryTask
+	missing := 0
+	var firstErr error
+
+	for {
+		var chunk []struct {
+			ID          uint
+			Filename    string
+			DownloadURL string
+			IsFavorite  bool
+			CreatedAt   time.Time
+		}
+
+		if err := database.DB.
+			Model(&models.Image{}).
+			Select("id, filename, download_url, is_favorite, created_at").
+			Where("(type IS NULL OR type <> ?) AND file_exists = ? AND id > ?", "video", false, lastID).
+			Order("id ASC").
+			Limit(chunkSize).
+			Find(&chunk).Error; err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			logger.Errorf("failed to query missing image batch: %v", err)
+			break
+		}
+		if len(chunk) == 0 {
+			break
+		}
+
+		for _, img := range chunk {
+			missing++
+			IncVerificationProcessed()
+			IncVerificationMissing()
+
+			if img.DownloadURL == "" {
+				continue
+			}
+
+			tasks = append(tasks, ImageRecoveryTask{
+				ID:            img.ID,
+				CurrentDBPath: img.Filename,
+				DownloadURL:   img.DownloadURL,
+				IsFavorite:    img.IsFavorite,
+				CreatedAt:     img.CreatedAt,
+				SourceName:    "uncategorized",
+			})
+		}
+
+		lastID = chunk[len(chunk)-1].ID
+	}
+
+	return tasks, missing, firstErr
+}
+
+// loadImageGalleryRelations batch-loads gallery IDs and source names for the
+// given image IDs (chunked to bound IN-clause size). A failed batch is logged
+// and skipped so remaining batches still resolve, matching the previous
+// per-batch behavior; the first error is also returned for the caller to log.
+func loadImageGalleryRelations(ids []uint) (map[uint][]uint, map[uint]string, error) {
+	type imgGalRel struct {
+		ImageID    uint
+		GalleryID  uint
+		SourceName *string
+	}
+
+	imgToGalleries := make(map[uint][]uint)
+	imgToSource := make(map[uint]string)
+	var firstErr error
+
+	const queryBatchSize = 1000
+	for i := 0; i < len(ids); i += queryBatchSize {
+		end := i + queryBatchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+
+		var rels []imgGalRel
+		err := database.DB.Table("image_galleries").
+			Select("image_galleries.image_id, image_galleries.gallery_id, sources.name as source_name").
+			Joins("JOIN galleries ON galleries.id = image_galleries.gallery_id").
+			Joins("LEFT JOIN sources ON sources.id = galleries.source_id").
+			Where("image_galleries.image_id IN ?", ids[i:end]).
+			Scan(&rels).Error
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		for _, r := range rels {
+			imgToGalleries[r.ImageID] = append(imgToGalleries[r.ImageID], r.GalleryID)
+			if r.SourceName != nil && *r.SourceName != "" && imgToSource[r.ImageID] == "" {
+				imgToSource[r.ImageID] = *r.SourceName
+			}
+		}
+	}
+
+	return imgToGalleries, imgToSource, firstErr
+}
+
 // VerifyDownloadedImages checks all images in the database and re-downloads any missing files
 // VerifyDownloadedImages checks all images and re-downloads + fixes DB if needed
 func VerifyDownloadedImages() error {
 	logger.Info("Verifying downloaded images...")
 
-	// Count total images first
+	// Count recoverable images first. Videos are owned by
+	// VerifyDownloadedVideos: counting them here would inflate the progress
+	// total, and image recovery would download video bodies only to discard
+	// them when image decoding fails.
 	var totalImages int64
-	if err := database.DB.Model(&models.Image{}).Count(&totalImages).Error; err != nil {
+	if err := database.DB.Model(&models.Image{}).
+		Where("(type IS NULL OR type <> ?)", "video").
+		Count(&totalImages).Error; err != nil {
 		return fmt.Errorf("failed to count images: %w", err)
 	}
 
@@ -160,10 +277,7 @@ func VerifyDownloadedImages() error {
 		SetVerificationRunning(true, int(totalImages))
 		defer SetVerificationRunning(false, 0)
 
-		missingCount := 0
 		var recoveredCount int32 = 0
-
-		var rawTasks []ImageRecoveryTask
 
 		type updateResult struct {
 			ID             uint
@@ -199,8 +313,9 @@ func VerifyDownloadedImages() error {
 					} else {
 						atomic.AddInt32(&recoveredCount, 1)
 						IncVerificationRecovered()
-						// Re-downloaded file now on disk — (re)build its embedding.
-						EnqueueEmbed(res.ID)
+						// Embedding is deferred until recovery completes (see
+						// below) so the embedder does not compete with downloads
+						// for CPU on a fresh install.
 					}
 				}
 				tx.Commit()
@@ -224,114 +339,67 @@ func VerifyDownloadedImages() error {
 			}
 		}()
 
-		// Phase 1: scan and collect missing files (keyset pagination)
-		const chunkSize = 500
-		var lastID uint
-		for {
-			var imageChunk []struct {
-				ID          uint
-				Filename    string
-				DownloadURL string
-				IsFavorite  bool
-				FileExists  bool
-				CreatedAt   time.Time
-			}
-
-			if err := database.DB.
-				Model(&models.Image{}).
-				Select("id, filename, download_url, is_favorite, file_exists, created_at").
-				Where("id > ?", lastID).
-				Order("id ASC").
-				Limit(chunkSize).
-				Find(&imageChunk).Error; err != nil {
-				logger.Errorf("failed to query image batch: %v", err)
-				break
-			}
-			if len(imageChunk) == 0 {
-				break
-			}
-
-			for _, img := range imageChunk {
-				IncVerificationProcessed()
-				expectedFullPath := filepath.Join(UploadsDir, img.Filename)
-
-				if _, err := os.Stat(expectedFullPath); os.IsNotExist(err) {
-					missingCount++
-					IncVerificationMissing()
-					if img.FileExists {
-						database.DB.Model(&models.Image{}).Where("id = ?", img.ID).Update("file_exists", false)
-					}
-
-					thumbPath := filepath.Join(UploadsDir, "thumbnails", filepath.Base(img.Filename))
-					if _, err := os.Stat(thumbPath); os.IsNotExist(err) {
-						if _, err := os.Stat(expectedFullPath); err == nil {
-							go GenerateThumbnail(expectedFullPath)
+		// Post-processing pool: dominant colors (k-means) and the Lanczos
+		// thumbnail resize are CPU-bound and must not occupy download slots.
+		type imagePostJob struct {
+			result updateResult
+			path   string
+		}
+		postChan := make(chan imagePostJob, 128)
+		var wgPost sync.WaitGroup
+		for w := 0; w < recoveryPostprocessWorkers(); w++ {
+			wgPost.Add(1)
+			go func() {
+				defer wgPost.Done()
+				for job := range postChan {
+					if job.result.DominantColors == "" {
+						// gallery-dl fallback results already carry colors.
+						colors, err := ExtractDominantColors(job.path)
+						if err != nil {
+							logger.Warnf("Dominant color extraction failed for image %d: %v", job.result.ID, err)
+							colors = "[]"
 						}
+						job.result.DominantColors = colors
 					}
-
-					if img.DownloadURL == "" {
-						continue
+					if _, err := GenerateThumbnail(job.path); err != nil {
+						logger.Warnf("Thumbnail generation failed for recovered image %d: %v", job.result.ID, err)
 					}
-
-					rawTasks = append(rawTasks, ImageRecoveryTask{
-						ID:            img.ID,
-						CurrentDBPath: img.Filename,
-						DownloadURL:   img.DownloadURL,
-						IsFavorite:    img.IsFavorite,
-						CreatedAt:     img.CreatedAt,
-						SourceName:    "uncategorized",
-					})
+					resultChan <- job.result
 				}
-			}
-
-			lastID = imageChunk[len(imageChunk)-1].ID
+			}()
 		}
 
+		// Phase 1: collect missing files from the file_exists column, which
+		// SyncFileExists computed immediately before this runs at startup.
+		// Rows are already false, so there is no per-row stat and no per-row
+		// UPDATE. Videos are excluded (the video pipeline owns them).
+		rawTasks, missingCount, collectErr := collectMissingImageTasks()
+		if collectErr != nil {
+			logger.Errorf("Missing-image scan finished with errors: %v", collectErr)
+		} else {
+			// Rows examined only via the column (files believed present) still
+			// count as processed so the progress counter reaches the total.
+			AddVerificationProcessed(int32(totalImages) - int32(missingCount))
+		}
 		if missingCount > 0 {
-			fmt.Printf("Found %d missing images\n", missingCount)
+			logger.Infof("Found %d missing images", missingCount)
 		}
 
 		// Phase 2: prioritize and recover
 		if len(rawTasks) > 0 {
 			// 1. Batch load gallery associations and source names for missing images
-			type imgGalRel struct {
-				ImageID    uint
-				GalleryID  uint
-				SourceName *string
+			taskIDs := make([]uint, len(rawTasks))
+			for i, t := range rawTasks {
+				taskIDs[i] = t.ID
 			}
-
-			imgToGalleries := make(map[uint][]uint)
-			imgToSource := make(map[uint]string)
+			imgToGalleries, imgToSource, relErr := loadImageGalleryRelations(taskIDs)
+			if relErr != nil {
+				logger.Errorf("Failed to query gallery relations for missing images: %v", relErr)
+			}
 			referencedGalMap := make(map[uint]bool)
-
-			const queryBatchSize = 1000
-			for i := 0; i < len(rawTasks); i += queryBatchSize {
-				end := i + queryBatchSize
-				if end > len(rawTasks) {
-					end = len(rawTasks)
-				}
-				var ids []uint
-				for _, t := range rawTasks[i:end] {
-					ids = append(ids, t.ID)
-				}
-
-				var rels []imgGalRel
-				err := database.DB.Table("image_galleries").
-					Select("image_galleries.image_id, image_galleries.gallery_id, sources.name as source_name").
-					Joins("JOIN galleries ON galleries.id = image_galleries.gallery_id").
-					Joins("LEFT JOIN sources ON sources.id = galleries.source_id").
-					Where("image_galleries.image_id IN ?", ids).
-					Scan(&rels).Error
-				if err != nil {
-					logger.Errorf("Failed to query gallery relations for missing images: %v", err)
-				} else {
-					for _, r := range rels {
-						imgToGalleries[r.ImageID] = append(imgToGalleries[r.ImageID], r.GalleryID)
-						referencedGalMap[r.GalleryID] = true
-						if r.SourceName != nil && *r.SourceName != "" && imgToSource[r.ImageID] == "" {
-							imgToSource[r.ImageID] = *r.SourceName
-						}
-					}
+			for _, gids := range imgToGalleries {
+				for _, gid := range gids {
+					referencedGalMap[gid] = true
 				}
 			}
 
@@ -368,6 +436,7 @@ func VerifyDownloadedImages() error {
 			}
 
 			// 3. Query creation dates for all referenced galleries
+			const queryBatchSize = 1000
 			var refGalIDs []uint
 			for gid := range referencedGalMap {
 				refGalIDs = append(refGalIDs, gid)
@@ -405,7 +474,7 @@ func VerifyDownloadedImages() error {
 				providerTasks[provider] = append(providerTasks[provider], task)
 			}
 
-			const maxConcurrentPerProvider = 10
+			maxConcurrentPerProvider := recoveryConcurrency()
 			var wgProviders sync.WaitGroup
 
 			for provider, pTasks := range providerTasks {
@@ -444,12 +513,12 @@ func VerifyDownloadedImages() error {
 									if u, perr := urlpkg.Parse(task.DownloadURL); perr == nil {
 										referer = u.Scheme + "://" + u.Host
 									}
-									result, err := DownloadImage(task.DownloadURL, task.SourceName, referer)
+									result, err := DownloadImageWithoutColors(task.DownloadURL, task.SourceName, referer)
 									if err != nil {
 										if prov == "imx" && config.Global.GalleryDL.Enabled {
 											logger.Debugf("HTTP download failed for image ID %d; attempting gallery-dl fallback", task.ID)
 											gctx, gcancel := context.WithTimeout(context.Background(), time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
-											result, err = DownloadImageWithGalleryDL(gctx, task.DownloadURL, task.SourceName, time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
+											result, err = DownloadImageWithGalleryDLWithoutPostProcessing(gctx, task.DownloadURL, task.SourceName, time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
 											gcancel()
 											if err != nil {
 												logger.Warnf("[%s] Failed to download image ID %d after gallery-dl fallback: %v", prov, task.ID, err)
@@ -466,13 +535,14 @@ func VerifyDownloadedImages() error {
 										relPath = filepath.Join(task.SourceName, filepath.Base(result.Path))
 									}
 
-									resultChan <- updateResult{
-										ID:             task.ID,
-										RelPath:        relPath,
-										DominantColors: result.DominantColors,
+									postChan <- imagePostJob{
+										result: updateResult{
+											ID:             task.ID,
+											RelPath:        relPath,
+											DominantColors: result.DominantColors,
+										},
+										path: result.Path,
 									}
-
-									GenerateThumbnail(result.Path)
 
 									duration := time.Since(start)
 									logger.Debugf("[%s] Recovered image ID %d in %.2fs", prov, task.ID, duration.Seconds())
@@ -488,15 +558,31 @@ func VerifyDownloadedImages() error {
 			}
 
 			wgProviders.Wait()
-			close(resultChan) // Signal batch processor to finish
-			wgBatch.Wait()    // Wait for batch processor to complete writes
+			close(postChan) // Signal post-processing pool to finish
+			wgPost.Wait()   // Colors/thumbnails done; resultChan fully fed
+			close(resultChan)
+			wgBatch.Wait() // Wait for batch processor to complete writes
 			database.Checkpoint()
+
+			// Embedding is deferred until recovery completes so the embedder
+			// does not compete with downloads for CPU on a fresh install; the
+			// periodic sweep would otherwise pick these up within 15 minutes.
+			if n := EnqueueMissingEmbeddings(); n > 0 {
+				logger.Infof("Enqueued %d recovered images for embedding", n)
+			}
+		} else {
+			// No missing work: let the batch writer and post pool exit instead
+			// of leaking them for the process lifetime.
+			close(postChan)
+			wgPost.Wait()
+			close(resultChan)
+			wgBatch.Wait()
 		}
 
 		recovered := atomic.LoadInt32(&recoveredCount)
 		stillMissing := missingCount - int(recovered)
 		if missingCount > 0 {
-			fmt.Printf("Image verification complete — Downloaded: %d | Still missing: %d\n", recovered, stillMissing)
+			logger.Infof("Image verification complete — Downloaded: %d | Still missing: %d", recovered, stillMissing)
 		}
 	}()
 
@@ -693,35 +779,42 @@ func RemoveDuplicateImages() error {
 		// 2. File Exists on Disk
 		// 3. Oldest CreatedAt (Keep the original import)
 
+		// Precompute on-disk existence once per image; stat'ing inside the sort
+		// comparator would cost O(n log n) syscalls per duplicate group.
+		type candidate struct {
+			img    models.Image
+			exists bool
+		}
+		candidates := make([]candidate, len(images))
+		for i, img := range images {
+			_, err := os.Stat(filepath.Join(UploadsDir, img.Filename))
+			candidates[i] = candidate{img: img, exists: err == nil}
+		}
+
 		// Sort so the best candidate is at index 0
-		sort.Slice(images, func(i, j int) bool {
+		sort.Slice(candidates, func(i, j int) bool {
+			a, b := candidates[i].img, candidates[j].img
+
 			// 1. IsFavorite
-			if images[i].IsFavorite != images[j].IsFavorite {
-				return images[i].IsFavorite // True (favorite) comes first
+			if a.IsFavorite != b.IsFavorite {
+				return a.IsFavorite // True (favorite) comes first
 			}
 
 			// 2. File Exists
-			pathI := filepath.Join(UploadsDir, images[i].Filename)
-			pathJ := filepath.Join(UploadsDir, images[j].Filename)
-			_, errI := os.Stat(pathI)
-			_, errJ := os.Stat(pathJ)
-			existsI := errI == nil
-			existsJ := errJ == nil
-
-			if existsI != existsJ {
-				return existsI // True (exists) comes first
+			if candidates[i].exists != candidates[j].exists {
+				return candidates[i].exists // True (exists) comes first
 			}
 
 			// 3. Oldest CreatedAt (Stable ID usually implies age too, but use CreatedAt)
-			return images[i].CreatedAt.Before(images[j].CreatedAt)
+			return a.CreatedAt.Before(b.CreatedAt)
 		})
 
-		keeper := images[0]
+		keeper := candidates[0].img
 		keeperPath := filepath.Join(UploadsDir, keeper.Filename)
 
 		// The rest are to be removed
-		for i := 1; i < len(images); i++ {
-			toRemove := images[i]
+		for i := 1; i < len(candidates); i++ {
+			toRemove := candidates[i].img
 			pathToRemove := filepath.Join(UploadsDir, toRemove.Filename)
 
 			// Delete from DB

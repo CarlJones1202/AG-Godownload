@@ -22,6 +22,7 @@ import type {
   SimilarImagesResponse,
   Source,
   Tag,
+  TopColor,
 } from '@/types';
 
 const BASE = '/api';
@@ -122,6 +123,7 @@ export const galleries = {
 
 export interface ImageListParams extends PaginationParams {
   gallery_id?: number;
+  filter_person?: number;
   type?: string;
   favorites?: boolean;
   sort?: string;
@@ -151,6 +153,10 @@ export const images = {
     }),
   searchByColor: (color: string, limit?: number, threshold?: number) =>
     request<PaginatedResult<Image>>(`/search/color${qs({ color, limit, threshold })}`),
+};
+
+export const colors = {
+  top: (limit?: number) => request<TopColor[]>(`/colors/top${qs({ limit })}`),
 };
 
 export const ratings = {

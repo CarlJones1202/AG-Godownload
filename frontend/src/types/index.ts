@@ -184,6 +184,11 @@ export interface ColorSearchResult {
   distance: number;
 }
 
+export interface TopColor {
+  color: string;
+  image_count: number;
+}
+
 export interface PaginationParams {
   limit?: number;
   offset?: number;

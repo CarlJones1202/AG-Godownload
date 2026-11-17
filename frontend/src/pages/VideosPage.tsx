@@ -74,6 +74,10 @@ export function VideosPage() {
   const linkPersonMut = useMutation({
     mutationFn: (personId: number) => people.linkImage(personId, linkPersonImageId!),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['person'] });
+      queryClient.invalidateQueries({ queryKey: ['person-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['person-videos'] });
+      queryClient.invalidateQueries({ queryKey: ['people'] });
       setLinkPersonImageId(null);
       setPersonSearch('');
     },
@@ -100,7 +104,7 @@ export function VideosPage() {
                 onClick={() => setActiveVideo(vid)}
               >
                 <div className="relative aspect-video bg-zinc-800 overflow-hidden">
-                  <VideoThumb filename={vid.filename} alt={vid.filename} />
+                  <VideoThumb filename={vid.filename} thumbnailPath={vid.thumbnail_path} alt={vid.filename} />
                   <div className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity">
                     <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center">
                       <Play size={24} className="text-white ml-0.5" />
@@ -121,7 +125,7 @@ export function VideosPage() {
                     {vid.vr_mode !== 'none' && <Badge variant="warning">VR {vid.vr_mode}</Badge>}
                     <span className="text-xs text-zinc-500 ml-auto">{formatDate(vid.created_at)}</span>
                   </div>
-                  <div className="flex items-center justify-between mt-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                  <div className="flex items-center justify-between mt-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="flex items-center gap-1">

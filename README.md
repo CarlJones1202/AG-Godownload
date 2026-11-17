@@ -34,6 +34,15 @@ go run .
 
 The server will start on port 8080.
 
+### Graceful shutdown and crawl recovery
+
+Stop the server with Ctrl+C (or send SIGTERM). Shutdown stops workers from
+starting queued sources and waits for each active source crawl to finish before
+closing the database. Sources that were still queued are re-queued automatically
+when the server starts again. The wait can last as long as the current source
+takes; keep PostgreSQL running until the server reports that shutdown is
+complete.
+
 ### ThePornDB provider aliases
 
 Set `TPDB_API_KEY` in the server process environment or local `.env`, then

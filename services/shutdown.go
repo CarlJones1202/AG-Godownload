@@ -18,16 +18,15 @@ func ShutdownChan() <-chan struct{} {
 	return shutdown
 }
 
-// StopWorkers signals all background workers to exit. Safe to call multiple
-// times — only the first call takes effect. Stops task queues first so
-// workers finish their current item and then exit, then the HTTP server
-// shutdown can proceed, and finally the DB is closed.
+// StopWorkers signals background workers to exit and waits for active source
+// crawls to finish before the database is closed. Safe to call multiple times.
 func StopWorkers() {
 	stopOnce.Do(func() {
 		StopTaskQueues()
 		StopScanQueue()
 		StopWebSocketHub()
 		close(shutdown)
+		WaitForCrawlerWorkers()
 		StopEmbeddingWorkers()
 		logger.Info("Workers signaled to stop")
 	})

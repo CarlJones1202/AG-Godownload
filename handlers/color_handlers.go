@@ -143,3 +143,24 @@ func SearchByColor(c *gin.Context) {
 		},
 	})
 }
+
+// GetTopColors returns the most frequently used colors across image palettes
+// as preset swatches for the color-search UI. limit defaults to 16 and is
+// clamped to 1–64 to bound the response.
+func GetTopColors(c *gin.Context) {
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "16"))
+	if err != nil || limit < 1 {
+		limit = 16
+	}
+	if limit > 64 {
+		limit = 64
+	}
+
+	colors, err := services.TopDominantColors(limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to compute top colors"})
+		return
+	}
+
+	c.JSON(http.StatusOK, colors)
+}

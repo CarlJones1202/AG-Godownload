@@ -70,6 +70,13 @@ func Checkpoint() {
 }
 
 func Migrate() {
+	if err := migrateDuplicateTags(); err != nil {
+		logger.Fatal("Failed to migrate duplicate tags:", err)
+	}
+	if err := migrateDuplicateImageEmbeddings(); err != nil {
+		logger.Fatal("Failed to migrate duplicate image embeddings:", err)
+	}
+
 	err := DB.AutoMigrate(
 		&models.Source{},
 		&models.Gallery{},
@@ -97,6 +104,99 @@ func Migrate() {
 
 	addPersonGalleriesIndex()
 	addPersonScanQueueIndexes()
+}
+
+func migrateDuplicateTags() error {
+	if !DB.Migrator().HasTable(&models.Tag{}) {
+		return nil
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var duplicateNames []struct {
+			Name string
+		}
+		if err := tx.Unscoped().Model(&models.Tag{}).
+			Select("name").
+			Group("name").
+			Having("COUNT(*) > 1").
+			Find(&duplicateNames).Error; err != nil {
+			return err
+		}
+
+		for _, duplicate := range duplicateNames {
+			var tags []models.Tag
+			if err := tx.Unscoped().Where("name = ?", duplicate.Name).
+				Order("CASE WHEN deleted_at IS NULL THEN 0 ELSE 1 END, id ASC").
+				Find(&tags).Error; err != nil {
+				return err
+			}
+			if len(tags) < 2 {
+				continue
+			}
+
+			keepID := tags[0].ID
+			for _, tag := range tags[1:] {
+				if tx.Migrator().HasTable("image_tags") {
+					if err := tx.Exec(`
+						INSERT INTO image_tags (image_id, tag_id)
+						SELECT source.image_id, ?
+						FROM image_tags AS source
+						WHERE source.tag_id = ?
+						  AND NOT EXISTS (
+							SELECT 1 FROM image_tags AS existing
+							WHERE existing.image_id = source.image_id
+							  AND existing.tag_id = ?
+						  )
+					`, keepID, tag.ID, keepID).Error; err != nil {
+						return err
+					}
+					if err := tx.Exec("DELETE FROM image_tags WHERE tag_id = ?", tag.ID).Error; err != nil {
+						return err
+					}
+				}
+
+				if err := tx.Unscoped().Where("id = ?", tag.ID).Delete(&models.Tag{}).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		return nil
+	})
+}
+
+func migrateDuplicateImageEmbeddings() error {
+	if !DB.Migrator().HasTable(&models.ImageEmbedding{}) {
+		return nil
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var duplicateImageIDs []uint
+		if err := tx.Model(&models.ImageEmbedding{}).
+			Select("image_id").
+			Group("image_id").
+			Having("COUNT(*) > 1").
+			Pluck("image_id", &duplicateImageIDs).Error; err != nil {
+			return err
+		}
+
+		for _, imageID := range duplicateImageIDs {
+			var keepID uint
+			if err := tx.Model(&models.ImageEmbedding{}).
+				Where("image_id = ?", imageID).
+				Order("created_at DESC, id DESC").
+				Limit(1).
+				Pluck("id", &keepID).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("image_id = ? AND id <> ?", imageID, keepID).
+				Delete(&models.ImageEmbedding{}).Error; err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
 }
 
 func migratePlayboyProviderAliases() error {

@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { images, tagsApi, people } from '@/lib/api';
+import { images, tagsApi, people, colors as colorsApi } from '@/lib/api';
 import { cn, parseColors, thumbnailUrl, imageUrl } from '@/lib/utils';
 import {
   PageHeader,
@@ -20,6 +20,14 @@ import { Heart, Search, Palette, Trash2, Shuffle, UserPlus, X, Filter } from 'lu
 import { usePagination } from '@/hooks/usePagination';
 import type { Person } from '@/types';
 import { notifyFavoriteStateChanged } from '@/lib/favoriteFeedback';
+
+// normalizeHexColor returns the canonical #RRGGBB form of a user-entered hex
+// color, or '' when it is not yet a complete 6-digit hex color.
+const normalizeHexColor = (value: string): string => {
+  const trimmed = value.trim();
+  const withHash = trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
+  return /^#[0-9a-fA-F]{6}$/.test(withHash) ? withHash.toUpperCase() : '';
+};
 
 export function ImagesPage() {
   const queryClient = useQueryClient();
@@ -94,6 +102,13 @@ export function ImagesPage() {
     enabled: !!activeColorSearch,
   });
 
+  const { data: topColors } = useQuery({
+    queryKey: ['colors', 'top'],
+    queryFn: () => colorsApi.top(16),
+    enabled: showFilters,
+    staleTime: 5 * 60 * 1000, // full-table aggregation: refresh at most every 5 min
+  });
+
   const favMut = useMutation({
     mutationFn: (id: number) => images.toggleFavorite(id),
     onSuccess: (result, id) => {
@@ -118,6 +133,9 @@ export function ImagesPage() {
     setColorSearch('');
     setActiveColorSearch('');
   };
+
+  const validTypedColor = normalizeHexColor(colorSearch);
+  const pickerValue = validTypedColor || '#000000';
 
   const displayImages = activeColorSearch
     ? (colorResults?.data ?? [])
@@ -254,7 +272,7 @@ export function ImagesPage() {
           <div className="flex items-center gap-2 mt-4 pt-4 border-t border-zinc-800">
             <Palette size={14} className="text-zinc-500" />
             <span className="text-xs text-zinc-500 font-medium">Color Search</span>
-            <div className="flex-1 flex gap-2">
+            <div className="flex-1 flex items-center gap-2">
               <Input
                 placeholder="#ff0000"
                 value={colorSearch}
@@ -262,9 +280,24 @@ export function ImagesPage() {
                 onKeyDown={(e) => e.key === 'Enter' && handleColorSearch()}
                 className="w-32"
               />
-              {colorSearch && (
-                <div className="w-8 h-8 rounded border border-zinc-700 shrink-0" style={{ backgroundColor: colorSearch.startsWith('#') ? colorSearch : `#${colorSearch}` }} />
-              )}
+              {/* Native color picker: fills the hex field only; press Search to run. */}
+              <label
+                title="Pick a color"
+                className={cn(
+                  'relative w-8 h-8 shrink-0 rounded-md border border-zinc-700 bg-zinc-800 overflow-hidden cursor-pointer transition-colors hover:border-zinc-500',
+                  'focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-blue-500',
+                )}
+                style={validTypedColor ? { backgroundColor: validTypedColor } : undefined}
+              >
+                <input
+                  type="color"
+                  value={pickerValue}
+                  onChange={(e) => setColorSearch(e.target.value)}
+                  aria-label="Pick a color"
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+                {!validTypedColor && <Palette size={14} className="absolute inset-0 m-auto text-zinc-500 pointer-events-none" />}
+              </label>
             </div>
             <Button size="sm" onClick={handleColorSearch} disabled={!colorSearch.trim()}>
               <Search size={14} /> Search
@@ -273,6 +306,38 @@ export function ImagesPage() {
               <Button variant="ghost" size="sm" onClick={clearColorSearch}>Clear</Button>
             )}
           </div>
+
+          {topColors && topColors.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              <span className="text-xs text-zinc-500 font-medium shrink-0">Top colors</span>
+              <div className="flex flex-wrap gap-1.5">
+                {topColors.map((c) => {
+                  const isActive = normalizeHexColor(activeColorSearch) === c.color;
+                  return (
+                    <button
+                      key={c.color}
+                      type="button"
+                      aria-label={`Search by color ${c.color} (${c.image_count} images)`}
+                      aria-pressed={isActive}
+                      title={`${c.color} (${c.image_count} images)`}
+                      onClick={() => {
+                        setColorSearch(c.color);
+                        setActiveColorSearch(c.color);
+                      }}
+                      className={cn(
+                        'w-7 h-7 rounded-md border border-zinc-700 transition-colors',
+                        isActive
+                          ? 'border-blue-500 ring-2 ring-blue-500/40'
+                          : 'hover:border-zinc-500',
+                        'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500',
+                      )}
+                      style={{ backgroundColor: c.color }}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
