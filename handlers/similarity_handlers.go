@@ -451,6 +451,15 @@ func populateImagePaths(images []models.Image) {
 		Joins("LEFT JOIN sources ON sources.id = galleries.source_id").
 		Where("image_galleries.image_id IN ?", ids).
 		Scan(&rows)
+	var directRows []struct {
+		ImageID    uint
+		SourceName string
+	}
+	database.DB.Table("images").
+		Select("images.id AS image_id, sources.name AS source_name").
+		Joins("LEFT JOIN sources ON sources.id = images.source_id").
+		Where("images.id IN ?", ids).
+		Scan(&directRows)
 	sourceByImage := map[uint]string{}
 	for _, r := range rows {
 		if _, ok := sourceByImage[r.ImageID]; !ok {
@@ -459,6 +468,14 @@ func populateImagePaths(images []models.Image) {
 				name = "uncategorized"
 			}
 			sourceByImage[r.ImageID] = name
+		}
+	}
+	for _, r := range directRows {
+		if _, ok := sourceByImage[r.ImageID]; ok {
+			continue
+		}
+		if r.SourceName != "" {
+			sourceByImage[r.ImageID] = r.SourceName
 		}
 	}
 	for i := range images {
@@ -471,9 +488,32 @@ func populateImagePaths(images []models.Image) {
 		// (see crawler_service relPath). Use just the basename so the source
 		// dir isn't doubled in the URL, which would 404.
 		leaf := filepath.Base(images[i].Filename)
+		if filenameWebPath, filenameThumbnailPath, ok := pathsFromRelativeFilename(images[i].Filename); ok {
+			images[i].WebPath = filenameWebPath
+			images[i].ThumbnailPath = filenameThumbnailPath
+			continue
+		}
 		images[i].WebPath = fmt.Sprintf("/images/%s/%s", sanitized, leaf)
 		images[i].ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitized, leaf)
 	}
+}
+
+func pathsFromRelativeFilename(filename string) (webPath string, thumbnailPath string, ok bool) {
+	normalized := strings.ReplaceAll(strings.TrimLeft(filename, `/\`), `\`, "/")
+	parts := strings.Split(normalized, "/")
+	if len(parts) < 2 {
+		return "", "", false
+	}
+
+	leaf := parts[len(parts)-1]
+	sourceDirParts := parts[:len(parts)-1]
+	for i, part := range sourceDirParts {
+		sourceDirParts[i] = services.SanitizeDirectoryName(part)
+	}
+	sourceDir := strings.Join(sourceDirParts, "/")
+	return fmt.Sprintf("/images/%s/%s", sourceDir, leaf),
+		fmt.Sprintf("/images/%s/thumbnails/%s", sourceDir, leaf),
+		true
 }
 
 func roundScore(v float64) float64 {

@@ -64,6 +64,8 @@ export interface Image {
   duration_seconds?: number;
   tags?: Tag[];
   thumbnail_path?: string;
+  web_path?: string;
+  file_exists?: boolean;
 }
 
 export interface RatingProfile {

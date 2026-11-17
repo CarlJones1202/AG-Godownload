@@ -8,6 +8,26 @@ import (
 	"gallery_api/services"
 )
 
+func TestPathsFromRelativeFilename(t *testing.T) {
+	webPath, thumbnailPath, ok := pathsFromRelativeFilename(`Source Name\hash.jpg`)
+	if !ok {
+		t.Fatal("relative filename was not recognized")
+	}
+	sourceDir := services.SanitizeDirectoryName("Source Name")
+	wantWebPath := "/images/" + sourceDir + "/hash.jpg"
+	if webPath != wantWebPath {
+		t.Errorf("webPath = %q, want %q", webPath, wantWebPath)
+	}
+	wantThumbnailPath := "/images/" + sourceDir + "/thumbnails/hash.jpg"
+	if thumbnailPath != wantThumbnailPath {
+		t.Errorf("thumbnailPath = %q, want %q", thumbnailPath, wantThumbnailPath)
+	}
+
+	if _, _, ok := pathsFromRelativeFilename("hash.jpg"); ok {
+		t.Fatal("bare filename should use database-derived source path")
+	}
+}
+
 func TestResolveUploadPath(t *testing.T) {
 	tests := []struct {
 		path string

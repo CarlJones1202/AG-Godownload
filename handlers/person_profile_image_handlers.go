@@ -30,6 +30,7 @@ func GetPersonImages(c *gin.Context) {
 	var images []models.Image
 	if err := database.DB.
 		Where("type = 'image'").
+		Where("file_exists = ?", true).
 		Where("id IN (SELECT ig.image_id FROM image_galleries ig JOIN person_galleries pg ON pg.gallery_id = ig.gallery_id WHERE pg.person_id = ? "+
 			"UNION SELECT image_id FROM person_images WHERE person_id = ?)", uint(personID), uint(personID)).
 		Order("created_at DESC, id DESC").

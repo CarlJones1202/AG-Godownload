@@ -39,9 +39,34 @@ import {
   Play,
 } from 'lucide-react';
 import { CoverGrid } from '@/components/CoverGrid';
-import { getScanGalleryName } from '@/lib/utils';
+import { getScanGalleryName, thumbnailUrl, imageUrl } from '@/lib/utils';
 import { usePagination } from '@/hooks/usePagination';
 import { VideoPlayer } from '@/components/VideoPlayer';
+
+function ProfilePickerImage({ image }: { image: Image }) {
+  const sources = Array.from(new Set([
+    image.thumbnail_path,
+    image.filename ? thumbnailUrl(image.filename) : undefined,
+    image.web_path,
+    image.filename ? imageUrl(image.filename) : undefined,
+  ].filter((source): source is string => Boolean(source))));
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const src = sources[sourceIndex];
+
+  if (!src) {
+    return <div className="w-full h-full flex items-center justify-center text-zinc-600 text-[9px]">{image.filename}</div>;
+  }
+
+  return (
+    <img
+      src={src}
+      alt={image.filename}
+      loading="lazy"
+      className="w-full h-full object-cover"
+      onError={() => setSourceIndex((index) => index + 1)}
+    />
+  );
+}
 
 const PROVIDER_LIST = [
   "MetArt", "MetartX", "PlayboyPlus", "Vixen",
@@ -875,21 +900,18 @@ export function PersonDetailPage() {
               {loadingPersonImages ? (
                 <div className="py-12 flex flex-col items-center gap-3"><Spinner /><p className="text-xs text-zinc-500 animate-pulse">Loading images...</p></div>
               ) : !personImages || personImages.data.length === 0 ? (
-                <p className="text-xs text-zinc-500 text-center py-12">No images linked to this person's galleries yet.</p>
+                <p className="text-xs text-zinc-500 text-center py-12">No downloaded images are available for this person.</p>
               ) : (
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
                   {personImages.data.map((img) => {
                     const isCurrent = img.id === person.profile_image_id;
-                    const src = img.thumbnail_path && img.thumbnail_path.startsWith('/') ? img.thumbnail_path : undefined;
                     return (
                       <button key={img.id} disabled={setProfileImageMut.isPending}
                         onClick={() => setProfileImageMut.mutate(img.id)}
                         className={`relative aspect-[3/4] rounded-lg overflow-hidden border-2 transition-all bg-zinc-800 group ${
                           isCurrent ? 'border-amber-400' : 'border-transparent hover:border-zinc-600'
                         }`} title={img.filename}>
-                        {src
-                          ? <img src={src} alt={img.filename} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-                          : <div className="w-full h-full flex items-center justify-center text-zinc-600 text-[9px]">{img.filename}</div>}
+                        <ProfilePickerImage image={img} />
                         <div className={`absolute inset-0 flex items-center justify-center text-[10px] font-medium transition-all ${
                           isCurrent ? 'bg-amber-500/20 text-amber-200' : 'bg-black/40 text-white opacity-0 group-hover:opacity-100'
                         }`}>
