@@ -33,6 +33,48 @@ interface JustifiedGridProps {
 }
 
 const DEFAULT_ASPECT = 4 / 3;
+const failedGridSources = new Set<string>();
+
+function GridImage({
+  item,
+  handleImageLoad,
+}: {
+  item: JustifiedItem;
+  handleImageLoad: (id: string | number, e: React.SyntheticEvent<HTMLImageElement>) => void;
+}) {
+  const sources = Array.from(new Set(
+    [item.thumbSrc, item.src].filter((source): source is string => Boolean(source)),
+  ));
+  const [sourceIndex, setSourceIndex] = useState(() =>
+    sources.findIndex((source) => !failedGridSources.has(source)),
+  );
+
+  if (sourceIndex < 0 || sourceIndex >= sources.length) {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-zinc-600 text-xs">
+        Preview unavailable
+      </div>
+    );
+  }
+
+  const source = sources[sourceIndex];
+  return (
+    <img
+      src={source}
+      alt=""
+      className="w-full h-full object-cover"
+      loading="lazy"
+      onLoad={(e) => handleImageLoad(item.id, e)}
+      onError={() => {
+        failedGridSources.add(source);
+        setSourceIndex((index) => {
+          const next = sources.slice(index + 1).findIndex((candidate) => !failedGridSources.has(candidate));
+          return next < 0 ? sources.length : index + 1 + next;
+        });
+      }}
+    />
+  );
+}
 
 export function JustifiedGrid({
   items,
@@ -106,23 +148,7 @@ export function JustifiedGrid({
                 onClick={() => onItemClick?.(cell.globalIndex)}
               >
                 {cell.item.thumbSrc || cell.item.src ? (
-                  <img
-                    src={cell.item.thumbSrc ?? cell.item.src}
-                    alt=""
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                    onLoad={(e) => handleImageLoad(cell.item.id, e)}
-                    onError={(e) => {
-                      // Fall back to full-size src if thumbnail fails.
-                      const target = e.currentTarget;
-                      if (
-                        cell.item.thumbSrc &&
-                        target.src !== window.location.origin + cell.item.src
-                      ) {
-                        target.src = cell.item.src;
-                      }
-                    }}
-                  />
+                  <GridImage item={cell.item} handleImageLoad={handleImageLoad} />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-zinc-600 text-xs">
                     No preview

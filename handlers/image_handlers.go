@@ -343,6 +343,7 @@ func ServeImage(c *gin.Context) {
 		}
 	}
 
+	c.Header("Cache-Control", "private, max-age=60")
 	c.String(http.StatusNotFound, "Image not found")
 }
 
@@ -427,6 +428,7 @@ func ServeThumbnail(c *gin.Context) {
 		}
 	}
 
+	c.Header("Cache-Control", "private, max-age=60")
 	c.String(http.StatusNotFound, "Thumbnail not found")
 }
 

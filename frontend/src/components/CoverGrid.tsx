@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { formatDate, thumbnailUrl } from '@/lib/utils';
 import { Trash2, Eye } from 'lucide-react';
 
@@ -34,23 +35,28 @@ interface CoverGridCardProps {
 }
 
 function CoverGridCard({ item, onDelete }: CoverGridCardProps) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [item.thumbnailPath]);
+
   return (
     <Link
       to={`/galleries/${item.id}`}
       className="group relative block aspect-[3/2] rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-zinc-700 transition-all"
     >
-      {item.thumbnailPath ? (
+      {item.thumbnailPath && !failed ? (
         /^\//.test(item.thumbnailPath) ? (
           <img
             src={item.thumbnailPath}
             alt={item.title || `Gallery ${item.id}`}
             className="w-full h-full object-cover"
+            onError={() => setFailed(true)}
           />
         ) : (
           <img
             src={thumbnailUrl(item.thumbnailPath)}
             alt={item.title || `Gallery ${item.id}`}
             className="w-full h-full object-cover"
+            onError={() => setFailed(true)}
           />
         )
       ) : (
