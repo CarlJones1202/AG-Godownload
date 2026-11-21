@@ -143,9 +143,9 @@ export function FavoritesPage() {
                         <Play size={24} className="text-white ml-0.5" />
                       </div>
                     </div>
-                    {vid.duration_seconds != null && vid.duration_seconds > 0 && (
+                    {vid.duration != null && vid.duration > 0 && (
                       <div className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/70 text-white text-xs font-mono">
-                        {formatDuration(vid.duration_seconds)}
+                        {formatDuration(vid.duration)}
                       </div>
                     )}
                   </div>

@@ -61,7 +61,7 @@ export interface Image {
   is_favorite: boolean;
   is_video?: boolean;
   vr_mode: string;
-  duration_seconds?: number;
+  duration?: number;
   thumbnail_time_seconds?: number | null;
   tags?: Tag[];
   thumbnail_path?: string;

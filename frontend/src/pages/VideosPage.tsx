@@ -14,7 +14,7 @@ import {
   VideoThumb,
 } from '@/components/UI';
 import { VideoPlayer } from '@/components/VideoPlayer';
-import { Heart, Play, Trash2, UserPlus, X, Pencil } from 'lucide-react';
+import { Clock, Heart, Play, Trash2, UserPlus, X, Pencil } from 'lucide-react';
 import { usePagination } from '@/hooks/usePagination';
 import type { Image, Person } from '@/types';
 import { notifyFavoriteStateChanged } from '@/lib/favoriteFeedback';
@@ -110,9 +110,11 @@ export function VideosPage() {
                       <Play size={24} className="text-white ml-0.5" />
                     </div>
                   </div>
-                  {vid.duration_seconds != null && vid.duration_seconds > 0 && (
-                    <div className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/70 text-white text-xs font-mono">
-                      {formatDuration(vid.duration_seconds)}
+                  {vid.duration != null && vid.duration > 0 && (
+                    <div className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded bg-black/80 px-1.5 py-0.5 font-mono text-xs text-white">
+                      <Clock size={11} aria-hidden="true" />
+                      <span className="sr-only">Duration </span>
+                      {formatDuration(vid.duration)}
                     </div>
                   )}
                 </div>

@@ -23,7 +23,7 @@ export function VideoPlayer({ video, onClose, onThumbnailChange }: VideoPlayerPr
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(video.duration_seconds ?? 0);
+  const [duration, setDuration] = useState(video.duration ?? 0);
   const [loop, setLoop] = useState(false);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
