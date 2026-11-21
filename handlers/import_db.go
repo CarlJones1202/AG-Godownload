@@ -10,6 +10,7 @@ import (
 	"gallery_api/config"
 	"gallery_api/database"
 	"gallery_api/logger"
+	"gallery_api/services"
 	"github.com/gin-gonic/gin"
 )
 
@@ -69,6 +70,12 @@ func ImportDB(c *gin.Context) {
 	database.Connect(config.Global.DatabaseDSN())
 	database.Migrate()
 	database.MigrateData()
+
+	if services.StartMissingFileRecovery() {
+		logger.Info("Import: started missing-file recovery")
+	} else {
+		logger.Info("Import: missing-file recovery is already running")
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":     "database restored",

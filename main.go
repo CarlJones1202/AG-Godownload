@@ -45,34 +45,7 @@ func main() {
 	// before the slower metadata/thumbnail passes so downloads begin within
 	// seconds of process start and those passes run alongside them.
 	go func() {
-		logger.Info("Syncing file_exists column...")
-		if err := services.SyncFileExists(); err != nil {
-			logger.Error("File exists sync failed:", err)
-		}
-
-		logger.Info("Removing duplicate images...")
-		if err := services.RemoveDuplicateImages(); err != nil {
-			logger.Error("Duplicate image removal failed:", err)
-		}
-
-		logger.Info("Starting background verification of downloaded images...")
-		if err := services.VerifyDownloadedImages(); err != nil {
-			logger.Error("Background verification failed:", err)
-		} else {
-			logger.Info("Background verification started successfully")
-		}
-
-		logger.Info("Starting background verification of videos...")
-		if err := services.VerifyDownloadedVideos(); err != nil {
-			logger.Error("Video verification failed:", err)
-		} else {
-			logger.Info("Video verification started successfully")
-		}
-
-		logger.Info("Starting background verification of person images...")
-		if err := services.VerifyPersonImages(); err != nil {
-			logger.Error("Person image verification failed:", err)
-		}
+		services.RunMissingFileRecovery()
 
 		logger.Info("Starting scanning for missing video metadata...")
 		if err := services.ScanMissingMetadata(database.DB, false); err != nil {
