@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"gallery_api/database"
@@ -11,21 +12,27 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 )
 
 const (
-	vipergirlsBaseURL     = "https://vipergirls.to"
-	vipergirlsMaxResults  = 50
-	vipergirlsMaxQueryLen = 200
-	vipergirlsMaxBodySize = 10 << 20 // 10 MiB
-	vipergirlsUserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+	ForumSiteVipergirls = "vipergirls"
+	ForumSiteKittyKats  = "kitty-kats"
+
+	vipergirlsBaseURL      = "https://vipergirls.to"
+	vipergirlsMaxResults   = 50
+	vipergirlsMaxQueryLen  = 200
+	vipergirlsMaxBodySize  = 10 << 20 // 10 MiB
+	vipergirlsUserAgent    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+	vipergirlsSearchTimeout = 20 * time.Second
+	kittyKatsSearchTimeout  = 25 * time.Second
 )
 
 var (
 	vipergirlsThreadPathRE = regexp.MustCompile(`^/threads/(\d+)(?:-|/|$)`)
-	vipergirlsVideoForumRE = regexp.MustCompile(`(?i)\b(video|videos|movie|movies|clip|clips|film|films)\b`)
+	videoForumRE = regexp.MustCompile(`(?i)\b(video|videos|movie|movies|clip|clips|film|films)\b`)
 
 	// These are the forum IDs the site itself submits when "Search photo sections"
 	// is checked in its quick-search form. Sending imgsearch=1 together with these
@@ -34,8 +41,10 @@ var (
 	vipergirlsPhotoForumIDs = []string{"25", "161", "233", "235", "268", "372", "274"}
 )
 
-// VipergirlsSearchResult is one thread from a vipergirls.to search results page.
-type VipergirlsSearchResult struct {
+// ForumSearchResult is one thread from a supported forum search. The JSON shape is
+// shared by every source so the UI can render them in one grid.
+type ForumSearchResult struct {
+	Site         string `json:"site"`
 	ThreadID     string `json:"thread_id"`
 	Title        string `json:"title"`
 	SubForum     string `json:"sub_forum"`
@@ -43,10 +52,25 @@ type VipergirlsSearchResult struct {
 	ThumbnailURL string `json:"thumbnail_url,omitempty"`
 }
 
-// VipergirlsSearchResponse is the payload returned to the search popup.
+// VipergirlsSearchResult is kept as an alias for existing callers.
+type VipergirlsSearchResult = ForumSearchResult
+
+// ForumSearchSource describes one searched site, including a site-specific failure.
+// A partial failure is reported here instead of discarding results from other sites.
+type ForumSearchSource struct {
+	Site      string `json:"site"`
+	Label     string `json:"label"`
+	SearchURL string `json:"search_url"`
+	Error     string `json:"error,omitempty"`
+}
+
+// VipergirlsSearchResponse is the payload returned to the search popup. The endpoint
+// name and JSON shape are retained for existing callers; the response now aggregates
+// every supported forum.
 type VipergirlsSearchResponse struct {
 	Query     string                  `json:"query"`
 	SearchURL string                  `json:"search_url"`
+	Sources   []ForumSearchSource     `json:"sources"`
 	Data      []VipergirlsSearchResult `json:"data"`
 }
 
@@ -98,24 +122,35 @@ func IsVipergirlsThreadURL(raw string) bool {
 	return vipergirlsThreadPathRE.MatchString(u.Path)
 }
 
-// isVipergirlsPhotoForum keeps only results with an identifiable, non-video sub forum.
-// vipergirls.to uses "Videos"/"Movies" in its video forum names (e.g. "Hardcore Videos",
-// "Adult Movies"), so those are excluded here.
-func isVipergirlsPhotoForum(subForum string) bool {
+// IsForumThreadURL accepts a thread from any supported forum search source.
+func IsForumThreadURL(raw string) bool {
+	return IsVipergirlsThreadURL(raw) || IsKittyKatsThreadURL(raw)
+}
+
+// isPhotoForum keeps only results with an identifiable, non-video sub forum.
+// Forum names use "Videos"/"Movies"/"Clips"/"Films" for video sections
+// (e.g. "Hardcore Videos", "Adult Movies"), so those are excluded here.
+func isPhotoForum(subForum string) bool {
 	subForum = strings.TrimSpace(subForum)
-	if subForum == "" || vipergirlsVideoForumRE.MatchString(subForum) {
+	if subForum == "" || videoForumRE.MatchString(subForum) {
 		return false
 	}
 	return true
 }
 
-func isVipergirlsImageURL(raw string) bool {
+// isVipergirlsPhotoForum is retained for existing tests and callers.
+func isVipergirlsPhotoForum(subForum string) bool { return isPhotoForum(subForum) }
+
+func isAbsoluteHTTPURL(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return false
 	}
 	return u.Scheme == "http" || u.Scheme == "https"
 }
+
+// isVipergirlsImageURL is retained for existing callers.
+func isVipergirlsImageURL(raw string) bool { return isAbsoluteHTTPURL(raw) }
 
 func vipergirlsThreadID(threadURL string) string {
 	u, err := url.Parse(threadURL)
@@ -169,7 +204,7 @@ func firstVipergirlsImage(raw string) string {
 	var firstValid string
 	for _, candidate := range images {
 		candidate = strings.TrimSpace(candidate)
-		if !isVipergirlsImageURL(candidate) {
+		if !isAbsoluteHTTPURL(candidate) {
 			continue
 		}
 		if firstValid == "" {
@@ -227,7 +262,8 @@ func ParseVipergirlsSearch(reader io.Reader, base *url.URL) ([]VipergirlsSearchR
 		}
 		seen[threadURL] = true
 
-		results = append(results, VipergirlsSearchResult{
+		results = append(results, ForumSearchResult{
+			Site:         ForumSiteVipergirls,
 			ThreadID:     vipergirlsThreadID(threadURL),
 			Title:        title,
 			SubForum:     subForum,
@@ -242,6 +278,13 @@ func ParseVipergirlsSearch(reader io.Reader, base *url.URL) ([]VipergirlsSearchR
 // SearchVipergirls fetches the first page of a vipergirls.to search and returns only
 // results from photo subforums.
 func SearchVipergirls(query string) (*VipergirlsSearchResponse, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), vipergirlsSearchTimeout)
+	defer cancel()
+	return SearchVipergirlsWithContext(ctx, query)
+}
+
+// SearchVipergirlsWithContext is the context-aware form used by the combined search.
+func SearchVipergirlsWithContext(ctx context.Context, query string) (*VipergirlsSearchResponse, error) {
 	q := strings.TrimSpace(query)
 	if q == "" {
 		return nil, fmt.Errorf("search query is required")
@@ -256,7 +299,7 @@ func SearchVipergirls(query string) (*VipergirlsSearchResponse, error) {
 		return nil, fmt.Errorf("parse vipergirls base URL: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodGet, searchURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build vipergirls search request: %w", err)
 	}
@@ -281,14 +324,102 @@ func SearchVipergirls(query string) (*VipergirlsSearchResponse, error) {
 	return &VipergirlsSearchResponse{Query: q, SearchURL: searchURL, Data: results}, nil
 }
 
+type vipergirlsSearchOutcome struct {
+	response *VipergirlsSearchResponse
+	err      error
+}
+
+type kittyKatsSearchOutcome struct {
+	results []ForumSearchResult
+	err     error
+}
+
+// collectForumSearch runs both site searches under one context. A failure from one
+// site is reported in Sources while results from the other site are still returned.
+func collectForumSearch(
+	ctx context.Context,
+	query string,
+	searchVipergirls func(context.Context, string) (*VipergirlsSearchResponse, error),
+	searchKittyKats func(context.Context, string) ([]ForumSearchResult, error),
+) (*VipergirlsSearchResponse, error) {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return nil, fmt.Errorf("search query is required")
+	}
+	if len(q) > vipergirlsMaxQueryLen {
+		return nil, fmt.Errorf("search query must be %d characters or fewer", vipergirlsMaxQueryLen)
+	}
+
+	vgCh := make(chan vipergirlsSearchOutcome, 1)
+	kkCh := make(chan kittyKatsSearchOutcome, 1)
+
+	go func() {
+		resp, err := searchVipergirls(ctx, q)
+		vgCh <- vipergirlsSearchOutcome{response: resp, err: err}
+	}()
+	go func() {
+		results, err := searchKittyKats(ctx, q)
+		kkCh <- kittyKatsSearchOutcome{results: results, err: err}
+	}()
+
+	vg := <-vgCh
+	kk := <-kkCh
+
+	sources := []ForumSearchSource{
+		{
+			Site:      ForumSiteVipergirls,
+			Label:     "vipergirls.to",
+			SearchURL: VipergirlsSearchURL(q),
+		},
+		{
+			Site:      ForumSiteKittyKats,
+			Label:     "kitty-kats.net",
+			SearchURL: KittyKatsSearchURL(q),
+		},
+	}
+	if vg.err != nil {
+		sources[0].Error = vg.err.Error()
+	}
+	if kk.err != nil {
+		sources[1].Error = kk.err.Error()
+	}
+
+	data := make([]ForumSearchResult, 0)
+	if vg.response != nil {
+		data = append(data, vg.response.Data...)
+	}
+	data = append(data, kk.results...)
+
+	searchURL := VipergirlsSearchURL(q)
+	if vg.response != nil && vg.response.SearchURL != "" {
+		searchURL = vg.response.SearchURL
+	}
+	response := &VipergirlsSearchResponse{
+		Query:     q,
+		SearchURL: searchURL,
+		Sources:   sources,
+		Data:      data,
+	}
+	if vg.err != nil && kk.err != nil {
+		return response, fmt.Errorf("vipergirls search: %v; kitty-kats search: %v", vg.err, kk.err)
+	}
+	return response, nil
+}
+
+// SearchForumThreadsWithContext searches every supported forum for missing-gallery
+// thread candidates. One unavailable site does not hide results from the other.
+func SearchForumThreadsWithContext(ctx context.Context, query string) (*VipergirlsSearchResponse, error) {
+	return collectForumSearch(ctx, query, SearchVipergirlsWithContext, SearchKittyKatsWithContext)
+}
+
 // ScrapeVipergirlsAsMissingGallery associates a forum thread with a person's missing
 // gallery and queues the thread for crawling. It is safe to call twice for the same
 // thread/person pair.
 func ScrapeVipergirlsAsMissingGallery(req ScrapeVipergirlsRequest) (*ScrapeVipergirlsResponse, error) {
-	if !IsVipergirlsThreadURL(req.ThreadURL) {
-		return nil, fmt.Errorf("invalid vipergirls thread URL")
+	if !IsForumThreadURL(req.ThreadURL) {
+		return nil, fmt.Errorf("unsupported forum thread URL")
 	}
-	if req.ThumbnailURL != "" && !isVipergirlsImageURL(req.ThumbnailURL) {
+	if req.ThumbnailURL != "" && !isAbsoluteHTTPURL(req.ThumbnailURL) {
 		return nil, fmt.Errorf("invalid thumbnail URL")
 	}
 
@@ -347,7 +478,7 @@ func ScrapeVipergirlsAsMissingGallery(req ScrapeVipergirlsRequest) (*ScrapeViper
 		// keep the scrape request (and the UI's "Scraping..." state) open.
 		gallery.ProviderThumbnailURL = req.ThumbnailURL
 		database.DB.Save(&gallery)
-		go cacheVipergirlsThumbnail(gallery.ID, req.ThumbnailURL)
+		go cacheForumThumbnail(gallery.ID, req.ThumbnailURL)
 	}
 
 	var linkedCount int64
@@ -382,7 +513,7 @@ func ScrapeVipergirlsAsMissingGallery(req ScrapeVipergirlsRequest) (*ScrapeViper
 	if !sourceExists || (source.Status != "queued" && source.Status != "crawling") {
 		queueErr = QueueCrawlerSource(source.ID)
 		if queueErr != nil {
-			logger.Warnf("Failed to queue vipergirls source %d for crawling: %v", source.ID, queueErr)
+			logger.Warnf("Failed to queue forum source %d for crawling: %v", source.ID, queueErr)
 		}
 	}
 
@@ -396,7 +527,7 @@ func ScrapeVipergirlsAsMissingGallery(req ScrapeVipergirlsRequest) (*ScrapeViper
 				Provider:  provider,
 				SourceURL: req.MissingURL,
 				Title:     name,
-				Reason:    "vipergirls-scrape",
+				Reason:    "forum-scrape",
 			}
 			if err := database.DB.Create(&exclusion).Error; err != nil {
 				logger.Warnf("Failed to exclude resolved missing gallery for person %d: %v", person.ID, err)
@@ -404,7 +535,7 @@ func ScrapeVipergirlsAsMissingGallery(req ScrapeVipergirlsRequest) (*ScrapeViper
 		}
 	}
 
-	go refreshVipergirlsPersonScans(person.ID, provider)
+	go refreshForumPersonScans(person.ID, provider)
 
 	queued := queueErr == nil
 	message := "Gallery linked and crawl queued"
@@ -421,19 +552,19 @@ func ScrapeVipergirlsAsMissingGallery(req ScrapeVipergirlsRequest) (*ScrapeViper
 	}, nil
 }
 
-// cacheVipergirlsThumbnail stores a thumbnail after the scrape request has already
+// cacheForumThumbnail stores a thumbnail after the scrape request has already
 // returned. It re-reads the gallery so it never overwrites a thumbnail that was
 // cached or changed in the meantime.
-func cacheVipergirlsThumbnail(galleryID uint, thumbnailURL string) {
+func cacheForumThumbnail(galleryID uint, thumbnailURL string) {
 	localPath, err := DownloadProviderThumbnail(thumbnailURL)
 	if err != nil {
-		logger.Warnf("Failed to download vipergirls thumbnail for gallery %d: %v", galleryID, err)
+		logger.Warnf("Failed to download forum thumbnail for gallery %d: %v", galleryID, err)
 		return
 	}
 
 	var gallery models.Gallery
 	if err := database.DB.First(&gallery, galleryID).Error; err != nil {
-		logger.Warnf("Failed to find gallery %d for vipergirls thumbnail: %v", galleryID, err)
+		logger.Warnf("Failed to find gallery %d for forum thumbnail: %v", galleryID, err)
 		return
 	}
 	if gallery.ProviderThumbnail != "" || gallery.ProviderThumbnailURL != thumbnailURL {
@@ -441,18 +572,18 @@ func cacheVipergirlsThumbnail(galleryID uint, thumbnailURL string) {
 	}
 	gallery.ProviderThumbnail = localPath
 	if err := database.DB.Save(&gallery).Error; err != nil {
-		logger.Warnf("Failed to save vipergirls thumbnail for gallery %d: %v", galleryID, err)
+		logger.Warnf("Failed to save forum thumbnail for gallery %d: %v", galleryID, err)
 	}
 }
 
-func refreshVipergirlsPersonScans(personID uint, provider string) {
+func refreshForumPersonScans(personID uint, provider string) {
 	var alias models.PersonProviderAlias
 	if err := database.DB.Where("person_id = ? AND provider = ?", personID, provider).First(&alias).Error; err != nil {
 		return
 	}
 	result, err := ScanSourceForPerson(personID, provider, alias.Alias)
 	if err != nil {
-		logger.Warnf("Failed to refresh scans for person %d after vipergirls scrape: %v", personID, err)
+		logger.Warnf("Failed to refresh scans for person %d after forum scrape: %v", personID, err)
 		return
 	}
 	var latest models.PersonScanQueue

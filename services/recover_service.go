@@ -60,9 +60,9 @@ func RecoverImage(imageID uint) error {
 
 	// Attempt primary download
 	result, err := DownloadImage(img.DownloadURL, sourceName, referer)
+	recoveredDownloadURL := img.DownloadURL
 	if err != nil {
 		logger.Warnf("[%s] Single-image recovery failed for ID %d: %v", provider, img.ID, err)
-		// For imx provider, optionally attempt gallery-dl fallback
 		if provider == "imx" {
 			logger.Debugf("Attempting direct/IMX-page fallback for image ID %d", img.ID)
 			// create a context with timeout
@@ -72,6 +72,22 @@ func RecoverImage(imageID uint) error {
 				logger.Warnf("[imx] recovery fallback failed for ID %d: %v", img.ID, err)
 				return err
 			}
+		} else if provider == "imagetwist" {
+			logger.Debugf("Resolving ImageTwist page for image ID %d", img.ID)
+			resolvedURL, resolveErr := RipImagetwist(img.OriginalURL)
+			if resolveErr != nil {
+				logger.Warnf("[imagetwist] page recovery failed for ID %d: %v", img.ID, resolveErr)
+				return fmt.Errorf("direct ImageTwist download failed (%v); page recovery failed: %w", err, resolveErr)
+			}
+			if resolvedURL == img.DownloadURL {
+				return err
+			}
+			result, err = DownloadImage(resolvedURL, sourceName, referer)
+			if err != nil {
+				logger.Warnf("[imagetwist] resolved image recovery failed for ID %d: %v", img.ID, err)
+				return err
+			}
+			recoveredDownloadURL = resolvedURL
 		} else {
 			return err
 		}
@@ -84,11 +100,15 @@ func RecoverImage(imageID uint) error {
 	}
 
 	// Save DB updates
-	if err := database.DB.Model(&models.Image{}).Where("id = ?", img.ID).Updates(map[string]interface{}{
+	updates := map[string]interface{}{
 		"filename":        relPath,
 		"dominant_colors": result.DominantColors,
 		"file_exists":     true,
-	}).Error; err != nil {
+	}
+	if recoveredDownloadURL != img.DownloadURL {
+		updates["download_url"] = recoveredDownloadURL
+	}
+	if err := database.DB.Model(&models.Image{}).Where("id = ?", img.ID).Updates(updates).Error; err != nil {
 		logger.Errorf("Failed to update image %d after recovery: %v", img.ID, err)
 		return err
 	}

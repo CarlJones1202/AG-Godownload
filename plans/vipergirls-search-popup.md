@@ -1,7 +1,7 @@
 # ViperGirls missing-gallery search popup
 
-Status: Completed
-Completed: 2026-11-20
+Status: In Progress
+Completed: 2026-11-20 (initial vipergirls.to implementation)
 
 ## Problem and intended outcome
 
@@ -24,6 +24,8 @@ result offers two actions:
   the vipergirls link (Dashboard Attention > Missing Galleries and Person detail > Missing
   > Recent Scans).
 - Focused Go tests for search-page parsing and URL validation.
+- **Follow-up:** also include kitty-kats.net search results in the same popup, using the
+  same Title / Sub Forum / first-post thumbnail grid and the same scrape behaviour.
 
 ## Non-goals
 
@@ -40,7 +42,8 @@ result offers two actions:
 2. The popup shows a grid of results with title, sub forum, and first-post thumbnail;
    loading, empty, error, and no-thumbnail states are explicit. Only results from
    identifiable, non-video sub forums are shown (video/movie forum names are excluded).
-3. Each result has a working "View post" external link and a "Scrape" action.
+3. Each result has a working "View post" external link and a "Scrape" action. A
+   successful scrape closes the popup; a failed one keeps it open with the error shown.
 4. "Scrape" creates/links a gallery for the person, caches the thumbnail where possible,
    creates a Source for the vipergirls thread, queues the crawl, records the exclusion for
    the original missing result, and refreshes cached scans. It is idempotent for the same
@@ -65,6 +68,14 @@ result offers two actions:
 4. Frontend: types, API methods, shared query helper, `VipergirlsSearchDialog` component,
    and replacement of the two links.
 5. Tests and validation.
+
+## Kitty-kats follow-up (blocked on markup)
+
+The example search URL returns HTTP 403 (Cloudflare challenge) from this environment, so
+the result markup cannot be inspected directly. Need the user to provide the saved HTML
+of that search results page (browser View Source / Save Page), or confirmation of the
+result selectors. Also need a decision on whether a per-result request to the thread is
+acceptable for obtaining the first thumbnail if the search page does not include one.
 
 ## Risks and constraints
 

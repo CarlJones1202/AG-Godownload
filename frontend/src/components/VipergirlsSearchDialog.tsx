@@ -5,6 +5,11 @@ import { Badge, Button } from '@/components/UI';
 import { admin } from '@/lib/api';
 import type { VipergirlsSearchResult } from '@/types';
 
+const SITE_LABELS: Record<string, string> = {
+  vipergirls: 'vipergirls.to',
+  'kitty-kats': 'kitty-kats.net',
+};
+
 interface VipergirlsSearchDialogProps {
   open: boolean;
   query: string;
@@ -75,6 +80,7 @@ export function VipergirlsSearchDialog({
       queryClient.invalidateQueries({ queryKey: ['person', personId] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
       queryClient.invalidateQueries({ queryKey: ['sources'] });
+      onClose();
     },
   });
 

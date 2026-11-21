@@ -38,8 +38,8 @@ var KnownPlaceholderHashes = map[string]string{
 	// "208c9ad84252cc31794d6dbccb0779f37788950b94b64f2c3fd97ce7af7b1050": "unknown",
 	// "3222f188a489c47d281c856dd4bea49b8823e15be3385d1406f721ee0f1e59ff": "unknown",
 	// "5aec0ef5ce727c55af3ebfde673ff30f06c6611b35322de62b6a9bdba316bede": "unknown",
-	// imagetwist.com — run `sha256sum` on the placeholder image to fill this in.
-	// "imagetwist:abcdef1234567890...": "imagetwist",
+	// ImageTwist's 177x142 hotlink placeholder (8183 bytes).
+	"imagetwist:cc3d009865e4980b354ea615270128620d57aaaa243d8593adc8a13a96e4b088": "imagetwist",
 }
 
 // PlaceholderSizeThresholds defines (maxWidth, maxHeight, maxBytes) tuples for
@@ -50,11 +50,10 @@ var PlaceholderSizeThresholds = map[string]struct {
 	MaxBytes            int64
 }{
 	// A typical text-only "hotlinking disabled" JPEG is under ~50 KB and ~800×200
-	"imx":        {MaxWidth: 800, MaxHeight: 400, MaxBytes: 50 * 1024},
-	"imagebam":   {MaxWidth: 300, MaxHeight: 300, MaxBytes: 20 * 1024},
-	"imagetwist": {MaxWidth: 800, MaxHeight: 300, MaxBytes: 50 * 1024},
-	"viprimg":    {MaxWidth: 800, MaxHeight: 400, MaxBytes: 50 * 1024},
-	"default":    {MaxWidth: 800, MaxHeight: 400, MaxBytes: 60 * 1024},
+	"imx":      {MaxWidth: 800, MaxHeight: 400, MaxBytes: 50 * 1024},
+	"imagebam": {MaxWidth: 300, MaxHeight: 300, MaxBytes: 20 * 1024},
+	"viprimg":  {MaxWidth: 800, MaxHeight: 400, MaxBytes: 50 * 1024},
+	"default":  {MaxWidth: 800, MaxHeight: 400, MaxBytes: 60 * 1024},
 }
 
 // IsHotlinkPlaceholder checks whether the image at path matches a known
@@ -94,6 +93,12 @@ func checkHotlinkPlaceholder(imgPath, providerHint string, size int64, hashStr s
 	}
 	if provider, ok := KnownPlaceholderHashes[hashStr]; ok {
 		return true, fmt.Sprintf("known placeholder image for %s (hash match)", provider), nil
+	}
+
+	// ImageTwist serves legitimate small previews, so its dimensions alone are
+	// not enough to distinguish them from hotlink placeholders.
+	if providerHint == "imagetwist" {
+		return false, "", nil
 	}
 
 	// --- Check 2: heuristic size-based detection ---

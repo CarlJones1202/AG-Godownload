@@ -1,0 +1,159 @@
+package services
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/disintegration/imaging"
+	"github.com/gocolly/colly/v2"
+)
+
+func TestProbeLiveImageTwistMarkup(t *testing.T) {
+	response, err := http.Get("http://localhost:8080/images?sort=oldest&limit=2000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Data []struct {
+			ID          uint   `json:"id"`
+			OriginalURL string `json:"original_url"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		response.Body.Close()
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	var pageURL string
+	for _, row := range payload.Data {
+		if row.ID == 544 {
+			pageURL = row.OriginalURL
+			break
+		}
+	}
+	if pageURL == "" {
+		t.Fatal("image 544 was not found")
+	}
+
+	type result struct {
+		label                                                      string
+		bodyBytes, matches, posters, nonPosters, preferred, status int
+	}
+	var results []result
+	for _, mode := range []string{"Firefox91", "Chrome131", "Chrome131BrowserHeaders"} {
+		var current result
+		current.label = mode
+		c := newCollector(pageURL)
+		if mode != "Firefox91" {
+			c.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36"
+		}
+		if mode == "Chrome131BrowserHeaders" {
+			c.OnRequest(func(r *colly.Request) {
+				r.Headers.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+				r.Headers.Set("Accept-Language", "en-US,en;q=0.9")
+				r.Headers.Set("Upgrade-Insecure-Requests", "1")
+			})
+		}
+		c.OnResponse(func(r *colly.Response) {
+			current.status = r.StatusCode
+			current.bodyBytes = len(r.Body)
+		})
+		c.OnHTML("img[src]", func(e *colly.HTMLElement) {
+			candidate := e.Request.AbsoluteURL(e.Attr("src"))
+			if strings.Contains(strings.ToLower(candidate), "dki1gog4mj30") {
+				current.matches++
+				if strings.Contains(strings.ToLower(candidate), "premium_poster") {
+					current.posters++
+				} else {
+					current.nonPosters++
+				}
+				if preferredImagetwistImageURL(candidate, pageURL) != "" {
+					current.preferred++
+				}
+			}
+		})
+		if err := c.Visit(pageURL); err != nil {
+			t.Fatal(err)
+		}
+		results = append(results, current)
+	}
+	hardcodedCandidate := preferredImagetwistImageURL(
+		"https://i1.imagetwist.com/i/15619/dki1gog4mj30.jpg",
+		pageURL,
+	)
+	t.Logf("results=%+v helper_accepts_known_shape=%t", results, hardcodedCandidate != "")
+}
+
+func TestProbeLiveImageTwist544(t *testing.T) {
+	response, err := http.Get("http://localhost:8080/images?sort=oldest&limit=2000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("image API returned status %d", response.StatusCode)
+	}
+
+	var payload struct {
+		Data []struct {
+			ID          uint   `json:"id"`
+			OriginalURL string `json:"original_url"`
+			DownloadURL string `json:"download_url"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	var image struct {
+		OriginalURL string
+		DownloadURL string
+	}
+	for _, row := range payload.Data {
+		if row.ID == 544 {
+			image.OriginalURL = row.OriginalURL
+			image.DownloadURL = row.DownloadURL
+			break
+		}
+	}
+	if image.OriginalURL == "" || image.DownloadURL == "" {
+		t.Fatal("image 544 was not found in the local API response")
+	}
+
+	resolvedURL, err := RipImagetwist(image.OriginalURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolvedURL == image.DownloadURL {
+		t.Fatal("ImageTwist resolver returned the stored poster URL")
+	}
+
+	oldUploadsDir := UploadsDir
+	UploadsDir = t.TempDir()
+	defer func() { UploadsDir = oldUploadsDir }()
+
+	result, err := DownloadImage(resolvedURL, "recovery-probe", image.OriginalURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	downloaded, err := imaging.Open(result.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := filepath.Abs(result.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stat, err := os.Stat(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if downloaded.Bounds().Dx() <= 177 || stat.Size() <= 8183 {
+		t.Fatalf("resolved image still looks like the poster: %dx%d, %d bytes", downloaded.Bounds().Dx(), downloaded.Bounds().Dy(), stat.Size())
+	}
+	fmt.Printf("ImageTwist 544 live probe: %dx%d, %d bytes\n", downloaded.Bounds().Dx(), downloaded.Bounds().Dy(), stat.Size())
+}

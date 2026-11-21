@@ -330,6 +330,7 @@ export interface NotWantedGallery {
 }
 
 export interface VipergirlsSearchResult {
+  site: string;
   thread_id: string;
   title: string;
   sub_forum: string;
@@ -337,9 +338,17 @@ export interface VipergirlsSearchResult {
   thumbnail_url?: string;
 }
 
+export interface ForumSearchSource {
+  site: string;
+  label: string;
+  search_url: string;
+  error?: string;
+}
+
 export interface VipergirlsSearchResponse {
   query: string;
   search_url: string;
+  sources: ForumSearchSource[];
   data: VipergirlsSearchResult[];
 }
 

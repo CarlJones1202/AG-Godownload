@@ -7,11 +7,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// SearchVipergirls returns parsed vipergirls.to search results for the popup.
+// SearchVipergirls returns parsed forum search results for the popup. The endpoint
+// name is retained for existing callers; results from all supported sites are combined.
 func SearchVipergirls(c *gin.Context) {
-	results, err := services.SearchVipergirls(c.Query("query"))
+	results, err := services.SearchForumThreadsWithContext(c.Request.Context(), c.Query("query"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		if results == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error(), "results": results})
 		return
 	}
 	c.JSON(http.StatusOK, results)
@@ -24,8 +29,8 @@ func ScrapeVipergirls(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if !services.IsVipergirlsThreadURL(req.ThreadURL) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid vipergirls thread URL"})
+	if !services.IsForumThreadURL(req.ThreadURL) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported forum thread URL"})
 		return
 	}
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -285,6 +286,17 @@ func RipImagetwist(src string) (string, error) {
 	var continueName string
 	var continueValue string
 
+	setImageURL := func(e *colly.HTMLElement) {
+		if imageURL != "" {
+			return
+		}
+		candidate := preferredImagetwistImageURL(e.Request.AbsoluteURL(e.Attr("src")), src)
+		if candidate != "" {
+			imageURL = candidate
+			logger.Debugf("Found Imagetwist image: %s", imageURL)
+		}
+	}
+
 	// 1. Check for "Continue" button - usually input type="submit" in a form
 	c.OnHTML("form", func(e *colly.HTMLElement) {
 		// Often checks if it's posting to the same page or has specific inputs
@@ -327,18 +339,11 @@ func RipImagetwist(src string) (string, error) {
 	})
 
 	// 2. Look for the main image
-	c.OnHTML("img.pic", func(e *colly.HTMLElement) {
-		imageURL = e.Attr("src")
-		logger.Debugf("Found Imagetwist image (img.pic): %s", imageURL)
-	})
+	c.OnHTML("img.pic", setImageURL)
 
 	// Fallback image selector
-	c.OnHTML("img.img-responsive", func(e *colly.HTMLElement) {
-		if imageURL == "" && !strings.Contains(e.Attr("src"), "logo") {
-			imageURL = e.Attr("src")
-			logger.Debugf("Found Imagetwist image (img.img-responsive): %s", imageURL)
-		}
-	})
+	c.OnHTML("img.img-responsive", setImageURL)
+	c.OnHTML("img[src]", setImageURL)
 
 	// Visit the initial page
 	if err := c.Visit(src); err != nil {
@@ -353,17 +358,9 @@ func RipImagetwist(src string) (string, error) {
 		c2.AllowURLRevisit = true
 		c2.SetCookies(src, c.Cookies(src))
 
-		c2.OnHTML("img.pic", func(e *colly.HTMLElement) {
-			imageURL = e.Attr("src")
-			logger.Debugf("Found Imagetwist image after POST: %s", imageURL)
-		})
-
-		c2.OnHTML("img.img-responsive", func(e *colly.HTMLElement) {
-			if imageURL == "" && !strings.Contains(e.Attr("src"), "logo") {
-				imageURL = e.Attr("src")
-				logger.Debugf("Found Imagetwist image after POST (fallback): %s", imageURL)
-			}
-		})
+		c2.OnHTML("img.pic", setImageURL)
+		c2.OnHTML("img.img-responsive", setImageURL)
+		c2.OnHTML("img[src]", setImageURL)
 
 		// For Imagetwist and clones, usually we just need to hit the same URL with the same cookies
 		// and mostly any POST data that was in the form.
@@ -398,6 +395,51 @@ func RipImagetwist(src string) (string, error) {
 
 	return "", fmt.Errorf("failed to extract Imagetwist image from %s", src)
 }
+
+func preferredImagetwistImageURL(candidateURL, pageURL string) string {
+	candidate, err := url.Parse(candidateURL)
+	if err != nil || candidate.Hostname() == "" {
+		return ""
+	}
+	page, err := url.Parse(pageURL)
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(candidate.Hostname())
+	pageHost := strings.ToLower(page.Hostname())
+	if host != pageHost && !strings.HasSuffix(host, ".imagetwist.com") {
+		return ""
+	}
+
+	candidatePath := strings.ToLower(candidate.Path)
+	if strings.Contains(candidatePath, "premium_poster") {
+		return ""
+	}
+	switch strings.ToLower(path.Ext(candidate.Path)) {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp":
+	default:
+		return ""
+	}
+
+	imageID := imagetwistPageImageID(page)
+	if imageID != "" && !strings.Contains(candidatePath, strings.ToLower(imageID)) {
+		return ""
+	}
+	return candidate.String()
+}
+
+func imagetwistPageImageID(page *url.URL) string {
+	segments := strings.Split(strings.Trim(page.Path, "/"), "/")
+	if len(segments) == 0 || segments[0] == "" {
+		return ""
+	}
+	index := 0
+	if strings.EqualFold(segments[0], "i") && len(segments) > 1 {
+		index = 1
+	}
+	return strings.TrimSuffix(segments[index], path.Ext(segments[index]))
+}
+
 func RipMyMyPic(src string) (string, error) {
 	logger.Debugf("RipMyMyPic returning direct URL: %s", src)
 	// Typically mymypic.net links in JKF are either direct or need simple protocol fix

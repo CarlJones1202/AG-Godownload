@@ -45,3 +45,19 @@ func TestCheckHotlinkPlaceholderRejectsSmallImageBamResponse(t *testing.T) {
 		t.Fatal("placeholder rejection should include a reason")
 	}
 }
+
+func TestCheckHotlinkPlaceholderAllowsSmallImageTwistImage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "small-image.jpg")
+	img := imaging.New(500, 172, color.RGBA{R: 220, G: 120, B: 80, A: 255})
+	if err := imaging.Save(img, path); err != nil {
+		t.Fatal(err)
+	}
+
+	isPlaceholder, _, err := IsHotlinkPlaceholder(path, "imagetwist")
+	if err != nil {
+		t.Fatalf("placeholder check failed: %v", err)
+	}
+	if isPlaceholder {
+		t.Fatal("a small valid ImageTwist image should not be rejected by dimensions alone")
+	}
+}
