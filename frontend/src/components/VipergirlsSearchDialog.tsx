@@ -87,6 +87,7 @@ export function VipergirlsSearchDialog({
   if (!open) return null;
 
   const results = data?.data ?? [];
+  const sourceErrors = (data?.sources ?? []).filter((source) => Boolean(source.error));
   const pendingUrl = scrapeMut.isPending ? scrapeMut.variables?.thread_url : undefined;
   const errorMessage = error instanceof Error ? error.message : error ? 'Search failed' : null;
   const scrapeError = scrapeMut.error instanceof Error
@@ -107,7 +108,7 @@ export function VipergirlsSearchDialog({
         <div className="flex items-start justify-between gap-4 border-b border-zinc-800 p-4">
           <div className="min-w-0">
             <h2 id="vipergirls-dialog-title" className="text-base font-semibold text-white">
-              vipergirls.to results
+              Forum thread results
             </h2>
             <p className="mt-1 truncate text-xs text-zinc-500" title={query}>
               Search: <span className="text-zinc-300">{query || '(empty query)'}</span>
@@ -144,6 +145,20 @@ export function VipergirlsSearchDialog({
             </div>
           )}
 
+          {sourceErrors.length > 0 && !errorMessage && (
+            <div className="mb-4 rounded border border-amber-900/70 bg-amber-950/30 p-3 text-xs text-amber-300">
+              <p className="font-medium">Some forums could not be searched:</p>
+              <ul className="mt-1 list-inside list-disc space-y-0.5">
+                {sourceErrors.map((source) => (
+                  <li key={source.site}>
+                    <span className="text-amber-200">{SITE_LABELS[source.site] ?? source.label}:</span>{' '}
+                    {source.error}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {!query.trim() && (
             <p className="py-10 text-center text-xs text-zinc-500">
               No search terms are available for this missing gallery.
@@ -152,22 +167,27 @@ export function VipergirlsSearchDialog({
 
           {query.trim() && isLoading && (
             <div className="flex items-center justify-center gap-2 py-12 text-xs text-zinc-400">
-              <Loader2 size={14} className="animate-spin" /> Searching vipergirls.to...
+              <Loader2 size={14} className="animate-spin" /> Searching forums...
             </div>
           )}
 
           {query.trim() && !isLoading && !error && results.length === 0 && (
             <div className="py-10 text-center text-xs text-zinc-500">
               <p>No results found.</p>
-              {data?.search_url && (
-                <a
-                  href={data.search_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-2 inline-flex items-center gap-1 text-blue-400 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                >
-                  Open search on vipergirls.to <ExternalLink size={10} />
-                </a>
+              {(data?.sources ?? []).length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+                  {(data?.sources ?? []).map((source) => (
+                    <a
+                      key={source.site}
+                      href={source.search_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-blue-400 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                    >
+                      Open on {SITE_LABELS[source.site] ?? source.label} <ExternalLink size={10} />
+                    </a>
+                  ))}
+                </div>
               )}
             </div>
           )}
@@ -179,7 +199,7 @@ export function VipergirlsSearchDialog({
                 const wasScraped = scrapedKeys.has(`${scrapeScope}|${result.thread_url}`);
                 return (
                   <div
-                    key={result.thread_id || result.thread_url}
+                    key={`${result.site}|${result.thread_url}`}
                     className="flex flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/60 hover:border-zinc-700"
                   >
                     <div className="aspect-[3/2] overflow-hidden bg-zinc-800">
@@ -202,6 +222,9 @@ export function VipergirlsSearchDialog({
                         {result.title}
                       </p>
                       <div className="mt-2 flex flex-wrap gap-1">
+                        <Badge variant="default" className="text-[10px]">
+                          {SITE_LABELS[result.site] ?? result.site}
+                        </Badge>
                         <Badge variant="info" className="max-w-full truncate text-[10px]">
                           {result.sub_forum || 'Unknown forum'}
                         </Badge>

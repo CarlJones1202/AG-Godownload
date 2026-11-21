@@ -11,7 +11,7 @@ func TestRipImagetwistPrefersImageOverPremiumPoster(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprintf(w, `<img class="pic img-responsive" src="%s">`, serverURL(r)+"/i/15619/test-image.jpg/premium_poster.jpg")
-		fmt.Fprintf(w, `<img src="%s">`, serverURL(r)+"/i/15619/test-image.jpg")
+		fmt.Fprintf(w, `<textarea>[img]%s[/img]</textarea>`, serverURL(r)+"/i/15619/test-image.jpg")
 	}))
 	defer server.Close()
 

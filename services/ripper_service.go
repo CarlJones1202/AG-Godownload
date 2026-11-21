@@ -8,6 +8,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 
@@ -286,14 +287,28 @@ func RipImagetwist(src string) (string, error) {
 	var continueName string
 	var continueValue string
 
-	setImageURL := func(e *colly.HTMLElement) {
+	setImageURL := func(rawURL string) {
 		if imageURL != "" {
 			return
 		}
-		candidate := preferredImagetwistImageURL(e.Request.AbsoluteURL(e.Attr("src")), src)
+		candidate := preferredImagetwistImageURL(rawURL, src)
 		if candidate != "" {
 			imageURL = candidate
 			logger.Debugf("Found Imagetwist image: %s", imageURL)
+		}
+	}
+	setImageElement := func(e *colly.HTMLElement) {
+		setImageURL(e.Request.AbsoluteURL(e.Attr("src")))
+	}
+	setImageFromTextArea := func(e *colly.HTMLElement) {
+		for _, rawURL := range imagetwistURLPattern.FindAllString(e.Text, -1) {
+			if end := strings.Index(rawURL, "[/"); end >= 0 {
+				rawURL = rawURL[:end]
+			}
+			setImageURL(strings.TrimRight(rawURL, "])},.;"))
+			if imageURL != "" {
+				return
+			}
 		}
 	}
 
@@ -339,11 +354,12 @@ func RipImagetwist(src string) (string, error) {
 	})
 
 	// 2. Look for the main image
-	c.OnHTML("img.pic", setImageURL)
+	c.OnHTML("img.pic", setImageElement)
 
 	// Fallback image selector
-	c.OnHTML("img.img-responsive", setImageURL)
-	c.OnHTML("img[src]", setImageURL)
+	c.OnHTML("img.img-responsive", setImageElement)
+	c.OnHTML("img[src]", setImageElement)
+	c.OnHTML("textarea", setImageFromTextArea)
 
 	// Visit the initial page
 	if err := c.Visit(src); err != nil {
@@ -358,9 +374,10 @@ func RipImagetwist(src string) (string, error) {
 		c2.AllowURLRevisit = true
 		c2.SetCookies(src, c.Cookies(src))
 
-		c2.OnHTML("img.pic", setImageURL)
-		c2.OnHTML("img.img-responsive", setImageURL)
-		c2.OnHTML("img[src]", setImageURL)
+		c2.OnHTML("img.pic", setImageElement)
+		c2.OnHTML("img.img-responsive", setImageElement)
+		c2.OnHTML("img[src]", setImageElement)
+		c2.OnHTML("textarea", setImageFromTextArea)
 
 		// For Imagetwist and clones, usually we just need to hit the same URL with the same cookies
 		// and mostly any POST data that was in the form.
@@ -395,6 +412,8 @@ func RipImagetwist(src string) (string, error) {
 
 	return "", fmt.Errorf("failed to extract Imagetwist image from %s", src)
 }
+
+var imagetwistURLPattern = regexp.MustCompile(`(?i)https?://[^"'<>[:space:]]+`)
 
 func preferredImagetwistImageURL(candidateURL, pageURL string) string {
 	candidate, err := url.Parse(candidateURL)

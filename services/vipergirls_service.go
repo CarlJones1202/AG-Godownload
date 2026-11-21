@@ -21,18 +21,18 @@ const (
 	ForumSiteVipergirls = "vipergirls"
 	ForumSiteKittyKats  = "kitty-kats"
 
-	vipergirlsBaseURL      = "https://vipergirls.to"
-	vipergirlsMaxResults   = 50
-	vipergirlsMaxQueryLen  = 200
-	vipergirlsMaxBodySize  = 10 << 20 // 10 MiB
-	vipergirlsUserAgent    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+	vipergirlsBaseURL       = "https://vipergirls.to"
+	vipergirlsMaxResults    = 50
+	vipergirlsMaxQueryLen   = 200
+	vipergirlsMaxBodySize   = 10 << 20 // 10 MiB
+	vipergirlsUserAgent     = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 	vipergirlsSearchTimeout = 20 * time.Second
 	kittyKatsSearchTimeout  = 25 * time.Second
 )
 
 var (
 	vipergirlsThreadPathRE = regexp.MustCompile(`^/threads/(\d+)(?:-|/|$)`)
-	videoForumRE = regexp.MustCompile(`(?i)\b(video|videos|movie|movies|clip|clips|film|films)\b`)
+	videoForumRE           = regexp.MustCompile(`(?i)\b(video|videos|movie|movies|clip|clips|film|films)\b`)
 
 	// These are the forum IDs the site itself submits when "Search photo sections"
 	// is checked in its quick-search form. Sending imgsearch=1 together with these
@@ -68,9 +68,9 @@ type ForumSearchSource struct {
 // name and JSON shape are retained for existing callers; the response now aggregates
 // every supported forum.
 type VipergirlsSearchResponse struct {
-	Query     string                  `json:"query"`
-	SearchURL string                  `json:"search_url"`
-	Sources   []ForumSearchSource     `json:"sources"`
+	Query     string                   `json:"query"`
+	SearchURL string                   `json:"search_url"`
+	Sources   []ForumSearchSource      `json:"sources"`
 	Data      []VipergirlsSearchResult `json:"data"`
 }
 

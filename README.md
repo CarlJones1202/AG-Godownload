@@ -187,13 +187,15 @@ do start with `/api` are `/api/stats`, `/api/export/db`, and `/api/import/db`.
 - `POST /people/:id/link-galleries` - Auto-link galleries by name/alias
 
 ### Missing gallery discovery
-- `GET /admin/vipergirls/search?query=<terms>` - Parse the first page of vipergirls.to
-  photo-section search results into title, sub forum, thread URL, and first-post
-  thumbnail. The request mirrors the site's own "Search photo sections" option so video
-  sub forums are excluded.
-- `POST /admin/vipergirls/scrape` - Associate a chosen thread with a person's missing
-  gallery, create its source, and queue the crawl. The browser calls these through the
-  `/api` proxy prefix.
+- `GET /admin/vipergirls/search?query=<terms>` - Combine the first page of vipergirls.to
+  photo-section search results with kitty-kats.net thread search results. Each result
+  includes its site, title, sub forum, thread URL, and first-post thumbnail. The
+  vipergirls request mirrors the site's own "Search photo sections" option, and both sites
+  are filtered to non-video forums. A site-specific failure is returned in `sources[].error`
+  without hiding results from the other site. The endpoint name is retained for existing
+  callers; the browser uses the `/api` proxy prefix.
+- `POST /admin/vipergirls/scrape` - Associate a chosen vipergirls.to or kitty-kats.net
+  thread with a person's missing gallery, create its source, and queue the crawl.
 
 ### Similarity and ratings
 - `GET /similar/:id` - Recommendations for an image

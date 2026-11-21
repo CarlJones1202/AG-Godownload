@@ -6,9 +6,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
+	"gallery_api/config"
+	"gallery_api/database"
+	"gallery_api/models"
 	"github.com/disintegration/imaging"
 	"github.com/gocolly/colly/v2"
 )
@@ -41,8 +45,8 @@ func TestProbeLiveImageTwistMarkup(t *testing.T) {
 	}
 
 	type result struct {
-		label                                                      string
-		bodyBytes, matches, posters, nonPosters, preferred, status int
+		label                                                                                                                    string
+		bodyBytes, rawMatches, rawNonPosters, matches, posters, nonPosters, preferred, textareas, textID, textCandidates, status int
 	}
 	var results []result
 	for _, mode := range []string{"Firefox91", "Chrome131", "Chrome131BrowserHeaders"} {
@@ -62,6 +66,13 @@ func TestProbeLiveImageTwistMarkup(t *testing.T) {
 		c.OnResponse(func(r *colly.Response) {
 			current.status = r.StatusCode
 			current.bodyBytes = len(r.Body)
+			body := strings.ToLower(string(r.Body))
+			current.rawMatches = strings.Count(body, "dki1gog4mj30")
+			for _, match := range regexp.MustCompile(`(?is)<img\b[^>]*dki1gog4mj30[^>]*>`).FindAllString(body, -1) {
+				if !strings.Contains(match, "premium_poster") {
+					current.rawNonPosters++
+				}
+			}
 		})
 		c.OnHTML("img[src]", func(e *colly.HTMLElement) {
 			candidate := e.Request.AbsoluteURL(e.Attr("src"))
@@ -74,6 +85,17 @@ func TestProbeLiveImageTwistMarkup(t *testing.T) {
 				}
 				if preferredImagetwistImageURL(candidate, pageURL) != "" {
 					current.preferred++
+				}
+			}
+		})
+		c.OnHTML("textarea", func(e *colly.HTMLElement) {
+			current.textareas++
+			if strings.Contains(strings.ToLower(e.Text), "dki1gog4mj30") {
+				current.textID++
+				for _, candidate := range regexp.MustCompile(`(?i)https?://[^"'<>[:space:]]+`).FindAllString(e.Text, -1) {
+					if preferredImagetwistImageURL(candidate, pageURL) != "" {
+						current.textCandidates++
+					}
 				}
 			}
 		})
@@ -156,4 +178,41 @@ func TestProbeLiveImageTwist544(t *testing.T) {
 		t.Fatalf("resolved image still looks like the poster: %dx%d, %d bytes", downloaded.Bounds().Dx(), downloaded.Bounds().Dy(), stat.Size())
 	}
 	fmt.Printf("ImageTwist 544 live probe: %dx%d, %d bytes\n", downloaded.Bounds().Dx(), downloaded.Bounds().Dy(), stat.Size())
+}
+
+func TestProbeRecoverLiveImageTwist544(t *testing.T) {
+	config.Load()
+	database.Connect(config.Global.DatabaseDSN())
+	if err := RecoverImage(544); err != nil {
+		t.Fatal(err)
+	}
+
+	var row struct {
+		Filename    string
+		DownloadURL string
+		FileExists  bool
+	}
+	if err := database.DB.Model(&models.Image{}).
+		Select("filename, download_url, file_exists").
+		Where("id = ?", 544).Take(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !row.FileExists || strings.Contains(strings.ToLower(row.DownloadURL), "premium_poster") {
+		t.Fatalf("recovery did not persist the full image URL and file state")
+	}
+
+	imagePath := filepath.Join(UploadsDir, row.Filename)
+	info, err := os.Stat(imagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	downloaded, err := imaging.Open(imagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() <= 8183 {
+		t.Fatalf("recovered file is still placeholder-sized: %d bytes", info.Size())
+	}
+	fmt.Printf("ImageTwist 544 recovery: %dx%d, %d bytes, database updated\n",
+		downloaded.Bounds().Dx(), downloaded.Bounds().Dy(), info.Size())
 }

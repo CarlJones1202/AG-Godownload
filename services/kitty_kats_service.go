@@ -87,6 +87,7 @@ func canonicalKittyKatsURL(base *url.URL, raw string) (string, error) {
 	u := base.ResolveReference(ref)
 	u.RawQuery = ""
 	u.Fragment = ""
+	u.Path = strings.TrimSuffix(u.Path, "/")
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return "", fmt.Errorf("unsupported URL scheme %q", u.Scheme)
 	}
