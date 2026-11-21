@@ -21,8 +21,10 @@ Place your downloaded WireGuard configuration file in **one of these locations**
 
 **Option A (Recommended)**: Root of the project directory
 ```
-c:\Users\carlj\AG-Godownload\wireguard.conf
+<project-root>\wireguard.conf
 ```
+This file is gitignored because it contains a private key. Keep it local and do not
+commit it.
 
 **Option B**: Specify a custom location via environment variable
 ```powershell
@@ -31,7 +33,10 @@ $env:WIREGUARD_CONF = "C:\path\to\your\config.conf"
 
 ### 3. Restart the Application
 
-The WireGuard tunnel will be established automatically when the application starts.
+The tunnel is created on demand, the first time a request is made to one of the routed
+domains below. If no such request is made, the config is never loaded. Set
+`BYPASS_VPN=true` in the environment to force all requests onto the direct connection
+for testing.
 
 ## How It Works
 
@@ -43,6 +48,8 @@ The application automatically routes requests to the following domains through t
 - met-art.com
 - sexart.com
 - thelifeerotic.com
+- eternaldesire.com
+- mplstudios.com
 
 All other requests use your normal internet connection. This ensures:
 - ✅ Only scraper traffic is routed through the VPN
@@ -52,16 +59,13 @@ All other requests use your normal internet connection. This ensures:
 
 ## Verification
 
-When the application starts, you should see log messages like:
+On the first request to a routed domain, you should see log messages like:
 ```
+[VPN] URL requires WireGuard tunnel: https://www.metart.com/...
 Loading WireGuard configuration from: wireguard.conf
 WireGuard tunnel established successfully
 ```
-
-When scraping blocked sites, you'll see:
-```
-Using WireGuard tunnel for: https://www.metart.com/...
-```
+Colly-based scrapers log `Using WireGuard tunnel for Colly request to: <url>` instead.
 
 ## Troubleshooting
 

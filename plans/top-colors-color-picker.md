@@ -4,9 +4,9 @@
 
 ## Problem & Intended Outcome
 
-TODO (Major Tasks → Advanced image searching): "Search for images based on color
-(top 16 colors used in database should be provided to the user, with an optional
-color picker)".
+Originally tracked as a major task under advanced image searching: "Search for
+images based on color (top 16 colors used in database should be provided to the
+user, with an optional color picker)".
 
 The Images page already has a hex-input color search (`GET /search/color`), but
 the user has no way to discover which colors actually exist in their library and

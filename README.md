@@ -12,11 +12,16 @@ A Go-based image gallery API with automatic crawling and image ripping capabilit
 
 ## Setup
 1. Clone the repository.
-2. Run the initialization script to install dependencies (FFmpeg, Go, Node.js):
+2. Run the initialization script to install dependencies (FFmpeg, yt-dlp, Go, Node.js,
+   Python 3.13, VC++ runtime), set up portable PostgreSQL, and prepare the optional
+   local embedding runtime:
    ```powershell
    ./init.ps1
    ```
-   *Note: This script uses `winget` to install system dependencies. You may need to run it in an Administrator PowerShell session.*
+   *Note: This script uses `winget` to install system dependencies, downloads PostgreSQL
+   and the SigLIP embedding model, and writes a local `.env`. `init.ps1` is interactive and
+   may need an Administrator PowerShell session. `.env`, WireGuard configs, and cookie
+   exports are local-only secrets and are not tracked by Git.*
 
 ## Running the Application
 
@@ -38,10 +43,9 @@ The server will start on port 8080.
 
 Stop the server with Ctrl+C (or send SIGTERM). Shutdown stops workers from
 starting queued sources and waits for each active source crawl to finish before
-closing the database. Sources that were still queued are re-queued automatically
-when the server starts again. The wait can last as long as the current source
-takes; keep PostgreSQL running until the server reports that shutdown is
-complete.
+exiting. Sources that were still queued are re-queued automatically when the
+server starts again. The wait can last as long as the current source takes; keep
+PostgreSQL running until the server reports that shutdown is complete.
 
 ### Recover a gallery with missing photos
 
@@ -80,14 +84,14 @@ Review the matched performers and add each studio-specific name individually.
 
 ## Log Levels
 
-The application supports different log levels to control verbosity. By default, only **WARN** and **ERROR** messages are shown.
+The application supports different log levels to control verbosity. The default is **INFO**, which includes warnings and errors.
 
 ### Available Log Levels
 
 - `TRACE` - Most verbose, shows all internal operations
 - `DEBUG` - Shows detailed debugging information (ripper operations, worker activity)
-- `INFO` - Shows general informational messages (startup, migrations)
-- `WARN` - Shows warnings (default level)
+- `INFO` - Shows general informational messages (startup, migrations) — default
+- `WARN` - Shows warnings only
 - `ERROR` - Shows only errors
 
 ### Setting Log Level
@@ -113,7 +117,7 @@ LOG_LEVEL=DEBUG go run .
 
 ### Log Level Examples
 
-**Default (WARN)** - Minimal output, only warnings and errors:
+**Default (INFO)** - Startup and important events, plus warnings and errors:
 ```
 [WARN]  Crawler queue full, skipping source 5
 [ERROR] Worker 2 error crawling source 3: connection timeout
@@ -137,32 +141,47 @@ LOG_LEVEL=DEBUG go run .
 
 ## API Endpoints
 
+Most routes are registered at the **root path**. The frontend prefixes requests with
+`/api` and Vite strips that prefix when proxying to the Go server, so browser calls look
+like `/api/galleries` while direct server calls use `/galleries`. Exceptions that really
+do start with `/api` are `/api/stats`, `/api/export/db`, and `/api/import/db`.
+
 ### Galleries
-- `GET /api/galleries` - List all galleries
-- `POST /api/galleries` - Create a gallery
-- `GET /api/galleries/:id` - Get gallery details
-- `DELETE /api/galleries/:id` - Delete a gallery
+- `GET /galleries` - List galleries
+- `POST /galleries` - Create a gallery
+- `GET /galleries/:id` - Get gallery details
+- `PUT /galleries/:id` - Update a gallery
+- `DELETE /galleries/:id` - Delete a gallery
+- `POST /galleries/:id/images` - Add an image to a gallery
 
 ### Images
-- `GET /api/images` - List all images
-- `POST /api/galleries/:id/images` - Add image to gallery
-- `DELETE /api/images/:id` - Delete an image
-- `GET /api/images/:filename` - Serve image file
-- `GET /api/thumbnails/:filename` - Serve thumbnail
+- `GET /images` - List images
+- `DELETE /images/:imageId` - Delete an image
+- `GET /images/*filepath` - Serve an image file
+- `GET /thumbnails/*filepath` - Serve a thumbnail
+- `POST /images/:imageId/favorite` - Toggle favorite
+- `GET /search/color` - Search by hex color
+- `GET /colors/top` - Most used colors
 
 ### Sources
-- `GET /api/sources` - List all sources
-- `POST /api/sources` - Create a source
-- `POST /api/sources/:id/crawl` - Trigger crawl
-- `DELETE /api/sources/:id` - Delete a source
+- `GET /sources` - List sources
+- `POST /sources` - Create a source
+- `POST /sources/:id/crawl` - Trigger a crawl
+- `DELETE /sources/:id` - Delete a source
 
 ### People
-- `GET /api/people` - List all people
-- `POST /api/people` - Create a person
-- `GET /api/people/:id` - Get person details
-- `PUT /api/people/:id` - Update person
-- `DELETE /api/people/:id` - Delete person
-- `POST /api/people/:id/link-galleries` - Auto-link galleries by name/alias
+- `GET /people` - List people
+- `POST /people` - Create a person
+- `GET /people/:id` - Get person details
+- `PUT /people/:id` - Update a person
+- `DELETE /people/:id` - Delete a person
+- `POST /people/:id/link-galleries` - Auto-link galleries by name/alias
+
+### Similarity and ratings
+- `GET /similar/:id` - Recommendations for an image
+- `GET /similar?ids=<base64>` - Recommendations for a shared id list
+- `GET|PUT|DELETE /ratings/:imageId` - Read, set, or clear a 1–5 rating
+- `POST /profile/reset` - Reset the shared taste profile
 
 ## Frontend
 
@@ -174,4 +193,5 @@ npm install
 npm run dev
 ```
 
-The frontend will be available at http://localhost:5173
+The frontend will be available at http://localhost:3000. The Vite dev server proxies
+`/api`, `/images/`, `/thumbnails`, `/person-images`, and `/ws` to the Go server on port 8080.

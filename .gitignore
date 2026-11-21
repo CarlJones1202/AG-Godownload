@@ -9,6 +9,12 @@ frontend/node_modules
 *.db-shm
 *.db-wal
 
-* . d b 
- 
- 
+# Local secrets and runtime credentials
+.env
+!.env.example
+wireguard.conf
+*_cookies.txt
+
+# Generated model artifacts and logs
+*.pth
+*.log

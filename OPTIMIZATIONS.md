@@ -1,199 +1,51 @@
-# Prioritized Optimizations by Ease & Performance Impact
+# Optimization Status
 
-This document prioritizes the optimization tasks by implementation difficulty and expected performance gains.
+This document tracks optimization work across the project. Statuses were verified
+against the code on 2026-11-20; historical estimates and duplicate roadmaps were
+removed because the work itself is the useful record.
 
-## 🔥 Tier 1: Quick Wins (Easy + High Impact)
+## Status
 
-### 1. Database Indexing
-- **Status**: ✅ Complete
-- **Ease**: ⭐⭐⭐⭐⭐ (Very Easy - just add struct tags)
-- **Performance**: ⭐⭐⭐⭐⭐ (50-70% faster queries)
-- **Time**: 15 minutes
-- **Files**: `models/*.go`
-- **Why First**: Minimal code changes, massive performance improvement for all database operations
+| # | Item | Status | Notes |
+|---|---|---|---|
+| 1 | Database indexing | Complete | Indexes on hot columns in `models/*.go`. |
+| 2 | Bounded download concurrency | Complete | Semaphore in `services/crawler_service.go`. |
+| 3 | HTTP connection pooling | Complete | Shared clients in `services/http_client.go`. |
+| 4 | Batch database writes | Complete | `CreateInBatches` in `services/crawler_service.go`; some junction inserts are still built individually. |
+| 5 | Configurable worker pools | Complete | `CRAWLER_WORKERS`, `AITAG_WORKERS`, recovery pools in `config/config.go`. |
+| 6 | Context support and cancellation | Not started | No end-to-end cancellation plumbing through services. |
+| 7 | Structured logging | Partial | `logger/logger.go` provides leveled, prefixed text logs; no structured fields. |
+| 8 | Explicit error classification | Not started | No `errors/errors.go`; errors are wrapped ad hoc. |
+| 9 | Graceful shutdown | Complete | Signal handling, worker drain, and queued-crawl requeue in `main.go` / `services/shutdown.go`. |
+| 10 | Health and metrics endpoints | Partial | `/api/stats` exists; no dedicated `/health` or `/metrics` route. |
+| 11 | Streaming downloads | Partial | Downloads stream with `io.Copy`; thumbnail generation still decodes/re-encodes in memory. |
+| 12 | Rate limiting and circuit breakers | Not started | Retries exist, but no host-level throttling or circuit breaker. |
+| 13 | Retry with exponential backoff | Complete | `services/http_client.go` honors `Retry-After` and backs off on retries. |
+| 14 | Request middleware | Partial | Gin logger/recovery and a server read timeout exist; no custom timeout/compression middleware. |
+| 15 | Resumable video downloads | Not started | Large video downloads restart from scratch. |
 
-### 2. Worker Pool for Downloads
-- **Status**: ✅ Complete
-- **Ease**: ⭐⭐⭐⭐⭐ (Very Easy - add semaphore)
-- **Performance**: ⭐⭐⭐⭐ (Prevents resource exhaustion, smoother downloads)
-- **Time**: 15 minutes
-- **Files**: `services/crawler_service.go`
-- **Why Second**: Small code change, big impact on stability and performance improvement for all database operations
+## Remaining work, in suggested order
 
-### 3. HTTP Connection Pooling
-- **Status**: ✅ Complete
-- **Ease**: ⭐⭐⭐⭐ (Easy - configure existing http.Client)
-- **Performance**: ⭐⭐⭐⭐⭐ (30-50% faster downloads)
-- **Time**: 30 minutes
-- **Files**: New `services/http_client.go`, update rippers
-- **Why Second**: Reuses TCP connections, dramatically speeds up all downloads
+1. **Context and cancellation (6)** — thread `context.Context` through download and
+   crawl services so shutdown and client disconnects can stop in-flight work.
+2. **Error classification (8)** — introduce typed errors so retries can distinguish
+   transient network failures from permanent 404/403 responses.
+3. **Health endpoint (10)** — add a lightweight `/health` probe separate from the
+   stats/metrics routes.
+4. **Request middleware (14)** — add explicit per-route timeouts; note that uploads and
+   crawls can be long-running, so avoid a global write timeout.
+5. **Rate limiting and circuit breakers (12)** — protect hosts that trigger bans, using
+   the shared HTTP client so all rippers benefit.
+6. **Structured logging (7)** — add key/value fields while keeping existing log output
+   readable.
+7. **Streaming thumbnails and resumable video downloads (11, 15)** — larger changes with
+   the most implementation risk.
 
-### 3. Batch Database Operations
-- **Status**: ✅ Complete
-- **Ease**: ⭐⭐⭐⭐ (Easy - already partially implemented)
-- **Performance**: ⭐⭐⭐⭐ (40% faster inserts)
-- **Time**: 20 minutes
-- **Files**: `services/crawler_service.go` (optimize existing batching)
-- **Why Third**: Already have batching, just need to tune batch sizes and add to more places
+## Related notes
 
-### 4. Configuration Management
-- **Status**: ✅ Complete
-- **Ease**: ⭐⭐⭐⭐ (Easy - environment variables)
-- **Performance**: ⭐⭐⭐ (Enables tuning for your hardware)
-- **Time**: 45 minutes
-- **Files**: New `config/config.go`, update `main.go`
-- **Why Fourth**: Foundation for other optimizations, makes system tunable
-
----
-
-## 🚀 Tier 2: Medium Effort, High Impact
-
-### 5. Worker Pool Optimization
-- **Ease**: ⭐⭐⭐ (Moderate - refactor existing workers)
-- **Performance**: ⭐⭐⭐⭐ (Better resource usage, configurable concurrency)
-- **Time**: 1 hour
-- **Files**: `services/worker_service.go`
-- **Why**: Makes workers configurable and adds graceful shutdown
-
-### 6. Context Support & Cancellation
-- **Ease**: ⭐⭐⭐ (Moderate - add context params throughout)
-- **Performance**: ⭐⭐⭐ (Prevents resource leaks, enables timeouts)
-- **Time**: 1.5 hours
-- **Files**: All service files
-- **Why**: Critical for production reliability, prevents hung operations
-
-### 7. Structured Logging
-- **Status**: ✅ Complete
-- **Ease**: ⭐⭐⭐⭐ (Easy - enhance existing logger)
-- **Performance**: ⭐⭐ (Minimal direct impact, huge debugging benefit)
-- **Time**: 30 minutes
-- **Files**: `logger/logger.go`
-- **Why**: Makes debugging much easier, production-ready logging
-
-### 8. Error Handling Improvements
-- **Ease**: ⭐⭐⭐ (Moderate - wrap errors throughout)
-- **Performance**: ⭐⭐⭐ (Smarter retries, better failure handling)
-- **Time**: 1 hour
-- **Files**: New `errors/errors.go`, update all services
-- **Why**: Better error classification enables smarter retry logic
-
----
-
-## 🔧 Tier 3: More Effort, Good Impact
-
-### 9. Graceful Shutdown
-- **Ease**: ⭐⭐⭐ (Moderate - signal handling + context)
-- **Performance**: ⭐⭐⭐ (Prevents data corruption, clean exits)
-- **Time**: 1 hour
-- **Files**: `main.go`, all workers
-- **Why**: Production requirement, prevents data loss on shutdown
-
-### 10. Health & Metrics Endpoints
-- **Ease**: ⭐⭐⭐⭐ (Easy - new handlers)
-- **Performance**: ⭐⭐ (Observability, not direct performance)
-- **Time**: 45 minutes
-- **Files**: New `handlers/health_handlers.go`, update `main.go`
-- **Why**: Essential for monitoring, deployment readiness
-
-### 11. Streaming Downloads
-- **Ease**: ⭐⭐ (Harder - refactor download logic)
-- **Performance**: ⭐⭐⭐⭐ (20-30% lower memory for large files)
-- **Time**: 2 hours
-- **Files**: `services/image_service.go`, `services/video_ripper_service.go`
-- **Why**: Prevents memory issues with large videos
-
-### 12. Rate Limiting & Circuit Breakers
-- **Ease**: ⭐⭐ (Harder - new patterns)
-- **Performance**: ⭐⭐⭐ (Prevents bans, automatic failure handling)
-- **Time**: 2 hours
-- **Files**: `services/http_client.go`, `services/crawler_service.go`
-- **Why**: Prevents getting blocked by image hosts
-
----
-
-## 📊 Tier 4: Advanced Optimizations
-
-### 13. Retry Logic with Exponential Backoff
-- **Ease**: ⭐⭐⭐ (Moderate - already partially implemented)
-- **Performance**: ⭐⭐⭐ (Better success rate on transient failures)
-- **Time**: 1 hour
-- **Files**: `services/http_client.go`, all rippers
-- **Why**: Already have basic retries, make them smarter
-
-### 14. Request Middleware
-- **Ease**: ⭐⭐⭐ (Moderate - Gin middleware)
-- **Performance**: ⭐⭐ (Better API reliability)
-- **Time**: 1 hour
-- **Files**: `main.go`, new middleware files
-- **Why**: Adds timeouts, logging, compression to all endpoints
-
-### 15. Video Download Resume
-- **Ease**: ⭐ (Hard - complex state management)
-- **Performance**: ⭐⭐⭐ (Prevents re-downloading large files)
-- **Time**: 3+ hours
-- **Files**: `services/video_ripper_service.go`
-- **Why**: Nice-to-have, but complex to implement correctly
-
----
-
-## 📅 Recommended Implementation Order
-
-### Phase 1: Foundation (2-3 hours total)
-1. Database Indexing (15 min)
-2. HTTP Connection Pooling (30 min)
-3. Batch Database Optimization (20 min)
-4. Configuration Management (45 min)
-5. Structured Logging (30 min)
-
-**Expected Gains**: 50-70% faster queries, 30-50% faster downloads, configurable system
-
----
-
-### Phase 2: Reliability (3-4 hours total)
-6. Worker Pool Optimization (1 hour)
-7. Context Support & Cancellation (1.5 hours)
-8. Error Handling Improvements (1 hour)
-9. Graceful Shutdown (1 hour)
-
-**Expected Gains**: Production-ready, no resource leaks, clean shutdowns
-
----
-
-### Phase 3: Observability (1-2 hours total)
-10. Health & Metrics Endpoints (45 min)
-11. Retry Logic Enhancement (1 hour)
-
-**Expected Gains**: Better monitoring, higher success rates
-
----
-
-### Phase 4: Advanced (4+ hours total)
-12. Streaming Downloads (2 hours)
-13. Rate Limiting & Circuit Breakers (2 hours)
-14. Request Middleware (1 hour)
-15. Video Download Resume (3+ hours - optional)
-
-**Expected Gains**: Lower memory, better failure handling, resumable downloads
-
----
-
-## 🎯 Quick Start Recommendation
-
-**If you have 1 hour**: Do items 1-3 (Database indexing, HTTP pooling, batch optimization)
-- **Result**: Immediate 40-60% performance improvement with minimal code changes
-
-**If you have 3 hours**: Do Phase 1 (items 1-5)
-- **Result**: Massive performance gains + configurable, production-ready logging
-
-**If you have a full day**: Do Phases 1-2 (items 1-9)
-- **Result**: Production-ready system with excellent performance and reliability
-
----
-
-## 💡 Notes
-
-- **Don't skip Phase 1**: These are the highest ROI changes
-- **Configuration first**: Makes all other optimizations tunable
-- **Context support**: Required for graceful shutdown and timeouts
-- **Test after each phase**: Ensure no regressions before moving forward
-- **Phase 4 is optional**: System will be excellent after Phase 3
+- Slow SQL warnings should be resolved rather than ignored; see `AGENTS.md`.
+- Perf-sensitive changes should be measured before and after, using existing benchmarks
+  in `services/` and `database/` where possible.
+- `services/crawler_service.go` still has a few N+1-shaped code paths and a progress
+  ticker that could be tuned, but these are maintenance items rather than committed
+  roadmap work.

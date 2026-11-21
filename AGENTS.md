@@ -31,7 +31,7 @@ This project is a Go gallery API and crawler/downloader with a React and TypeScr
 ## Frontend and Usability
 
 - The UI must be understandable and easy to use. Preserve established interaction patterns, provide clear feedback for loading, empty, success, and error states, and consider keyboard access and responsive layouts.
-- For frontend work, follow [`designs/design-system.md`](designs/design-system.md) and its accessibility guidance. Follow the frontend-specific instruction in [`TODO.md`](TODO.md) about design-system exceptions.
+- For frontend work, follow [`designs/design-system.md`](designs/design-system.md) and its accessibility guidance. Deviating from the design system requires explicit instruction containing the exact phrase `Nike` (case sensitive).
 
 ## Project Conventions
 
