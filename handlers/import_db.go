@@ -1,11 +1,10 @@
 package handlers
 
 import (
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
-	"strings"
+	"sync"
 	"time"
 
 	"gallery_api/config"
@@ -38,24 +37,6 @@ func ImportDB(c *gin.Context) {
 	}
 	defer file.Close()
 
-	tmp, err := os.CreateTemp("", "gallery_restore_*.sql")
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create temp file"})
-		return
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-
-	if _, err := io.Copy(tmp, file); err != nil {
-		tmp.Close()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save upload"})
-		return
-	}
-	if err := tmp.Close(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to finalize upload"})
-		return
-	}
-
 	start := time.Now()
 
 	// Terminate other connections and reset public schema first so dumps without --clean restore into a fresh schema
@@ -65,9 +46,10 @@ func ImportDB(c *gin.Context) {
 		logger.Warnf("Import: schema reset warning: %v (%s)", err, string(resetOut))
 	}
 
-	cmd := exec.Command(psql, "-d", config.Global.DatabaseDSN(), "-v", "ON_ERROR_STOP=1", "-f", tmpPath)
+	cmd := exec.Command(psql, "-d", config.Global.DatabaseDSN(), "-v", "ON_ERROR_STOP=1", "-f", "-")
 	cmd.Env = append(os.Environ(), "PGPASSWORD="+config.Global.DBPassword)
-	out := &strings.Builder{}
+	cmd.Stdin = file
+	out := &tailBuffer{limit: 4096}
 	cmd.Stdout = out
 	cmd.Stderr = out
 
@@ -75,7 +57,7 @@ func ImportDB(c *gin.Context) {
 		logger.Errorf("Import: psql failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":  "database restore failed",
-			"detail": truncate(out.String(), 4096),
+			"detail": out.String(),
 		})
 		return
 	}
@@ -93,13 +75,38 @@ func ImportDB(c *gin.Context) {
 		"file":        header.Filename,
 		"bytes":       header.Size,
 		"duration_ms": time.Since(start).Milliseconds(),
-		"psql_output": truncate(out.String(), 4096),
+		"psql_output": out.String(),
 	})
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
+type tailBuffer struct {
+	mu    sync.Mutex
+	limit int
+	buf   []byte
+}
+
+func (b *tailBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.limit <= 0 {
+		return len(p), nil
 	}
-	return s[:n] + "..."
+	if len(p) >= b.limit {
+		b.buf = append(b.buf[:0], p[len(p)-b.limit:]...)
+		return len(p), nil
+	}
+
+	if excess := len(b.buf) + len(p) - b.limit; excess > 0 {
+		copy(b.buf, b.buf[excess:])
+		b.buf = b.buf[:len(b.buf)-excess]
+	}
+	b.buf = append(b.buf, p...)
+	return len(p), nil
+}
+
+func (b *tailBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return string(b.buf)
 }

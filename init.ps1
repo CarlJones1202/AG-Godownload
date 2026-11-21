@@ -32,54 +32,74 @@ if (-not (Get-Command "winget" -ErrorAction SilentlyContinue)) {
 }
 Write-Success "winget found."
 
-# 3. Install FFmpeg
-Write-Step "Checking for FFmpeg..."
+# 3. Install required system packages together
+Write-Step "Checking required system packages..."
+$missingWingetPackages = @()
+
 if (-not (Get-Command "ffmpeg" -ErrorAction SilentlyContinue)) {
-    Write-Host "Installing FFmpeg via winget..."
-    winget install --id Gyan.FFmpeg --silent --accept-package-agreements --accept-source-agreements
-    # Refresh path
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+    $missingWingetPackages += "Gyan.FFmpeg"
 }
+if (-not (Get-Command "yt-dlp" -ErrorAction SilentlyContinue)) {
+    $missingWingetPackages += "yt-dlp.yt-dlp"
+}
+if (-not (Get-Command "go" -ErrorAction SilentlyContinue)) {
+    $missingWingetPackages += "GoLang.Go"
+}
+if (-not (Get-Command "node" -ErrorAction SilentlyContinue)) {
+    $missingWingetPackages += "OpenJS.NodeJS.LTS"
+}
+if (-not (Get-Command "py" -ErrorAction SilentlyContinue)) {
+    $missingWingetPackages += "Python.Python.3.13"
+}
+
+$system32 = Join-Path $env:WINDIR "System32"
+$vcDllsMissing = -not (Test-Path (Join-Path $system32 "vcruntime140.dll")) -or
+                 -not (Test-Path (Join-Path $system32 "vcruntime140_1.dll")) -or
+                 -not (Test-Path (Join-Path $system32 "msvcp140.dll"))
+if ($vcDllsMissing) {
+    $missingWingetPackages += "Microsoft.VCRedist.2015+.x64"
+}
+
+if ($missingWingetPackages.Count -gt 0) {
+    Write-Host "Installing missing packages in one winget operation:"
+    $missingWingetPackages | ForEach-Object { Write-Host "  - $_" }
+
+    $wingetArgs = @("install", "--silent", "--accept-package-agreements", "--accept-source-agreements", "--source", "winget")
+    foreach ($packageId in $missingWingetPackages) {
+        $wingetArgs += @("--id", $packageId)
+    }
+    & winget @wingetArgs
+    Write-Host "winget finished (exit code $LASTEXITCODE)."
+
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
+        [System.Environment]::GetEnvironmentVariable("Path","User")
+} else {
+    Write-Success "All required system packages are already installed."
+}
+
 if (Get-Command "ffmpeg" -ErrorAction SilentlyContinue) {
     Write-Success "FFmpeg is ready."
-} else {
+} elseif ($missingWingetPackages -contains "Gyan.FFmpeg") {
     Write-Warning-Host "FFmpeg was installed but 'ffmpeg' command is not in the current session path."
     Write-Warning-Host "Restart your terminal after this script completes."
 }
 
-# 4. Install yt-dlp
-Write-Step "Checking for yt-dlp..."
-if (-not (Get-Command "yt-dlp" -ErrorAction SilentlyContinue)) {
-    Write-Host "Installing yt-dlp via winget..."
-    winget install --id yt-dlp.yt-dlp --silent --accept-package-agreements --accept-source-agreements --source winget
-    # Refresh path
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-}
 if (Get-Command "yt-dlp" -ErrorAction SilentlyContinue) {
     Write-Success "yt-dlp is ready."
-} else {
+} elseif ($missingWingetPackages -contains "yt-dlp.yt-dlp") {
     Write-Warning-Host "yt-dlp was installed but 'yt-dlp' command is not in the current session path."
 }
 
-# 5. Install Go
-Write-Step "Checking for Go..."
-if (-not (Get-Command "go" -ErrorAction SilentlyContinue)) {
-    Write-Host "Installing Go via winget..."
-    winget install --id GoLang.Go --silent --accept-package-agreements --accept-source-agreements
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-}
 if (Get-Command "go" -ErrorAction SilentlyContinue) {
     Write-Success "Go is ready ($(go version))."
-} else {
+} elseif ($missingWingetPackages -contains "GoLang.Go") {
     Write-Warning-Host "Go was installed but 'go' command is not in the current session path."
 }
 
-# 5. Install Node.js
-Write-Step "Checking for Node.js..."
-if (-not (Get-Command "node" -ErrorAction SilentlyContinue)) {
-    Write-Host "Installing Node.js via winget..."
-    winget install --id OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+if (Get-Command "node" -ErrorAction SilentlyContinue) {
+    Write-Success "Node.js is ready."
+} elseif ($missingWingetPackages -contains "OpenJS.NodeJS.LTS") {
+    Write-Warning-Host "Node.js was installed but 'node' command is not in the current session path."
 }
 
 # 6. Install Python + gallery-dl
@@ -105,21 +125,13 @@ if (-not (Test-Path (Join-Path $PWD "bin"))) {
 
 # --- VC++ runtime (required by PostgreSQL 17 MSVC binaries) ---
 Write-Host "Checking for Microsoft Visual C++ Redistributable runtime..."
-$system32 = Join-Path $env:WINDIR "System32"
 $vcDllsMissing = -not (Test-Path (Join-Path $system32 "vcruntime140.dll")) -or
                  -not (Test-Path (Join-Path $system32 "vcruntime140_1.dll")) -or
                  -not (Test-Path (Join-Path $system32 "msvcp140.dll"))
 if ($vcDllsMissing) {
-    Write-Host "Installing Microsoft Visual C++ Redistributable (x64) via winget..."
-    winget install --id Microsoft.VCRedist.2015+.x64 --silent --accept-package-agreements --accept-source-agreements
-    Write-Host "winget finished (exit code $LASTEXITCODE)."
-    if (-not (Test-Path (Join-Path $system32 "vcruntime140_1.dll"))) {
-        Write-Warning-Host "VC++ runtime may still be missing; PostgreSQL may fail to start (STATUS_DLL_NOT_FOUND)."
-    } else {
-        Write-Success "VC++ runtime is ready."
-    }
+    Write-Warning-Host "VC++ runtime may still be missing; PostgreSQL may fail to start (STATUS_DLL_NOT_FOUND)."
 } else {
-    Write-Success "VC++ runtime already present."
+    Write-Success "VC++ runtime is ready."
 }
 
 # --- Download and extract portable PostgreSQL binaries ---
@@ -283,27 +295,12 @@ Write-Success "Backend initialized."
 Write-Step "Setting up local SigLIP 2 semantic embeddings..."
 $pythonLauncher = Get-Command "py" -ErrorAction SilentlyContinue
 if (-not $pythonLauncher) {
-    Write-Host "Installing Python 3.13 via winget..."
-    winget install --id Python.Python.3.13 --silent --accept-package-agreements --accept-source-agreements
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
-        [System.Environment]::GetEnvironmentVariable("Path", "User")
-    $pythonLauncher = Get-Command "py" -ErrorAction SilentlyContinue
-}
-if (-not $pythonLauncher) {
-    throw "Python launcher is unavailable after installation."
+    throw "Python launcher is unavailable after the combined package installation."
 }
 
 & $pythonLauncher.Source -3.13 --version
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "Installing Python 3.13 via winget..."
-    winget install --id Python.Python.3.13 --silent --accept-package-agreements --accept-source-agreements
-    if ($LASTEXITCODE -ne 0) { throw "Failed to install Python 3.13." }
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
-        [System.Environment]::GetEnvironmentVariable("Path", "User")
-    $pythonLauncher = Get-Command "py" -ErrorAction SilentlyContinue
-    if (-not $pythonLauncher) { throw "Python launcher is unavailable after installing Python 3.13." }
-    & $pythonLauncher.Source -3.13 --version
-    if ($LASTEXITCODE -ne 0) { throw "Python 3.13 is required for the local semantic embedding runtime." }
+    throw "Python 3.13 is required for the local semantic embedding runtime."
 }
 
 $embeddingVenv = Join-Path $PWD "bin\embedding-venv"
