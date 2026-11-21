@@ -484,18 +484,28 @@ func populateImagePaths(images []models.Image) {
 			sourceName = "uncategorized"
 		}
 		sanitized := services.SanitizeDirectoryName(sourceName)
-		// Filename may already be a relative path like "SourceName/hash.jpg"
-		// (see crawler_service relPath). Use just the basename so the source
-		// dir isn't doubled in the URL, which would 404.
-		leaf := filepath.Base(images[i].Filename)
-		if filenameWebPath, filenameThumbnailPath, ok := pathsFromRelativeFilename(images[i].Filename); ok {
-			images[i].WebPath = filenameWebPath
-			images[i].ThumbnailPath = filenameThumbnailPath
-			continue
-		}
-		images[i].WebPath = fmt.Sprintf("/images/%s/%s", sanitized, leaf)
-		images[i].ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitized, leaf)
+		images[i].WebPath, images[i].ThumbnailPath, images[i].TrickplayVTT, images[i].TrickplaySprite =
+			imagePathsFromFilename(images[i].Filename, sanitized, images[i].Type == "video")
 	}
+}
+
+func imagePathsFromFilename(filename, sanitizedSource string, isVideo bool) (webPath, thumbnailPath, trickplayVTT, trickplaySprite string) {
+	leaf := filepath.Base(filename)
+	directory := "/images/" + sanitizedSource
+	if relativeWebPath, _, ok := pathsFromRelativeFilename(filename); ok {
+		directory = relativeWebPath[:strings.LastIndex(relativeWebPath, "/")]
+	}
+
+	webPath = fmt.Sprintf("%s/%s", directory, leaf)
+	thumbnailFilename := leaf
+	if isVideo {
+		baseFilename := strings.TrimSuffix(leaf, filepath.Ext(leaf))
+		thumbnailFilename = baseFilename + ".jpg"
+		trickplayVTT = fmt.Sprintf("%s/trickplay/%s.vtt", directory, baseFilename)
+		trickplaySprite = fmt.Sprintf("%s/trickplay/%s_sprite.jpg", directory, baseFilename)
+	}
+	thumbnailPath = fmt.Sprintf("%s/thumbnails/%s", directory, thumbnailFilename)
+	return
 }
 
 func pathsFromRelativeFilename(filename string) (webPath string, thumbnailPath string, ok bool) {

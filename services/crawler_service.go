@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"gallery_api/config"
 	"gallery_api/database"
@@ -349,6 +350,9 @@ func CrawlSource(sourceID uint) error {
 				case strings.Contains(src, "imx.to"):
 					logger.Debug("Ripping from Imx.to")
 					imageURL, err = RipImx(src)
+					if err == nil && imageURL != "" {
+						downloadReferer = src
+					}
 				case strings.Contains(src, "turboimagehost"):
 					logger.Debug("Ripping from TurboImageHost")
 					imageURL, err = RipTurboImg(src)
@@ -444,6 +448,13 @@ func CrawlSource(sourceID uint) error {
 					if attempt < maxRetries {
 						time.Sleep(time.Duration(attempt*2) * time.Second)
 					}
+				}
+
+				if err != nil && strings.Contains(strings.ToLower(imageURL), "imx.to") {
+					logger.Debugf("HTTP download failed for IMX image %s; retrying through the IMX page", imageURL)
+					ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
+					result, err = DownloadImageWithIMXFallback(ctx, src, imageURL, source.Name)
+					cancel()
 				}
 
 				if err != nil {
@@ -684,9 +695,20 @@ func ProcessVideoSource(source models.Source) error {
 
 	logger.Infof("Extracted video title: %s", videoTitle)
 
-	// Delete existing videos from this source before re-downloading
+	// Delete existing videos from this source before re-downloading. Capture
+	// any user-selected thumbnail time first so the replacement video keeps it.
 	var existingVideos []models.Image
+	var preservedThumbnailTime *float64
+	var preservedUpdatedAt time.Time
 	if err := database.DB.Where("source_id = ? AND type = ?", source.ID, "video").Find(&existingVideos).Error; err == nil {
+		for _, existingVideo := range existingVideos {
+			if existingVideo.OriginalURL == source.Location && existingVideo.ThumbnailTime != nil &&
+				(preservedThumbnailTime == nil || existingVideo.UpdatedAt.After(preservedUpdatedAt)) {
+				thumbnailTime := *existingVideo.ThumbnailTime
+				preservedThumbnailTime = &thumbnailTime
+				preservedUpdatedAt = existingVideo.UpdatedAt
+			}
+		}
 		for _, existingVideo := range existingVideos {
 			// Delete the file from disk
 			fullPath := filepath.Join(UploadsDir, existingVideo.Filename)
@@ -706,14 +728,14 @@ func ProcessVideoSource(source models.Source) error {
 
 	if isLocalFile {
 		// For YouTube (and future local downloads), use ImportLocalVideo
-		result, err = ImportLocalVideo(localPath, source.Name)
+		result, err = ImportLocalVideoAt(localPath, source.Name, preservedThumbnailTime)
 		if err != nil {
 			return fmt.Errorf("failed to import video: %w", err)
 		}
 		videoURL = source.Location // Use original URL as download URL
 	} else {
 		// Download the video from URL
-		result, err = DownloadVideo(videoURL, source.Name, source.Location, videoTitle)
+		result, err = DownloadVideoAt(videoURL, source.Name, source.Location, videoTitle, preservedThumbnailTime)
 		if err != nil {
 			return fmt.Errorf("failed to download video: %w", err)
 		}
@@ -740,6 +762,7 @@ func ProcessVideoSource(source models.Source) error {
 		DownloadURL:    videoURL,
 		Title:          imageTitle,
 		Duration:       result.Duration,
+		ThumbnailTime:  preservedThumbnailTime,
 		Width:          result.Width,
 		Height:         result.Height,
 		SizeMB:         result.SizeMB,

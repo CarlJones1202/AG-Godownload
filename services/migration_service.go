@@ -71,10 +71,11 @@ func MigrateImagesToNewStructure() error {
 		ID          uint
 		Filename    string
 		DownloadURL string
+		OriginalURL string
 	}
 	if err := database.DB.
 		Model(&models.Image{}).
-		Select("id, filename, download_url").
+		Select("id, filename, download_url, original_url").
 		Find(&images).Error; err != nil {
 		return fmt.Errorf("failed to load images: %w", err)
 	}
@@ -133,19 +134,21 @@ func MigrateImagesToNewStructure() error {
 				continue
 			}
 
-			// Prefer using the download URL origin as the referer when re-downloading
-			referer := ""
-			if u, perr := url.Parse(image.DownloadURL); perr == nil {
-				referer = u.Scheme + "://" + u.Host
+			// Preserve the provider page as referer when the host requires it.
+			referer := imageDownloadReferer(extractImageProvider(image.DownloadURL), image.OriginalURL, image.DownloadURL)
+			if referer == "" {
+				if u, perr := url.Parse(image.DownloadURL); perr == nil {
+					referer = u.Scheme + "://" + u.Host
+				}
 			}
 
 			result, err := DownloadImage(image.DownloadURL, sourceName, referer)
 			if err != nil {
 				// If imx and gallery-dl enabled, try fallback without logging the initial HTTP failure as final
-				if strings.Contains(strings.ToLower(image.DownloadURL), "imx.to") && config.Global.GalleryDL.Enabled {
-					logger.Debugf("HTTP re-download failed for %s; attempting gallery-dl fallback", image.Filename)
+				if extractImageProvider(image.DownloadURL) == "imx" {
+					logger.Debugf("HTTP re-download failed for %s; retrying through the IMX page", image.Filename)
 					gctx, gcancel := context.WithTimeout(context.Background(), time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
-					result, err = DownloadImageWithGalleryDL(gctx, image.DownloadURL, sourceName, time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
+					result, err = DownloadImageWithIMXFallback(gctx, image.OriginalURL, image.DownloadURL, sourceName)
 					gcancel()
 					if err != nil {
 						logger.Errorf("Failed to re-download %s after gallery-dl fallback: %v", image.Filename, err)
@@ -210,19 +213,21 @@ func MigrateImagesToNewStructure() error {
 			logger.Infof("Hash collision detected for %s, re-downloading to ensure separate copy", image.Filename)
 
 			if image.DownloadURL != "" {
-				// Prefer using the download URL origin as the referer when re-downloading
-				referer := ""
-				if u, perr := url.Parse(image.DownloadURL); perr == nil {
-					referer = u.Scheme + "://" + u.Host
+				// Preserve the provider page as referer when the host requires it.
+				referer := imageDownloadReferer(extractImageProvider(image.DownloadURL), image.OriginalURL, image.DownloadURL)
+				if referer == "" {
+					if u, perr := url.Parse(image.DownloadURL); perr == nil {
+						referer = u.Scheme + "://" + u.Host
+					}
 				}
 
 				result, err := DownloadImage(image.DownloadURL, sourceName, referer)
 				if err != nil {
 					// Try gallery-dl fallback for imx when enabled; suppress initial HTTP failure as final
-					if strings.Contains(strings.ToLower(image.DownloadURL), "imx.to") && config.Global.GalleryDL.Enabled {
-						logger.Debugf("HTTP re-download failed for %s (hash collision path); attempting gallery-dl fallback", image.Filename)
+					if extractImageProvider(image.DownloadURL) == "imx" {
+						logger.Debugf("HTTP re-download failed for %s (hash collision path); retrying through the IMX page", image.Filename)
 						gctx, gcancel := context.WithTimeout(context.Background(), time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
-						result, err = DownloadImageWithGalleryDL(gctx, image.DownloadURL, sourceName, time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
+						result, err = DownloadImageWithIMXFallback(gctx, image.OriginalURL, image.DownloadURL, sourceName)
 						gcancel()
 						if err != nil {
 							logger.Errorf("Failed to re-download %s after gallery-dl fallback: %v", image.Filename, err)

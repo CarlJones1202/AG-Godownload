@@ -12,7 +12,7 @@ removed because the work itself is the useful record.
 | 2 | Bounded download concurrency | Complete | Semaphore in `services/crawler_service.go`. |
 | 3 | HTTP connection pooling | Complete | Shared clients in `services/http_client.go`. |
 | 4 | Batch database writes | Complete | `CreateInBatches` in `services/crawler_service.go`; some junction inserts are still built individually. |
-| 5 | Configurable worker pools | Complete | `CRAWLER_WORKERS`, `AITAG_WORKERS`, recovery pools in `config/config.go`. |
+| 5 | Configurable worker pools | Complete | `CRAWLER_WORKERS`, `AITAG_WORKERS`, `PERSON_SCAN_WORKERS`, and recovery pools in `config/config.go`. |
 | 6 | Context support and cancellation | Not started | No end-to-end cancellation plumbing through services. |
 | 7 | Structured logging | Partial | `logger/logger.go` provides leveled, prefixed text logs; no structured fields. |
 | 8 | Explicit error classification | Not started | No `errors/errors.go`; errors are wrapped ad hoc. |

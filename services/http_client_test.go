@@ -4,14 +4,103 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"gallery_api/config"
 )
+
+func TestIMXHostDetection(t *testing.T) {
+	for _, host := range []string{"imx.to", "image.imx.to", "i02.imx.to"} {
+		if !isIMXHost(host) {
+			t.Errorf("isIMXHost(%q) = false, want true", host)
+		}
+	}
+	if isIMXHost("notimx.to") {
+		t.Error("isIMXHost accepted a non-IMX domain")
+	}
+}
+
+func TestAcquireIMXRequestLimitsConcurrency(t *testing.T) {
+	first, err := acquireIMXRequest(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := acquireIMXRequest(context.Background())
+	if err != nil {
+		first()
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	third, err := acquireIMXRequest(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		if err == nil {
+			third()
+		}
+		first()
+		second()
+		t.Fatalf("third concurrent acquire error = %v, want deadline exceeded", err)
+	}
+
+	first()
+	third, err = acquireIMXRequest(context.Background())
+	if err != nil {
+		second()
+		t.Fatalf("acquire after a slot is released: %v", err)
+	}
+	second()
+	third()
+}
+
+func TestDoRequestWithRetryUsesExtendedRetriesForIMX(t *testing.T) {
+	oldClient, oldTransport := globalClient, globalTransport
+	oldRetries := config.Global.HTTPMaxRetries
+	globalTransport = nil
+	config.Global.HTTPMaxRetries = 1
+	var requestCount atomic.Int32
+	globalClient = &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		count := requestCount.Add(1)
+		status := http.StatusServiceUnavailable
+		if count == 5 {
+			status = http.StatusOK
+		}
+		return &http.Response{
+			StatusCode: status,
+			Header:     http.Header{"Retry-After": []string{"0"}},
+			Body:       io.NopCloser(strings.NewReader("ok")),
+		}, nil
+	})}
+	defer func() {
+		globalClient, globalTransport = oldClient, oldTransport
+		config.Global.HTTPMaxRetries = oldRetries
+	}()
+
+	req, err := http.NewRequest(http.MethodGet, "https://image.imx.to/image.jpg", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := DoRequestWithRetry(context.Background(), req)
+	if err != nil {
+		t.Fatalf("DoRequestWithRetry() error = %v", err)
+	}
+	resp.Body.Close()
+	if got := requestCount.Load(); got != 5 {
+		t.Fatalf("request count = %d, want 5", got)
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
 
 func TestRetryDelay(t *testing.T) {
 	now := time.Date(2026, time.October, 22, 12, 0, 0, 0, time.UTC)

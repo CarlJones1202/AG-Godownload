@@ -32,6 +32,9 @@ func main() {
 	if err := services.CleanupDuplicateScans(); err != nil {
 		logger.Warnf("Failed to cleanup duplicate scans: %v", err)
 	}
+	if err := services.RestorePendingScans(); err != nil {
+		logger.Errorf("Failed to restore pending person scans: %v", err)
+	}
 
 	// Ensure uploads directory exists
 	if err := services.EnsureUploadsDir(); err != nil {
@@ -181,6 +184,10 @@ func main() {
 	r.GET("/admin/missing-galleries/not-wanted", handlers.GetNotWantedGalleries)
 	r.DELETE("/admin/missing-galleries/not-wanted/:id", handlers.RemoveNotWantedGallery)
 
+	// ViperGirls search results for missing galleries
+	r.GET("/admin/vipergirls/search", handlers.SearchVipergirls)
+	r.POST("/admin/vipergirls/scrape", handlers.ScrapeVipergirls)
+
 	// Old StashDB routes (kept for backward compatibility)
 	r.GET("/stashdb/search", handlers.SearchStashDB)
 	r.POST("/people/:id/stashdb/link", handlers.LinkStashDB)
@@ -210,6 +217,7 @@ func main() {
 	r.DELETE("/images/:imageId", handlers.DeleteImage)
 	r.POST("/images/:imageId/favorite", handlers.ToggleFavorite)
 	r.PATCH("/images/:imageId/vr-mode", handlers.UpdateImageVrMode)
+	r.PATCH("/images/:imageId/thumbnail-time", handlers.UpdateVideoThumbnailTime)
 	r.PATCH("/images/:imageId/title", handlers.UpdateImageTitle)
 	r.GET("/images", handlers.GetImages)
 	r.GET("/search/color", handlers.SearchByColor)
@@ -264,5 +272,7 @@ func main() {
 	// crawls to finish while the database is still available.
 	services.StopWorkers()
 
-	logger.Info("Shutdown complete")
+	// PostgreSQL is an external service managed by start-db.ps1/stop-db.ps1.
+	// Stopping the API must not close or stop that database server.
+	logger.Info("API shutdown complete; PostgreSQL left running")
 }

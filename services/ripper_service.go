@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"gallery_api/logger"
 	"net/http"
@@ -118,6 +119,11 @@ func RipPixHost(src string) (string, error) {
 
 func RipImx(src string) (string, error) {
 	logger.Debugf("Starting RipImx for %s", src)
+	release, err := acquireIMXRequest(context.Background())
+	if err != nil {
+		return "", fmt.Errorf("waiting to resolve IMX page %s: %w", src, err)
+	}
+	defer release()
 
 	// imx.to structure:
 	// 1. Anchor href points to the image page (e.g., https://imx.to/i/abc123)
@@ -139,6 +145,12 @@ func RipImx(src string) (string, error) {
 		continueValue = e.Attr("value")
 		logger.Debug("Found imx.to continue button")
 	})
+	c.OnHTML("button[name='imgContinue']", func(e *colly.HTMLElement) {
+		needsContinue = true
+		continueName = "imgContinue"
+		continueValue = e.Attr("value")
+		logger.Debug("Found imx.to continue button")
+	})
 
 	// 2. Look for the main image
 	c.OnHTML("img", func(e *colly.HTMLElement) {
@@ -152,7 +164,7 @@ func RipImx(src string) (string, error) {
 
 		// Look for images hosted on imx.to CDN
 		if strings.Contains(imgSrc, "imx.to") || strings.Contains(imgSrc, "i.imx.to") {
-			if strings.Contains(imgSrc, "/i/") {
+			if strings.Contains(imgSrc, "/i/") || strings.Contains(imgSrc, "/u/i/") {
 				imageURL = imgSrc
 				logger.Debugf("Found full-size image: %s", imgSrc)
 			} else if imageURL == "" {
@@ -177,6 +189,10 @@ func RipImx(src string) (string, error) {
 
 		// Important: Cookies must be preserved from the first request
 		c2.SetCookies(src, c.Cookies(src))
+		c2.OnRequest(func(r *colly.Request) {
+			r.Headers.Set("Referer", src)
+			r.Headers.Set("Origin", "https://imx.to")
+		})
 
 		c2.OnHTML("img", func(e *colly.HTMLElement) {
 			imgSrc := e.Attr("src")
@@ -185,7 +201,7 @@ func RipImx(src string) (string, error) {
 			}
 
 			if strings.Contains(imgSrc, "imx.to") || strings.Contains(imgSrc, "i.imx.to") {
-				if strings.Contains(imgSrc, "/i/") {
+				if strings.Contains(imgSrc, "/i/") || strings.Contains(imgSrc, "/u/i/") {
 					imageURL = imgSrc
 					logger.Debugf("Found full-size image after POST: %s", imgSrc)
 				} else if imageURL == "" {
@@ -206,23 +222,18 @@ func RipImx(src string) (string, error) {
 	if imageURL != "" {
 		// Make sure it's an absolute URL
 		if !strings.HasPrefix(imageURL, "http") {
-			imageURL = "https:" + imageURL
+			if strings.HasPrefix(imageURL, "//") {
+				imageURL = "https:" + imageURL
+			} else {
+				parsed, parseErr := url.Parse(src)
+				if parseErr == nil {
+					imageURL = parsed.ResolveReference(&url.URL{Path: imageURL}).String()
+				}
+			}
 		}
 		return imageURL, nil
 	}
-
-	// Fallback: try HEAD request
-	logger.Debug("No image found, trying HEAD request fallback")
-	resp, err := http.Head(src)
-	if err != nil {
-		return "", fmt.Errorf("resolving Imx URL %s: %v", src, err)
-	}
-	defer resp.Body.Close()
-
-	finalURL := resp.Request.URL.String()
-	imageURL = strings.ReplaceAll(finalURL, "/t/", "/i/")
-	logger.Debugf("Transformed Imx.to URL: %s -> %s", src, imageURL)
-	return imageURL, nil
+	return "", fmt.Errorf("could not extract an IMX image URL after visiting %s", src)
 }
 
 func RipTurboImg(src string) (string, error) {

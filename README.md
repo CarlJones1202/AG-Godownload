@@ -39,6 +39,11 @@ go run .
 
 The server will start on port 8080.
 
+Missing-gallery rechecks run with four workers by default. Set
+`PERSON_SCAN_WORKERS` in the server environment to adjust concurrency; scans for
+the same provider remain serialized. Pending scans resume automatically after a
+server restart.
+
 ### Graceful shutdown and crawl recovery
 
 Stop the server with Ctrl+C (or send SIGTERM). Shutdown stops workers from
@@ -46,6 +51,9 @@ starting queued sources and waits for each active source crawl to finish before
 exiting. Sources that were still queued are re-queued automatically when the
 server starts again. The wait can last as long as the current source takes; keep
 PostgreSQL running until the server reports that shutdown is complete.
+PostgreSQL is a separate process: API shutdown does not start or stop it.
+The database startup scripts launch PostgreSQL without sharing the API console,
+so Ctrl+C for the server is not propagated to PostgreSQL.
 
 ### Recover a gallery with missing photos
 
@@ -160,6 +168,7 @@ do start with `/api` are `/api/stats`, `/api/export/db`, and `/api/import/db`.
 - `GET /images/*filepath` - Serve an image file
 - `GET /thumbnails/*filepath` - Serve a thumbnail
 - `POST /images/:imageId/favorite` - Toggle favorite
+- `PATCH /images/:imageId/thumbnail-time` - Save a video thumbnail time and regenerate its thumbnail
 - `GET /search/color` - Search by hex color
 - `GET /colors/top` - Most used colors
 
@@ -176,6 +185,15 @@ do start with `/api` are `/api/stats`, `/api/export/db`, and `/api/import/db`.
 - `PUT /people/:id` - Update a person
 - `DELETE /people/:id` - Delete a person
 - `POST /people/:id/link-galleries` - Auto-link galleries by name/alias
+
+### Missing gallery discovery
+- `GET /admin/vipergirls/search?query=<terms>` - Parse the first page of vipergirls.to
+  photo-section search results into title, sub forum, thread URL, and first-post
+  thumbnail. The request mirrors the site's own "Search photo sections" option so video
+  sub forums are excluded.
+- `POST /admin/vipergirls/scrape` - Associate a chosen thread with a person's missing
+  gallery, create its source, and queue the crawl. The browser calls these through the
+  `/api` proxy prefix.
 
 ### Similarity and ratings
 - `GET /similar/:id` - Recommendations for an image

@@ -4,6 +4,7 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { sources, admin, maintenance, stats, adminApi, profile, people } from '@/lib/api';
 import type { Image as GalleryImage, NotWantedGallery, Source } from '@/types';
 import { Spinner, Badge, Button, Input, Tabs } from '@/components/UI';
+import { VipergirlsSearchDialog } from '@/components/VipergirlsSearchDialog';
 import {
   Globe,
   Images,
@@ -25,7 +26,7 @@ import {
   Trash2,
   EyeOff,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, vipergirlsSearchQuery } from '@/lib/utils';
 
 const PROVIDER_OPTIONS = [
   "MetArt", "MetartX", "PlayboyPlus", "Vixen",
@@ -92,6 +93,14 @@ export function DashboardPage() {
   const [missingQ, setMissingQ] = useState('');
   const [missingProvider, setMissingProvider] = useState('');
   const [rechecking, setRechecking] = useState(false);
+  const [vipergirlsTarget, setVipergirlsTarget] = useState<{
+    query: string;
+    personId: number;
+    provider: string;
+    galleryName: string;
+    missingUrl: string;
+    title: string;
+  } | null>(null);
 
   const { data: missingData, isLoading: loadingMissing, dataUpdatedAt: missingUpdatedAt } = useQuery({
     queryKey: ['admin', 'missing-galleries', { page: missingPage, q: missingQ, provider: missingProvider }],
@@ -617,15 +626,22 @@ export function DashboardPage() {
                       </div>
 
                       <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
-                        <a
-                          href={`https://vipergirls.to/search.php?do=process&query=${encodeURIComponent(`"${mg.alias || mg.person_name || ''}" "${mg.gallery_name || ''}"`)}&titleonly=1&forumchoice%5B%5D=235&childforums=1`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title="Search vipergirls.to"
-                          className="p-2.5 bg-white/10 hover:bg-blue-500/80 rounded-full transition-colors"
+                        <button
+                          type="button"
+                          onClick={() => setVipergirlsTarget({
+                            query: vipergirlsSearchQuery(mg.alias || mg.person_name, mg.gallery_name),
+                            personId: mg.person_id,
+                            provider: mg.provider,
+                            galleryName: mg.gallery_name,
+                            missingUrl: mg.gallery_url,
+                            title: mg.gallery_name,
+                          })}
+                          title="Find on vipergirls.to"
+                          aria-label={`Find ${mg.gallery_name} on vipergirls.to`}
+                          className="p-2.5 bg-white/10 hover:bg-blue-500/80 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                         >
                           <ExternalLink size={18} className="text-white" />
-                        </a>
+                        </button>
                         <button
                           onClick={() => excludeMissingMut.mutate({ person_id: mg.person_id, provider: mg.provider, source_url: mg.gallery_url, title: mg.gallery_name })}
                           disabled={excludeMissingMut.isPending}
@@ -1012,6 +1028,17 @@ export function DashboardPage() {
           </SectionCard>
         </div>
       )}
+
+      <VipergirlsSearchDialog
+        open={vipergirlsTarget !== null}
+        query={vipergirlsTarget?.query ?? ''}
+        personId={vipergirlsTarget?.personId ?? 0}
+        provider={vipergirlsTarget?.provider ?? ''}
+        galleryName={vipergirlsTarget?.galleryName ?? ''}
+        missingUrl={vipergirlsTarget?.missingUrl}
+        title={vipergirlsTarget?.title}
+        onClose={() => setVipergirlsTarget(null)}
+      />
     </div>
   );
 }

@@ -12,14 +12,20 @@ import (
 
 // ImportLocalVideo imports a video file from a local path
 func ImportLocalVideo(sourcePath string, sourceName string) (*DownloadImageResult, error) {
-	return importLocalVideo(sourcePath, sourceName, true)
+	return ImportLocalVideoAt(sourcePath, sourceName, nil)
+}
+
+// ImportLocalVideoAt imports a video and generates its thumbnail at an
+// explicit time when one is supplied.
+func ImportLocalVideoAt(sourcePath string, sourceName string, thumbnailTime *float64) (*DownloadImageResult, error) {
+	return importLocalVideo(sourcePath, sourceName, true, thumbnailTime)
 }
 
 // importLocalVideo moves a local video into UploadsDir. When postProcess is
 // false, inline thumbnail/trickplay generation is skipped so bulk recovery can
 // hand that CPU-bound work to a post-processing pool instead of occupying a
 // download slot; video metadata is still extracted because callers persist it.
-func importLocalVideo(sourcePath string, sourceName string, postProcess bool) (*DownloadImageResult, error) {
+func importLocalVideo(sourcePath string, sourceName string, postProcess bool, thumbnailTime *float64) (*DownloadImageResult, error) {
 	// Verify source file exists
 	info, err := os.Stat(sourcePath)
 	if err != nil {
@@ -80,7 +86,7 @@ func importLocalVideo(sourcePath string, sourceName string, postProcess bool) (*
 
 	// Generate thumbnail
 	if postProcess {
-		if _, err := GenerateVideoThumbnail(destPath); err != nil {
+		if _, err := GenerateVideoThumbnailAt(destPath, thumbnailTime); err != nil {
 			fmt.Printf("Warning: Failed to generate video thumbnail: %v\n", err)
 		}
 

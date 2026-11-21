@@ -226,6 +226,37 @@ func PersonSearchTerms(person models.Person, providerAliases []models.PersonProv
 	return searchTerms
 }
 
+// PersonScanSearchTerms returns the names used for a provider-specific missing-gallery
+// scan. Unlike PersonSearchTerms, it intentionally ignores the person's general aliases:
+// those aliases may belong to other providers and, when searched on every provider,
+// produce unrelated galleries in the missing list. The canonical name is kept as a
+// fallback, along with aliases scoped to the provider and the explicitly selected alias.
+func PersonScanSearchTerms(person models.Person, providerAliases []models.PersonProviderAlias, provider, alias string) []string {
+	searchTerms := make([]string, 0, 2+len(providerAliases))
+	seen := make(map[string]bool)
+
+	appendTerm := func(term string) {
+		term = strings.TrimSpace(term)
+		key := strings.ToLower(term)
+		if term == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		searchTerms = append(searchTerms, term)
+	}
+
+	appendTerm(person.Name)
+	for _, providerAlias := range providerAliases {
+		if !strings.EqualFold(providerAlias.Provider, provider) {
+			continue
+		}
+		appendTerm(providerAlias.Alias)
+	}
+	appendTerm(alias)
+
+	return searchTerms
+}
+
 // CalculateMatchConfidence returns a confidence score (0.0-1.0) for a name match
 func CalculateMatchConfidence(searchTerm, targetText string) float64 {
 	normalizedSearch := NormalizeName(searchTerm)

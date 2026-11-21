@@ -1,17 +1,19 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, RotateCw } from 'lucide-react';
+import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, RotateCw, Camera } from 'lucide-react';
 import type { Image } from '@/types';
+import { videos as videosApi } from '@/lib/api';
 import { videoUrl, trickplayVttUrl, formatDuration } from '@/lib/utils';
 import { VRPlayer } from './VRPlayer';
 
 interface VideoPlayerProps {
   video: Image;
   onClose: () => void;
+  onThumbnailChange?: (video: Image) => void;
 }
 
 const SPEEDS = [0.25, 0.5, 1, 1.5, 2];
 
-export function VideoPlayer({ video, onClose }: VideoPlayerProps) {
+export function VideoPlayer({ video, onClose, onThumbnailChange }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -30,6 +32,8 @@ export function VideoPlayer({ video, onClose }: VideoPlayerProps) {
   const [controlsVisible, setControlsVisible] = useState(true);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const [scrubbing, setScrubbing] = useState(false);
+  const [savingThumbnail, setSavingThumbnail] = useState(false);
+  const [thumbnailFeedback, setThumbnailFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
 
   useEffect(() => {
     document.body.style.overflow = 'hidden';
@@ -86,6 +90,30 @@ export function VideoPlayer({ video, onClose }: VideoPlayerProps) {
     setVolume(val);
     setMuted(val === 0);
   }, []);
+
+  const handleSetThumbnail = useCallback(async () => {
+    const el = videoRef.current;
+    if (!el || savingThumbnail) return;
+
+    const mediaDuration = Number.isFinite(el.duration) ? el.duration : duration;
+    const time = Math.min(Math.max(el.currentTime, 0), mediaDuration || el.currentTime);
+    if (!Number.isFinite(time) || mediaDuration <= 0) return;
+
+    setSavingThumbnail(true);
+    setThumbnailFeedback(null);
+    try {
+      const updated = await videosApi.setThumbnailTime(video.id, time);
+      onThumbnailChange?.(updated);
+      setThumbnailFeedback({ kind: 'success', message: `Thumbnail set at ${formatDuration(Math.floor(time))}` });
+    } catch (err) {
+      setThumbnailFeedback({
+        kind: 'error',
+        message: err instanceof Error ? err.message : 'Could not set the thumbnail',
+      });
+    } finally {
+      setSavingThumbnail(false);
+    }
+  }, [duration, onThumbnailChange, savingThumbnail, video.id]);
 
   const toggleFullscreen = useCallback(async () => {
     if (!document.fullscreenElement) {
@@ -155,6 +183,14 @@ export function VideoPlayer({ video, onClose }: VideoPlayerProps) {
   const vttSrc = trickplayVttUrl(video.filename);
 
   const formatSpeed = (s: number) => `${s === 1 ? 'Normal' : s + 'x'}`;
+  const thumbnailFeedbackEl = thumbnailFeedback && (
+    <p
+      role={thumbnailFeedback.kind === 'error' ? 'alert' : 'status'}
+      className={`text-xs ${thumbnailFeedback.kind === 'error' ? 'text-red-400' : 'text-emerald-400'}`}
+    >
+      {thumbnailFeedback.message}
+    </p>
+  );
 
   if (isVr) {
     if (vrOpen) {
@@ -207,12 +243,23 @@ export function VideoPlayer({ video, onClose }: VideoPlayerProps) {
                 Enter VR Viewer
               </button>
               <button
+                onClick={handleSetThumbnail}
+                disabled={savingThumbnail}
+                className="flex items-center gap-2 px-4 py-3 rounded-lg bg-white/10 hover:bg-white/20 text-white font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Use current frame as thumbnail"
+                aria-label="Use current frame as thumbnail"
+              >
+                <Camera size={18} />
+                {savingThumbnail ? 'Saving...' : 'Set thumbnail'}
+              </button>
+              <button
                 onClick={onClose}
                 className="px-5 py-3 rounded-lg bg-white/10 hover:bg-white/20 text-white font-medium transition-colors"
               >
                 Back
               </button>
             </div>
+            {thumbnailFeedbackEl}
           </div>
           <button
             onClick={onClose}
@@ -303,6 +350,8 @@ export function VideoPlayer({ video, onClose }: VideoPlayerProps) {
         }`}
       >
         <div className="bg-gradient-to-t from-black/90 via-black/60 to-transparent px-4 pt-10 pb-3">
+          {thumbnailFeedbackEl && <div className="mb-2 px-1">{thumbnailFeedbackEl}</div>}
+
           {/* Progress bar */}
           <div
             ref={progressRef}
@@ -328,6 +377,17 @@ export function VideoPlayer({ video, onClose }: VideoPlayerProps) {
             {/* Play/Pause */}
             <button onClick={togglePlay} className="p-1 hover:text-blue-400 transition-colors" title={isPlaying ? 'Pause' : 'Play'}>
               {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
+            </button>
+
+            {/* Use current frame as thumbnail */}
+            <button
+              onClick={handleSetThumbnail}
+              disabled={savingThumbnail || duration <= 0}
+              className="p-1 text-white/50 hover:text-blue-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Use current frame as thumbnail"
+              aria-label="Use current frame as thumbnail"
+            >
+              <Camera size={20} />
             </button>
 
             {/* Time */}

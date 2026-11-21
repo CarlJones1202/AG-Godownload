@@ -28,8 +28,9 @@ type Config struct {
 	PGBinDir   string // directory containing pg_dump / pg_ctl etc. (set by init.ps1)
 
 	// Workers
-	CrawlerWorkers int
-	AITagWorkers   int
+	CrawlerWorkers    int
+	AITagWorkers      int
+	PersonScanWorkers int
 
 	// Images
 	UploadsDir             string
@@ -89,6 +90,7 @@ func Load() {
 		CrawlerWorkers: getEnvAsInt("CRAWLER_WORKERS", 5),
 		// Default to 0 to disable AI tagging unless explicitly enabled
 		AITagWorkers:           getEnvAsInt("AITAG_WORKERS", 0),
+		PersonScanWorkers:      getEnvAsInt("PERSON_SCAN_WORKERS", 4),
 		UploadsDir:             getEnv("UPLOADS_DIR", "uploads"),
 		MaxConcurrentDownloads: getEnvAsInt("MAX_CONCURRENT_DOWNLOADS", 10),
 		// Recovery defaults preserve the previous hardcoded pool size of 10.
@@ -102,7 +104,7 @@ func Load() {
 	}
 
 	// GalleryDL defaults
-	Global.GalleryDL.Enabled = false
+	Global.GalleryDL.Enabled = getEnvAsBool("GALLERYDL_ENABLED", true)
 	Global.GalleryDL.BinaryPath = getEnv("GALLERYDL_BINARY", "gallery-dl")
 	Global.GalleryDL.TimeoutSec = getEnvAsInt("GALLERYDL_TIMEOUT_SEC", 30)
 	// Providers default - only imx
@@ -133,6 +135,9 @@ func Load() {
 	}
 	if Global.RecoveryPostprocessWorkers < 1 {
 		Global.RecoveryPostprocessWorkers = 1
+	}
+	if Global.PersonScanWorkers < 1 {
+		Global.PersonScanWorkers = 1
 	}
 
 	// Recommendation weights: embed, tags, color, pref
@@ -179,6 +184,21 @@ func getEnvAsInt(key string, fallback int) int {
 		return value
 	}
 	return fallback
+}
+
+func getEnvAsBool(key string, fallback bool) bool {
+	strValue := strings.TrimSpace(strings.ToLower(getEnv(key, "")))
+	if strValue == "" {
+		return fallback
+	}
+	switch strValue {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func getEnvAsFloat(key string, fallback float64) float64 {

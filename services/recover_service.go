@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
-	"time"
 
-	"gallery_api/config"
 	"gallery_api/database"
 	"gallery_api/logger"
 	"gallery_api/models"
@@ -52,10 +50,12 @@ func RecoverImage(imageID uint) error {
 	// Ensure we remove active after work
 	defer RemoveActiveVerificationDownload(img.ID)
 
-	// Use the download URL's origin as referer
-	referer := ""
-	if u, err := url.Parse(img.DownloadURL); err == nil {
-		referer = u.Scheme + "://" + u.Host
+	// Use the provider page as referer when the host requires it.
+	referer := imageDownloadReferer(provider, img.OriginalURL, img.DownloadURL)
+	if referer == "" {
+		if u, err := url.Parse(img.DownloadURL); err == nil {
+			referer = u.Scheme + "://" + u.Host
+		}
 	}
 
 	// Attempt primary download
@@ -63,13 +63,13 @@ func RecoverImage(imageID uint) error {
 	if err != nil {
 		logger.Warnf("[%s] Single-image recovery failed for ID %d: %v", provider, img.ID, err)
 		// For imx provider, optionally attempt gallery-dl fallback
-		if provider == "imx" && config.Global.GalleryDL.Enabled {
-			logger.Debugf("Attempting gallery-dl fallback for image ID %d", img.ID)
+		if provider == "imx" {
+			logger.Debugf("Attempting direct/IMX-page fallback for image ID %d", img.ID)
 			// create a context with timeout
 			ctx := context.Background()
-			result, err = DownloadImageWithGalleryDL(ctx, img.DownloadURL, sourceName, time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
+			result, err = DownloadImageWithIMXFallback(ctx, img.OriginalURL, img.DownloadURL, sourceName)
 			if err != nil {
-				logger.Warnf("[imx] gallery-dl fallback failed for ID %d: %v", img.ID, err)
+				logger.Warnf("[imx] recovery fallback failed for ID %d: %v", img.ID, err)
 				return err
 			}
 		} else {

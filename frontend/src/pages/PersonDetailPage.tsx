@@ -39,7 +39,8 @@ import {
   Play,
 } from 'lucide-react';
 import { CoverGrid } from '@/components/CoverGrid';
-import { getScanGalleryName, thumbnailUrl, imageUrl } from '@/lib/utils';
+import { VipergirlsSearchDialog } from '@/components/VipergirlsSearchDialog';
+import { getScanGalleryName, thumbnailUrl, imageUrl, vipergirlsSearchQuery } from '@/lib/utils';
 import { usePagination } from '@/hooks/usePagination';
 import { VideoPlayer } from '@/components/VideoPlayer';
 
@@ -124,6 +125,14 @@ export function PersonDetailPage() {
   const [stashDbOpen, setStashDbOpen] = useState(false);
   const [stashDbSearchQuery, setStashDbSearchQuery] = useState('');
   const [profilePickerOpen, setProfilePickerOpen] = useState(false);
+  const [vipergirlsTarget, setVipergirlsTarget] = useState<{
+    query: string;
+    personId: number;
+    provider: string;
+    galleryName: string;
+    missingUrl: string;
+    title: string;
+  } | null>(null);
 
   const { data: person, isLoading: loadingPerson } = useQuery({
     queryKey: ['person', personId],
@@ -575,7 +584,7 @@ export function PersonDetailPage() {
                 <button key={video.id} type="button" onClick={() => setActiveVideo(video)}
                   className="group overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/50 text-left hover:border-zinc-700 transition-colors">
                   <div className="relative aspect-video bg-zinc-800">
-                    <VideoThumb filename={video.filename} thumbnailPath={video.thumbnail_path} alt={video.title || video.filename} />
+                    <VideoThumb filename={video.filename} thumbnailPath={video.thumbnail_path} thumbnailTime={video.thumbnail_time_seconds} alt={video.title || video.filename} />
                     <div className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity">
                       <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/60">
                         <Play size={20} className="ml-0.5 text-white" />
@@ -746,10 +755,28 @@ export function PersonDetailPage() {
                                         onClick={() => linkFoundMut.mutate({ provider: scan.provider ?? '', source_url: mg.url, name: getScanGalleryName(mg.title ?? '', scan.provider ?? '', mg.gallery_name, [scan.alias ?? '', person?.name ?? '']), thumbnail_url: mg.thumbnail_url || mg.thumbnail })}>Scrape</Button>
                                       <Button size="sm" variant="secondary" className="h-7 px-2 text-[10px]" disabled={excludeScanResultMut.isPending}
                                         onClick={() => excludeScanResultMut.mutate({ provider: scan.provider ?? '', source_url: mg.url ?? '', title: mg.title ?? '' })}>Not Wanted</Button>
-                                      <a href={`https://vipergirls.to/search.php?do=process&query=${encodeURIComponent(`"${scan.alias || ''}" "${getScanGalleryName(mg.title || '', scan.provider || '', mg.gallery_name, [scan.alias || '', person?.name || ''])}"`)}&titleonly=1&forumchoice%5B%5D=235&childforums=1`}
-                                        target="_blank" rel="noopener noreferrer"
-                                        className="h-7 px-2 text-[10px] inline-flex items-center justify-center rounded-md bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 border border-blue-500/30 transition-all"
-                                        title="Search vipergirls.to"><ExternalLink size={10} /></a>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const galleryName = getScanGalleryName(
+                                            mg.title || '',
+                                            scan.provider || '',
+                                            mg.gallery_name,
+                                            [scan.alias || '', person?.name || ''],
+                                          );
+                                          setVipergirlsTarget({
+                                            query: vipergirlsSearchQuery(scan.alias, galleryName),
+                                            personId,
+                                            provider: scan.provider || '',
+                                            galleryName,
+                                            missingUrl: mg.url || '',
+                                            title: mg.title || '',
+                                          });
+                                        }}
+                                        className="h-7 px-2 text-[10px] inline-flex items-center justify-center gap-1 rounded-md bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 border border-blue-500/30 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                                        title="Find on vipergirls.to"
+                                        aria-label={`Find ${mg.title || 'gallery'} on vipergirls.to`}
+                                      ><ExternalLink size={10} /></button>
                                     </>
                                   )}
                                 </div>
@@ -787,7 +814,17 @@ export function PersonDetailPage() {
         )}
       </div>
 
-      {activeVideo && <VideoPlayer video={activeVideo} onClose={() => setActiveVideo(null)} />}
+      {activeVideo && (
+        <VideoPlayer
+          video={activeVideo}
+          onClose={() => setActiveVideo(null)}
+          onThumbnailChange={(updated) => {
+            setActiveVideo(updated);
+            queryClient.invalidateQueries({ queryKey: ['person-videos', personId] });
+            queryClient.invalidateQueries({ queryKey: ['videos'] });
+          }}
+        />
+      )}
 
       {/* Edit Modal */}
       {editing && (
@@ -990,6 +1027,17 @@ export function PersonDetailPage() {
           </div>
         </div>
       )}
+
+      <VipergirlsSearchDialog
+        open={vipergirlsTarget !== null}
+        query={vipergirlsTarget?.query ?? ''}
+        personId={vipergirlsTarget?.personId ?? personId}
+        provider={vipergirlsTarget?.provider ?? ''}
+        galleryName={vipergirlsTarget?.galleryName ?? ''}
+        missingUrl={vipergirlsTarget?.missingUrl}
+        title={vipergirlsTarget?.title}
+        onClose={() => setVipergirlsTarget(null)}
+      />
     </div>
   );
 }

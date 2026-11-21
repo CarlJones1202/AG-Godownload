@@ -28,6 +28,27 @@ func TestPathsFromRelativeFilename(t *testing.T) {
 	}
 }
 
+func TestImagePathsFromFilenameForVideo(t *testing.T) {
+	webPath, thumbnailPath, trickplayVTT, trickplaySprite := imagePathsFromFilename(
+		`Source Name\clip.mp4`,
+		services.SanitizeDirectoryName("uncategorized"),
+		true,
+	)
+	sourceDir := services.SanitizeDirectoryName("Source Name")
+	if want := "/images/" + sourceDir + "/clip.mp4"; webPath != want {
+		t.Errorf("webPath = %q, want %q", webPath, want)
+	}
+	if want := "/images/" + sourceDir + "/thumbnails/clip.jpg"; thumbnailPath != want {
+		t.Errorf("thumbnailPath = %q, want %q", thumbnailPath, want)
+	}
+	if want := "/images/" + sourceDir + "/trickplay/clip.vtt"; trickplayVTT != want {
+		t.Errorf("trickplayVTT = %q, want %q", trickplayVTT, want)
+	}
+	if want := "/images/" + sourceDir + "/trickplay/clip_sprite.jpg"; trickplaySprite != want {
+		t.Errorf("trickplaySprite = %q, want %q", trickplaySprite, want)
+	}
+}
+
 func TestResolveUploadPath(t *testing.T) {
 	tests := []struct {
 		path string

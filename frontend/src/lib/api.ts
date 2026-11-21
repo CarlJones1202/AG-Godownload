@@ -19,10 +19,13 @@ import type {
   ProviderAlias,
   TPDBPerformerAliases,
   RatingResponse,
+  ScrapeVipergirlsRequest,
+  ScrapeVipergirlsResponse,
   SimilarImagesResponse,
   Source,
   Tag,
   TopColor,
+  VipergirlsSearchResponse,
 } from '@/types';
 
 const BASE = '/api';
@@ -205,6 +208,11 @@ export const videos = {
   list: (params: PaginationParams = {}) =>
     request<PaginatedResult<Image>>(`/images${qs({ ...params, type: 'video' })}`),
   delete: (id: number) => request<void>(`/images/${id}`, { method: 'DELETE' }),
+  setThumbnailTime: (id: number, timeSeconds: number) =>
+    request<Image>(`/images/${id}/thumbnail-time`, {
+      method: 'PATCH',
+      body: JSON.stringify({ thumbnail_time_seconds: Math.round(timeSeconds * 1000) / 1000 }),
+    }),
 };
 
 export interface PeopleListParams extends PaginationParams {
@@ -318,6 +326,13 @@ export const admin = {
     request<{ data: NotWantedGallery[] }>(`/admin/missing-galleries/not-wanted${qs({ person_id: personId })}`),
   removeNotWanted: (id: number) =>
     request<{ message: string }>(`/admin/missing-galleries/not-wanted/${id}`, { method: 'DELETE' }),
+  searchVipergirls: (query: string) =>
+    request<VipergirlsSearchResponse>(`/admin/vipergirls/search${qs({ query })}`),
+  scrapeVipergirls: (data: ScrapeVipergirlsRequest) =>
+    request<ScrapeVipergirlsResponse>('/admin/vipergirls/scrape', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
 
 export const tagsApi = {

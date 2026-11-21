@@ -21,6 +21,14 @@ export function getScanGalleryName(
   return match[2].trim();
 }
 
+export function vipergirlsSearchQuery(alias?: string, galleryName?: string): string {
+  const terms = [alias, galleryName]
+    .map((term) => (term ?? '').trim().replace(/"/g, ''))
+    .filter(Boolean)
+    .map((term) => `"${term}"`);
+  return terms.join(' ');
+}
+
 export function formatDate(dateStr: string | undefined): string {
   if (!dateStr) return '-';
   const d = new Date(dateStr);

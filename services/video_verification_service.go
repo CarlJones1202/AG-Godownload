@@ -23,6 +23,7 @@ type VideoRecoveryTask struct {
 	SourceName    string
 	Title         string
 	SizeMB        float64
+	ThumbnailTime *float64
 }
 
 // SortVideoRecoveryTasks sorts tasks by SizeMB ascending (smallest first).
@@ -46,6 +47,7 @@ type videoScanRow struct {
 	OriginalURL     string
 	Title           string
 	SizeMB          float64
+	ThumbnailTime   *float64
 	DirectSourceID  *uint
 	GallerySourceID *uint
 }
@@ -73,7 +75,7 @@ func collectMissingVideoTasks() ([]VideoRecoveryTask, int, int, error) {
 		var rows []videoScanRow
 		if err := database.DB.
 			Model(&models.Image{}).
-			Select("images.id, images.filename, images.download_url, images.original_url, images.title, images.size_mb, images.source_id AS direct_source_id, galleries.source_id AS gallery_source_id").
+			Select("images.id, images.filename, images.download_url, images.original_url, images.title, images.size_mb, images.thumbnail_time_seconds, images.source_id AS direct_source_id, galleries.source_id AS gallery_source_id").
 			Joins("LEFT JOIN image_galleries ON image_galleries.image_id = images.id").
 			Joins("LEFT JOIN galleries ON galleries.id = image_galleries.gallery_id").
 			Where("images.type = ? AND images.file_exists = ? AND images.id > ?", "video", false, lastID).
@@ -182,6 +184,7 @@ func collectMissingVideoTasks() ([]VideoRecoveryTask, int, int, error) {
 			SourceName:    sourceName,
 			Title:         v.Title,
 			SizeMB:        v.SizeMB,
+			ThumbnailTime: v.ThumbnailTime,
 		})
 	}
 
@@ -202,11 +205,12 @@ func regeneratePresentVideoThumbnails(postChan chan func()) {
 
 	for {
 		var rows []struct {
-			ID       uint
-			Filename string
+			ID            uint
+			Filename      string
+			ThumbnailTime *float64
 		}
 		if err := database.DB.Model(&models.Image{}).
-			Select("id, filename").
+			Select("id, filename, thumbnail_time_seconds").
 			Where("type = ? AND file_exists = ? AND id > ?", "video", true, lastID).
 			Order("id ASC").
 			Limit(chunkSize).
@@ -221,7 +225,7 @@ func regeneratePresentVideoThumbnails(postChan chan func()) {
 		for _, r := range rows {
 			IncVideoVerificationProcessed()
 			wg.Add(1)
-			go func(id uint, filename string) {
+			go func(id uint, filename string, thumbnailTime *float64) {
 				defer wg.Done()
 				sem <- struct{}{}
 				defer func() { <-sem }()
@@ -232,13 +236,13 @@ func regeneratePresentVideoThumbnails(postChan chan func()) {
 				if _, err := os.Stat(thumbPath); os.IsNotExist(err) {
 					if _, err2 := os.Stat(expectedFullPath); err2 == nil {
 						postChan <- func() {
-							if _, err := GenerateVideoThumbnail(expectedFullPath); err != nil {
+							if _, err := GenerateVideoThumbnailAt(expectedFullPath, thumbnailTime); err != nil {
 								logger.Warnf("[Video ID %d] Thumbnail generation failed: %v", id, err)
 							}
 						}
 					}
 				}
-			}(r.ID, r.Filename)
+			}(r.ID, r.Filename, r.ThumbnailTime)
 		}
 		wg.Wait()
 		lastID = rows[len(rows)-1].ID
@@ -448,8 +452,9 @@ func VerifyDownloadedVideos() error {
 							}
 
 							postPath := result.Path
+							thumbnailTime := t.ThumbnailTime
 							postChan <- func() {
-								if _, err := GenerateVideoThumbnail(postPath); err != nil {
+								if _, err := GenerateVideoThumbnailAt(postPath, thumbnailTime); err != nil {
 									logger.Warnf("[Video ID %d] Thumbnail generation failed: %v", t.ID, err)
 								}
 								if err := GenerateTrickplayData(postPath); err != nil {

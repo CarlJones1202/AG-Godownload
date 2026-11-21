@@ -2,15 +2,18 @@ package handlers
 
 import (
 	"fmt"
+	"gallery_api/config"
 	"gallery_api/database"
 	"gallery_api/logger"
 	"gallery_api/models"
 	"gallery_api/services"
+	"math"
 	"net/http"
 	urlpkg "net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 
 	"strings"
 
@@ -274,32 +277,7 @@ func GetImages(c *gin.Context) {
 	}
 
 	// Populate virtual paths
-	for i := range images {
-		sourceName := "uncategorized"
-
-		if images[i].Type == "video" && images[i].SourceID != nil && images[i].Source != nil {
-			sourceName = images[i].Source.Name
-		} else if len(images[i].Galleries) > 0 && images[i].Galleries[0].Source != nil {
-			sourceName = images[i].Galleries[0].Source.Name
-		}
-
-		sanitizedSource := services.SanitizeDirectoryName(sourceName)
-		images[i].WebPath = fmt.Sprintf("/images/%s/%s", sanitizedSource, filepath.Base(images[i].Filename))
-
-		// Video thumbnails use base filename (without video extension) + .jpg
-		thumbnailFilename := images[i].Filename
-		if images[i].Type == "video" {
-			baseFilename := strings.TrimSuffix(images[i].Filename, filepath.Ext(images[i].Filename))
-			thumbnailFilename = baseFilename + ".jpg"
-
-			baseFilename = strings.TrimSuffix(filepath.Base(images[i].Filename), filepath.Ext(images[i].Filename))
-
-			// Add trickplay paths for videos
-			images[i].TrickplayVTT = fmt.Sprintf("/images/%s/trickplay/%s.vtt", sanitizedSource, baseFilename)
-			images[i].TrickplaySprite = fmt.Sprintf("/images/%s/trickplay/%s_sprite.jpg", sanitizedSource, baseFilename)
-		}
-		images[i].ThumbnailPath = fmt.Sprintf("/images/%s/thumbnails/%s", sanitizedSource, filepath.Base(thumbnailFilename))
-	}
+	populateImagePaths(images)
 
 	totalPages := int((total + int64(limit) - 1) / int64(limit))
 
@@ -657,6 +635,16 @@ func RetryAllImages(c *gin.Context) {
 	const maxRetries = 5000
 	count := 0
 	var lastID uint
+	workerCount := config.Global.MaxConcurrentDownloads
+	if workerCount < 1 {
+		workerCount = 10
+	}
+	if workerCount > 20 {
+		workerCount = 20
+	}
+	semaphore := make(chan struct{}, workerCount)
+	var wg sync.WaitGroup
+
 	for {
 		var page []models.Image
 		if err := database.DB.Select("id, filename").Where("id > ?", lastID).Order("id ASC").Limit(pageSize).Find(&page).Error; err != nil {
@@ -673,7 +661,11 @@ func RetryAllImages(c *gin.Context) {
 				if count > maxRetries {
 					break
 				}
+				semaphore <- struct{}{}
+				wg.Add(1)
 				go func(id uint) {
+					defer wg.Done()
+					defer func() { <-semaphore }()
 					if err := services.RecoverImage(id); err != nil {
 						logger.Warnf("RetryAllImages failed for %d: %v", id, err)
 					}
@@ -753,6 +745,84 @@ func UpdateImageVrMode(c *gin.Context) {
 		"message": "VR mode updated",
 		"vr_mode": image.VRMode,
 	})
+}
+
+// UpdateVideoThumbnailTime saves a user-selected thumbnail time and replaces
+// the current thumbnail immediately. The same time is used by all later
+// thumbnail generation paths for this video.
+func UpdateVideoThumbnailTime(c *gin.Context) {
+	idStr := c.Param("imageId")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid image ID"})
+		return
+	}
+
+	var req struct {
+		ThumbnailTime *float64 `json:"thumbnail_time_seconds"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.ThumbnailTime == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "thumbnail_time_seconds is required"})
+		return
+	}
+
+	thumbnailTime := *req.ThumbnailTime
+	if math.IsNaN(thumbnailTime) || math.IsInf(thumbnailTime, 0) || thumbnailTime < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "thumbnail_time_seconds must be a non-negative number"})
+		return
+	}
+
+	var image models.Image
+	if err := database.DB.Preload("Galleries.Source").Preload("Source").First(&image, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Video not found"})
+		return
+	}
+	if image.Type != "video" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Thumbnail time is only supported for videos"})
+		return
+	}
+
+	videoPath, ok := resolveUploadPath(image.Filename)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid video path"})
+		return
+	}
+	if _, err := os.Stat(videoPath); err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "Video file is not available locally"})
+		return
+	}
+
+	duration := image.Duration
+	if duration <= 0 {
+		if meta, err := services.GetVideoMetadata(videoPath); err == nil {
+			duration = meta.Duration
+		}
+	}
+	if duration > 0 && thumbnailTime > duration+0.5 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("thumbnail_time_seconds must be within the video duration (%.3f seconds)", duration)})
+		return
+	}
+
+	if _, err := services.GenerateVideoThumbnailAt(videoPath, &thumbnailTime); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate thumbnail: " + err.Error()})
+		return
+	}
+
+	if err := database.DB.Model(&models.Image{}).
+		Where("id = ?", image.ID).
+		UpdateColumn("thumbnail_time_seconds", thumbnailTime).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save thumbnail time"})
+		return
+	}
+
+	image.ThumbnailTime = &thumbnailTime
+	result := []models.Image{image}
+	populateImagePaths(result)
+	c.JSON(http.StatusOK, result[0])
 }
 
 // UpdateImageTitle updates the display title for a video/image and marks it as

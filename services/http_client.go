@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"gallery_api/config"
 	"gallery_api/logger"
+	"io"
 	"net"
 	"net/http"
 	urlpkg "net/url"
@@ -18,6 +19,7 @@ import (
 const (
 	maxRetryBackoff = 30 * time.Second
 	maxRetryAfter   = time.Minute
+	imxMaxRetries   = 5
 )
 
 type requestRetryError struct {
@@ -97,7 +99,37 @@ func DefaultHTTPClientConfig() HTTPClientConfig {
 var (
 	globalClient    *http.Client
 	globalTransport *http.Transport
+	imxRequestSlots = make(chan struct{}, 2)
 )
+
+func isIMXHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	return host == "imx.to" || strings.HasSuffix(host, ".imx.to")
+}
+
+func acquireIMXRequest(ctx context.Context) (func(), error) {
+	select {
+	case imxRequestSlots <- struct{}{}:
+		var once sync.Once
+		return func() {
+			once.Do(func() { <-imxRequestSlots })
+		}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+type releaseOnClose struct {
+	io.ReadCloser
+	release func()
+	once    sync.Once
+}
+
+func (body *releaseOnClose) Close() error {
+	err := body.ReadCloser.Close()
+	body.once.Do(body.release)
+	return err
+}
 
 // InitHTTPClient initializes the global HTTP client with connection pooling
 func InitHTTPClient(config HTTPClientConfig) {
@@ -110,6 +142,7 @@ func InitHTTPClient(config HTTPClientConfig) {
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          config.MaxIdleConns,
 		MaxIdleConnsPerHost:   config.MaxIdleConnsPerHost,
+		MaxConnsPerHost:       config.MaxIdleConnsPerHost,
 		IdleConnTimeout:       config.IdleConnTimeout,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
@@ -144,6 +177,12 @@ func isRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
+	errText := strings.ToLower(err.Error())
+	if strings.Contains(errText, "only one usage of each socket address") ||
+		strings.Contains(errText, "address already in use") ||
+		strings.Contains(errText, "connection reset") {
+		return true
+	}
 	if netErr, ok := err.(net.Error); ok {
 		return netErr.Timeout() || netErr.Temporary()
 	}
@@ -154,12 +193,16 @@ func isRetryableError(err error) bool {
 func DoRequestWithRetry(ctx context.Context, req *http.Request) (*http.Response, error) {
 	client := GetConfiguredHTTPClient()
 	config := DefaultHTTPClientConfig() // In a real app, this might come from global config
+	maxRetries := config.MaxRetries
+	if isIMXHost(req.URL.Hostname()) && maxRetries < imxMaxRetries {
+		maxRetries = imxMaxRetries
+	}
 
 	var lastErr error
 	var nextRetryDelay time.Duration
 	hasNextRetryDelay := false
 
-	for i := 0; i <= config.MaxRetries; i++ {
+	for i := 0; i <= maxRetries; i++ {
 		// specific check for context cancellation
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -190,20 +233,35 @@ func DoRequestWithRetry(ctx context.Context, req *http.Request) (*http.Response,
 			reqWithCtx.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
 		}
 
+		var release func()
+		if isIMXHost(req.URL.Hostname()) {
+			var acquireErr error
+			release, acquireErr = acquireIMXRequest(ctx)
+			if acquireErr != nil {
+				return nil, acquireErr
+			}
+		}
+
 		resp, err := client.Do(reqWithCtx)
 		if err != nil {
+			if release != nil {
+				release()
+			}
 			lastErr = err
 			if isRetryableError(err) {
 				continue
 			}
 			return nil, err
 		}
+		if release != nil {
+			resp.Body = &releaseOnClose{ReadCloser: resp.Body, release: release}
+		}
 
 		// Check for retryable status codes (5xx, 429)
 		if resp.StatusCode >= 500 || resp.StatusCode == 429 {
 			resp.Body.Close()
 			lastErr = fmt.Errorf("server returned status %d", resp.StatusCode)
-			if i < config.MaxRetries {
+			if i < maxRetries {
 				nextRetryDelay = retryDelay(i+1, resp.Header.Get("Retry-After"), time.Now())
 				hasNextRetryDelay = true
 			}
@@ -213,7 +271,7 @@ func DoRequestWithRetry(ctx context.Context, req *http.Request) (*http.Response,
 		return resp, nil
 	}
 
-	return nil, &requestRetryError{retries: config.MaxRetries, err: lastErr}
+	return nil, &requestRetryError{retries: maxRetries, err: lastErr}
 }
 
 // GetOrFetchCookies returns session cookies for the given page URL. It caches

@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"gallery_api/config"
 	"gallery_api/database"
 	"gallery_api/logger"
 	"gallery_api/models"
@@ -127,6 +128,47 @@ func AddAllPeopleToScanQueue() (int, error) {
 	return len(seen), nil
 }
 
+// RestorePendingScans reloads unfinished scan jobs after a server restart.
+func RestorePendingScans() error {
+	var scans []models.PersonScanQueue
+	if err := database.DB.
+		Where("status IN ?", []models.ScanStatus{models.ScanStatusPending, models.ScanStatusProcessing}).
+		Order("created_at ASC, id ASC").
+		Find(&scans).Error; err != nil {
+		return fmt.Errorf("failed to restore pending scans: %w", err)
+	}
+
+	var interruptedIDs []uint
+	for _, scan := range scans {
+		if scan.Status == models.ScanStatusProcessing {
+			interruptedIDs = append(interruptedIDs, scan.ID)
+		}
+	}
+	if len(interruptedIDs) > 0 {
+		if err := database.DB.Model(&models.PersonScanQueue{}).
+			Where("id IN ? AND status = ?", interruptedIDs, models.ScanStatusProcessing).
+			Updates(map[string]interface{}{
+				"status":       models.ScanStatusPending,
+				"started_at":   nil,
+				"completed_at": nil,
+			}).Error; err != nil {
+			return fmt.Errorf("reset interrupted scans: %w", err)
+		}
+	}
+
+	scanQueue.mu.Lock()
+	for _, scan := range scans {
+		scanQueue.queue = append(scanQueue.queue, scan.ID)
+	}
+	scanQueue.cond.Broadcast()
+	scanQueue.mu.Unlock()
+
+	if len(scans) > 0 {
+		logger.Infof("Restored %d pending person scans", len(scans))
+	}
+	return nil
+}
+
 // GetScanResults returns the scan results for a person
 func GetScanResults(personID uint) ([]models.PersonScanQueue, error) {
 	var scans []models.PersonScanQueue
@@ -151,37 +193,44 @@ func GetLatestScanResult(personID uint, provider string) (*models.PersonScanQueu
 
 // StartScanWorker starts the background worker that processes scan jobs
 func StartScanWorker() {
-	go func() {
-		logger.Info("Starting scan worker")
-		for {
-			scanQueue.mu.Lock()
-			for len(scanQueue.queue) == 0 {
-				// Check shutdown before sleeping
-				select {
-				case <-scanQueue.done:
-					scanQueue.mu.Unlock()
-					logger.Info("Scan worker shutting down")
-					return
-				default:
-				}
-				scanQueue.cond.Wait()
+	workers := config.Global.PersonScanWorkers
+	if workers < 1 {
+		workers = 1
+	}
+	logger.Infof("Starting %d person scan workers", workers)
+	for i := 0; i < workers; i++ {
+		go scanQueue.runWorker(processScan)
+	}
+}
+
+func (q *ScanQueue) runWorker(process func(uint)) {
+	for {
+		q.mu.Lock()
+		for len(q.queue) == 0 {
+			select {
+			case <-q.done:
+				q.mu.Unlock()
+				logger.Info("Scan worker shutting down")
+				return
+			default:
 			}
-			scanID := scanQueue.queue[0]
-			scanQueue.queue = scanQueue.queue[1:]
-			scanQueue.mu.Unlock()
-
-			processScan(scanID)
-
-			// Small pause between processing items
-			time.Sleep(500 * time.Millisecond)
+			q.cond.Wait()
 		}
-	}()
+		scanID := q.queue[0]
+		q.queue = q.queue[1:]
+		q.mu.Unlock()
+
+		process(scanID)
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 // StopScanQueue signals the scan worker to exit after finishing its current job.
 func StopScanQueue() {
+	scanQueue.mu.Lock()
 	close(scanQueue.done)
 	scanQueue.cond.Broadcast()
+	scanQueue.mu.Unlock()
 	if dailyCron != nil {
 		dailyCron.Stop()
 	}

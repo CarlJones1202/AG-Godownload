@@ -103,6 +103,27 @@ if (Get-Command "node" -ErrorAction SilentlyContinue) {
 }
 
 # 6. Install Python + gallery-dl
+if (Get-Command py -ErrorAction SilentlyContinue) {
+    try {
+        & py -3.13 -m pip install --user gallery-dl
+        if ($LASTEXITCODE -eq 0) {
+            Write-Success "gallery-dl is ready."
+        }
+    } catch {
+        Write-Warning-Host "Failed to install gallery-dl: $_"
+    }
+} elseif (Get-Command python -ErrorAction SilentlyContinue) {
+    try {
+        & python -m pip install --user gallery-dl
+        if ($LASTEXITCODE -eq 0) {
+            Write-Success "gallery-dl is ready."
+        }
+    } catch {
+        Write-Warning-Host "Failed to install gallery-dl: $_"
+    }
+} else {
+    Write-Warning-Host "Python is unavailable; gallery-dl fallback will remain disabled."
+}
 
 # 7. PostgreSQL
 Write-Step "Setting up PostgreSQL (portable, local)..."
@@ -203,7 +224,9 @@ if (-not (Test-Path $pgInitdb)) {
     } else {
         Write-Host "Starting PostgreSQL via pg_ctl..."
         $pgLog = Join-Path $PWD "bin\pg.log"
-        & $pgCtl -D $pgData -l $pgLog start
+        Start-Process -FilePath $pgCtl `
+            -ArgumentList "-D `"$pgData`" -l `"$pgLog`" start" `
+            -NoNewWindow -Wait
         $ready = $false
         for ($i = 0; $i -lt 30; $i++) {
             & $pgIsReady -h 127.0.0.1 -p $pgPort | Out-Null

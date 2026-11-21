@@ -17,7 +17,9 @@ if ($LASTEXITCODE -eq 0) {
 }
 
 Write-Host "Starting PostgreSQL..." -ForegroundColor Cyan
-& $pgCtl -D $pgData -l $pgLog start
+Start-Process -FilePath $pgCtl `
+    -ArgumentList "-D `"$pgData`" -l `"$pgLog`" start" `
+    -NoNewWindow -Wait
 
 $ready = $false
 for ($i = 0; $i -lt 15; $i++) {

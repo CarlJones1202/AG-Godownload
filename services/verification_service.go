@@ -62,6 +62,7 @@ type ImageRecoveryTask struct {
 	ID            uint
 	CurrentDBPath string
 	DownloadURL   string
+	OriginalURL   string
 	SourceName    string
 	IsFavorite    bool
 	CreatedAt     time.Time
@@ -165,13 +166,14 @@ func collectMissingImageTasks() ([]ImageRecoveryTask, int, error) {
 			ID          uint
 			Filename    string
 			DownloadURL string
+			OriginalURL string
 			IsFavorite  bool
 			CreatedAt   time.Time
 		}
 
 		if err := database.DB.
 			Model(&models.Image{}).
-			Select("id, filename, download_url, is_favorite, created_at").
+			Select("id, filename, download_url, original_url, is_favorite, created_at").
 			Where("(type IS NULL OR type <> ?) AND file_exists = ? AND id > ?", "video", false, lastID).
 			Order("id ASC").
 			Limit(chunkSize).
@@ -199,6 +201,7 @@ func collectMissingImageTasks() ([]ImageRecoveryTask, int, error) {
 				ID:            img.ID,
 				CurrentDBPath: img.Filename,
 				DownloadURL:   img.DownloadURL,
+				OriginalURL:   img.OriginalURL,
 				IsFavorite:    img.IsFavorite,
 				CreatedAt:     img.CreatedAt,
 				SourceName:    "uncategorized",
@@ -510,18 +513,21 @@ func VerifyDownloadedImages() error {
 									start := time.Now()
 
 									referer := ""
-									if u, perr := urlpkg.Parse(task.DownloadURL); perr == nil {
-										referer = u.Scheme + "://" + u.Host
+									referer = imageDownloadReferer(prov, task.OriginalURL, task.DownloadURL)
+									if referer == "" {
+										if u, perr := urlpkg.Parse(task.DownloadURL); perr == nil {
+											referer = u.Scheme + "://" + u.Host
+										}
 									}
 									result, err := DownloadImageWithoutColors(task.DownloadURL, task.SourceName, referer)
 									if err != nil {
-										if prov == "imx" && config.Global.GalleryDL.Enabled {
-											logger.Debugf("HTTP download failed for image ID %d; attempting gallery-dl fallback", task.ID)
+										if prov == "imx" {
+											logger.Debugf("HTTP download failed for image ID %d; attempting direct/IMX-page fallback", task.ID)
 											gctx, gcancel := context.WithTimeout(context.Background(), time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
-											result, err = DownloadImageWithGalleryDLWithoutPostProcessing(gctx, task.DownloadURL, task.SourceName, time.Duration(config.Global.GalleryDL.TimeoutSec)*time.Second)
+											result, err = DownloadImageWithIMXFallbackWithoutPostProcessing(gctx, task.OriginalURL, task.DownloadURL, task.SourceName)
 											gcancel()
 											if err != nil {
-												logger.Warnf("[%s] Failed to download image ID %d after gallery-dl fallback: %v", prov, task.ID, err)
+												logger.Warnf("[%s] Failed to download image ID %d after IMX page fallback: %v", prov, task.ID, err)
 												return
 											}
 										} else {

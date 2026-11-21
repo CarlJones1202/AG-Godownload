@@ -655,7 +655,13 @@ func formatBytes(b int64) string {
 // falling back to buffered streaming otherwise. This keeps memory usage constant
 // regardless of video file size.
 func DownloadVideo(videoURL string, sourceName string, pageURL string, title string) (*DownloadImageResult, error) {
-	return downloadVideo(videoURL, sourceName, pageURL, title, true)
+	return DownloadVideoAt(videoURL, sourceName, pageURL, title, nil)
+}
+
+// DownloadVideoAt downloads a video and generates its thumbnail at an explicit
+// time when one is supplied.
+func DownloadVideoAt(videoURL string, sourceName string, pageURL string, title string, thumbnailTime *float64) (*DownloadImageResult, error) {
+	return downloadVideo(videoURL, sourceName, pageURL, title, true, thumbnailTime)
 }
 
 // DownloadVideoWithoutPostProcessing behaves like DownloadVideo but skips the
@@ -664,10 +670,16 @@ func DownloadVideo(videoURL string, sourceName string, pageURL string, title str
 // post-processing pool. Video metadata is still extracted because the
 // recovery batch writer persists it with the result.
 func DownloadVideoWithoutPostProcessing(videoURL string, sourceName string, pageURL string, title string) (*DownloadImageResult, error) {
-	return downloadVideo(videoURL, sourceName, pageURL, title, false)
+	return DownloadVideoWithoutPostProcessingAt(videoURL, sourceName, pageURL, title, nil)
 }
 
-func downloadVideo(videoURL string, sourceName string, pageURL string, title string, postProcess bool) (*DownloadImageResult, error) {
+// DownloadVideoWithoutPostProcessingAt is the explicit-thumbnail-time variant
+// of DownloadVideoWithoutPostProcessing.
+func DownloadVideoWithoutPostProcessingAt(videoURL string, sourceName string, pageURL string, title string, thumbnailTime *float64) (*DownloadImageResult, error) {
+	return downloadVideo(videoURL, sourceName, pageURL, title, false, thumbnailTime)
+}
+
+func downloadVideo(videoURL string, sourceName string, pageURL string, title string, postProcess bool, thumbnailTime *float64) (*DownloadImageResult, error) {
 	logger.Infof("Downloading video from %s", videoURL)
 
 	// Page URLs for YouTube and Google Drive need yt-dlp rather than direct HTTP streaming.
@@ -680,7 +692,7 @@ func downloadVideo(videoURL string, sourceName string, pageURL string, title str
 		if title == "" && ytTitle != "" {
 			title = ytTitle
 		}
-		result, err := importLocalVideo(localPath, sourceName, postProcess)
+		result, err := importLocalVideo(localPath, sourceName, postProcess, thumbnailTime)
 		if err != nil {
 			return nil, fmt.Errorf("failed to import video: %w", err)
 		}
@@ -766,7 +778,7 @@ func downloadVideo(videoURL string, sourceName string, pageURL string, title str
 	// If final file already exists, remove temp and return
 	if _, err := os.Stat(destPath); err == nil {
 		logger.Debugf("Video file already exists: %s", destPath)
-		return buildVideoResult(destPath, title, postProcess)
+		return buildVideoResult(destPath, title, postProcess, thumbnailTime)
 	}
 
 	if err := os.Rename(tmpPath, destPath); err != nil {
@@ -774,15 +786,15 @@ func downloadVideo(videoURL string, sourceName string, pageURL string, title str
 	}
 	logger.Infof("Saved video to: %s (%s)", destPath, formatBytes(info.Size()))
 
-	return buildVideoResult(destPath, title, postProcess)
+	return buildVideoResult(destPath, title, postProcess, thumbnailTime)
 }
 
 // buildVideoResult generates thumbnail, trickplay, metadata for a video and returns the result.
 // When postProcess is false, thumbnail/trickplay generation is skipped (the
 // caller is expected to schedule it elsewhere) but metadata is still extracted.
-func buildVideoResult(destPath string, title string, postProcess bool) (*DownloadImageResult, error) {
+func buildVideoResult(destPath string, title string, postProcess bool, thumbnailTime *float64) (*DownloadImageResult, error) {
 	if postProcess {
-		if _, err := GenerateVideoThumbnail(destPath); err != nil {
+		if _, err := GenerateVideoThumbnailAt(destPath, thumbnailTime); err != nil {
 			logger.Warnf("Failed to generate video thumbnail: %v", err)
 		}
 

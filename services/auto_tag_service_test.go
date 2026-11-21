@@ -82,3 +82,42 @@ func TestPersonSearchTermsIncludesAllAliasSources(t *testing.T) {
 		t.Fatalf("PersonSearchTerms() = %#v, want %#v", got, want)
 	}
 }
+
+func TestPersonScanSearchTermsExcludesUnscopedAliases(t *testing.T) {
+	person := models.Person{
+		Name:    "Lily Chey",
+		Aliases: `["Guerlain", "Lili", "Dominika", "Violetta"]`,
+	}
+	providerAliases := []models.PersonProviderAlias{
+		{Provider: "mplstudios", Alias: "Raisa"},
+		{Provider: "METART", Alias: "Lily Chey"},
+		{Provider: "metart", Alias: "  "},
+		{Provider: "metart", Alias: "lily c"},
+	}
+
+	tests := []struct {
+		name  string
+		alias string
+		want  []string
+	}{
+		{
+			name:  "explicit alias",
+			alias: "lily c",
+			want:  []string{"Lily Chey", "lily c"},
+		},
+		{
+			name:  "no explicit alias uses provider aliases",
+			alias: "",
+			want:  []string{"Lily Chey", "lily c"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := PersonScanSearchTerms(person, providerAliases, "MetArt", tt.alias)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("PersonScanSearchTerms() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}

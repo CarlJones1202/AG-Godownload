@@ -62,6 +62,7 @@ export interface Image {
   is_video?: boolean;
   vr_mode: string;
   duration_seconds?: number;
+  thumbnail_time_seconds?: number | null;
   tags?: Tag[];
   thumbnail_path?: string;
   web_path?: string;
@@ -326,6 +327,37 @@ export interface NotWantedGallery {
   title: string;
   reason?: string;
   created_at: string;
+}
+
+export interface VipergirlsSearchResult {
+  thread_id: string;
+  title: string;
+  sub_forum: string;
+  thread_url: string;
+  thumbnail_url?: string;
+}
+
+export interface VipergirlsSearchResponse {
+  query: string;
+  search_url: string;
+  data: VipergirlsSearchResult[];
+}
+
+export interface ScrapeVipergirlsRequest {
+  person_id: number;
+  provider: string;
+  gallery_name: string;
+  missing_url?: string;
+  title?: string;
+  thread_url: string;
+  thumbnail_url?: string;
+}
+
+export interface ScrapeVipergirlsResponse {
+  gallery_id: number;
+  source_id: number;
+  queued: boolean;
+  message: string;
 }
 
 export interface IdentifierResult {

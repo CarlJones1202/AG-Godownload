@@ -137,7 +137,7 @@ export function FavoritesPage() {
                   onClick={() => setActiveVideo(vid)}
                 >
                   <div className="relative aspect-video bg-zinc-800 overflow-hidden">
-                    <VideoThumb filename={vid.filename} alt={vid.filename} />
+                    <VideoThumb filename={vid.filename} thumbnailPath={vid.thumbnail_path} thumbnailTime={vid.thumbnail_time_seconds} alt={vid.filename} />
                     <div className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity">
                       <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center">
                         <Play size={24} className="text-white ml-0.5" />
@@ -198,7 +198,17 @@ export function FavoritesPage() {
         />
       )}
 
-      {activeVideo && <VideoPlayer video={activeVideo} onClose={() => setActiveVideo(null)} />}
+      {activeVideo && (
+        <VideoPlayer
+          video={activeVideo}
+          onClose={() => setActiveVideo(null)}
+          onThumbnailChange={(updated) => {
+            setActiveVideo(updated);
+            queryClient.invalidateQueries({ queryKey: ['favorites'] });
+            queryClient.invalidateQueries({ queryKey: ['videos'] });
+          }}
+        />
+      )}
 
       <ConfirmDialog
         open={confirmDeleteId !== null}

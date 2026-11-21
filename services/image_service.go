@@ -50,6 +50,8 @@ var PlaceholderSizeThresholds = map[string]struct {
 	MaxBytes            int64
 }{
 	// A typical text-only "hotlinking disabled" JPEG is under ~50 KB and ~800×200
+	"imx":        {MaxWidth: 800, MaxHeight: 400, MaxBytes: 50 * 1024},
+	"imagebam":   {MaxWidth: 300, MaxHeight: 300, MaxBytes: 20 * 1024},
 	"imagetwist": {MaxWidth: 800, MaxHeight: 300, MaxBytes: 50 * 1024},
 	"viprimg":    {MaxWidth: 800, MaxHeight: 400, MaxBytes: 50 * 1024},
 	"default":    {MaxWidth: 800, MaxHeight: 400, MaxBytes: 60 * 1024},
@@ -420,8 +422,17 @@ func GetVideoMetadata(srcPath string) (*VideoMetadata, error) {
 	return &VideoMetadata{SizeMB: sizeMB}, fmt.Errorf("failed to parse ffprobe output: %s", string(output))
 }
 
-// GenerateVideoThumbnail generates a thumbnail for a video file using ffmpeg
+// GenerateVideoThumbnail generates a thumbnail for a video file using ffmpeg.
+// It preserves the existing behavior: an existing thumbnail is kept and a
+// sensible default seek time is used when no explicit time is supplied.
 func GenerateVideoThumbnail(srcPath string) (string, error) {
+	return GenerateVideoThumbnailAt(srcPath, nil)
+}
+
+// GenerateVideoThumbnailAt generates a thumbnail at an explicit seek time.
+// A non-nil thumbnailTime always replaces the existing thumbnail so a user's
+// selection is authoritative across redownloads.
+func GenerateVideoThumbnailAt(srcPath string, thumbnailTime *float64) (string, error) {
 	dir := filepath.Dir(srcPath)
 	thumbnailDir := filepath.Join(dir, "thumbnails")
 
@@ -434,24 +445,95 @@ func GenerateVideoThumbnail(srcPath string) (string, error) {
 	filename := baseFilename + ".jpg"
 	thumbPath := filepath.Join(thumbnailDir, filename)
 
-	// Check if thumbnail already exists
-	if _, err := os.Stat(thumbPath); err == nil {
-		return thumbPath, nil
+	if thumbnailTime == nil {
+		if _, err := os.Stat(thumbPath); err == nil {
+			return thumbPath, nil
+		}
 	}
 
-	// Get duration to pick a good seek position
-	seekTime := 10.0
-	if meta, err := GetVideoMetadata(srcPath); err == nil && meta.Duration > 0 {
-		seekTime = math.Min(10.0, meta.Duration/3.0)
+	seekStr, err := resolveThumbnailSeekArg(srcPath, thumbnailTime)
+	if err != nil {
+		return "", err
 	}
 
-	seekStr := fmt.Sprintf("%.2f", seekTime)
-	cmd := exec.Command("ffmpeg", "-i", srcPath, "-ss", seekStr, "-vframes", "1", "-vf", "scale=320:-1", "-q:v", "3", "-y", thumbPath)
+	// Write through a temporary file so a failed ffmpeg run cannot leave a
+	// truncated thumbnail behind.
+	tmpFile, err := os.CreateTemp(thumbnailDir, ".thumbnail-*.jpg")
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmpFile.Name()
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpPath)
+		return "", err
+	}
+	defer os.Remove(tmpPath)
+
+	cmd := exec.Command("ffmpeg", "-i", srcPath, "-ss", seekStr, "-vframes", "1", "-vf", "scale=320:-1", "-q:v", "3", "-y", tmpPath)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("failed to generate video thumbnail: %w, output: %s", err, string(output))
 	}
 
+	// Windows cannot rename over an existing file. Move the old thumbnail
+	// aside first so a failed replacement can be rolled back.
+	backupPath := thumbPath + ".bak"
+	hasBackup := false
+	if _, err := os.Stat(thumbPath); err == nil {
+		_ = os.Remove(backupPath)
+		if err := os.Rename(thumbPath, backupPath); err != nil {
+			return "", err
+		}
+		hasBackup = true
+	}
+	if err := os.Rename(tmpPath, thumbPath); err != nil {
+		if hasBackup {
+			_ = os.Rename(backupPath, thumbPath)
+		}
+		return "", err
+	}
+	if hasBackup {
+		_ = os.Remove(backupPath)
+	}
+
 	return thumbPath, nil
+}
+
+// resolveThumbnailSeekArg returns the ffmpeg seek argument for a video. It
+// validates an explicit user selection and clamps it to the probed duration so
+// a value at (or beyond) the end of the file still produces a frame.
+func resolveThumbnailSeekArg(srcPath string, thumbnailTime *float64) (string, error) {
+	if thumbnailTime != nil && (math.IsNaN(*thumbnailTime) || math.IsInf(*thumbnailTime, 0) || *thumbnailTime < 0) {
+		return "", fmt.Errorf("invalid thumbnail time: %v", *thumbnailTime)
+	}
+
+	duration := 0.0
+	if meta, err := GetVideoMetadata(srcPath); err == nil {
+		duration = meta.Duration
+	}
+	return formatThumbnailSeekArg(duration, thumbnailTime), nil
+}
+
+// formatThumbnailSeekArg is the pure part of resolveThumbnailSeekArg so the
+// default/clamping rules can be tested without invoking ffprobe or ffmpeg.
+func formatThumbnailSeekArg(duration float64, thumbnailTime *float64) string {
+	seekTime := 10.0
+	if thumbnailTime != nil {
+		seekTime = *thumbnailTime
+	}
+
+	if duration > 0 {
+		if thumbnailTime == nil {
+			seekTime = math.Min(10.0, duration/3.0)
+		} else if seekTime > duration {
+			seekTime = duration
+		}
+		// An exact end-of-file seek can decode no frames; stay just inside it.
+		if seekTime >= duration {
+			seekTime = math.Max(0, duration-0.001)
+		}
+	}
+
+	return fmt.Sprintf("%.3f", seekTime)
 }
 
 // DownloadProviderThumbnail downloads a thumbnail from a provider and saves it to the gallery_thumbnails directory

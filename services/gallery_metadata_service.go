@@ -2558,7 +2558,7 @@ func ScanSourceForPerson(personID uint, provider string, alias string) (*PersonS
 		Find(&providerAliases).Error; err != nil {
 		return nil, fmt.Errorf("failed to load provider aliases: %w", err)
 	}
-	searchTerms := PersonSearchTerms(person, providerAliases, alias)
+	searchTerms := PersonScanSearchTerms(person, providerAliases, provider, alias)
 
 	var allResults []GallerySearchResult
 	var searchFailures []error
