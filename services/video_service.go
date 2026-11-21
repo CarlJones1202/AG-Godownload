@@ -135,6 +135,10 @@ func isYouTubeURL(url string) bool {
 	return strings.Contains(lower, "youtube.com") || strings.Contains(lower, "youtu.be")
 }
 
+func isGoogleDriveURL(url string) bool {
+	return strings.Contains(strings.ToLower(url), "drive.google.com")
+}
+
 // IsVideoURL checks if a URL points to a video based on extension or domain
 func IsVideoURL(url string) bool {
 	// Check extension
@@ -154,7 +158,7 @@ func IsVideoURL(url string) bool {
 	if strings.Contains(url, "youtube.com") || strings.Contains(url, "youtu.be") {
 		return true
 	}
-	if strings.Contains(url, "drive.google.com") {
+	if isGoogleDriveURL(url) {
 		return true
 	}
 	if strings.Contains(url, "xhamster.com") {

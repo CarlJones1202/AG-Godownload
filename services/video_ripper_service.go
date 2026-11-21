@@ -670,22 +670,22 @@ func DownloadVideoWithoutPostProcessing(videoURL string, sourceName string, page
 func downloadVideo(videoURL string, sourceName string, pageURL string, title string, postProcess bool) (*DownloadImageResult, error) {
 	logger.Infof("Downloading video from %s", videoURL)
 
-	// YouTube pages / short links can't be streamed directly — rip through yt-dlp
-	if isYouTubeURL(videoURL) {
-		logger.Infof("Detected YouTube URL, invoking RipYouTube...")
+	// Page URLs for YouTube and Google Drive need yt-dlp rather than direct HTTP streaming.
+	if isYouTubeURL(videoURL) || isGoogleDriveURL(videoURL) {
+		logger.Infof("Detected video page URL, invoking yt-dlp...")
 		localPath, ytTitle, err := RipYouTube(videoURL)
 		if err != nil {
-			return nil, fmt.Errorf("failed to download YouTube video: %w", err)
+			return nil, fmt.Errorf("failed to download video with yt-dlp: %w", err)
 		}
 		if title == "" && ytTitle != "" {
 			title = ytTitle
 		}
 		result, err := importLocalVideo(localPath, sourceName, postProcess)
 		if err != nil {
-			return nil, fmt.Errorf("failed to import YouTube video: %w", err)
+			return nil, fmt.Errorf("failed to import video: %w", err)
 		}
 		result.Title = title
-		logger.Infof("Saved YouTube video to: %s", result.Path)
+		logger.Infof("Saved video to: %s", result.Path)
 		return result, nil
 	}
 

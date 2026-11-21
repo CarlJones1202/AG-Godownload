@@ -663,7 +663,7 @@ func ProcessVideoSource(source models.Source) error {
 			return fmt.Errorf("failed to download xHamster video: %w", err)
 		}
 		isLocalFile = true
-	} else if strings.Contains(source.Location, "drive.google.com") {
+	} else if isGoogleDriveURL(source.Location) {
 		logger.Infof("Detected Google Drive URL, using yt-dlp...")
 		localPath, videoTitle, err = RipYouTube(source.Location)
 		if err != nil {
